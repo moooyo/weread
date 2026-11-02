@@ -1,0 +1,26 @@
+# Operator-local files
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Future local application state and downloaded resources
+/cache/
+/data/
+/books/
+/covers/
+/tokens/
+/sessions/
+
+# Future generated build output
+/target/
+/dist/
+/build/
+
+# Editor and operating-system files
+.idea/
+.vscode/
+Thumbs.db
+Desktop.ini
+.DS_Store
