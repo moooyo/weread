@@ -1,0 +1,900 @@
+diff --git a/api.rs b/api.rs
+index 201ff4d..3336984 100644
+--- a/api.rs
++++ b/api.rs
+@@ -8,7 +8,7 @@ This module contains types that are public and re-exported in the slint-rs as we
+ #![warn(missing_docs)]
+ 
+ use crate::context::WindowEventDispatchResult;
+-use crate::input::{InternalKeyEvent, KeyEventType, MouseEvent, TouchPhase};
++use crate::input::{MouseEvent, TouchPhase};
+ use crate::window::{WindowAdapter, WindowInner};
+ use alloc::boxed::Box;
+ use alloc::string::String;
+@@ -21,6 +21,10 @@ pub use crate::graphics::{
+     SharedPixelBuffer,
+ };
+ pub use crate::input::Keys;
++// Project-local test reachability for the existing native IME pipeline. Slint
++// 1.17.1 WindowEvent has no composition variant; these retain their core origin.
++#[doc(hidden)]
++pub use crate::input::{InternalKeyEvent, KeyEventType};
+ pub use crate::sharedvector::SharedVector;
+ pub use crate::{format, string::SharedString, string::ToSharedString};
+ 
+@@ -478,6 +482,69 @@ pub enum CloseRequestResponse {
+     KeepWindowShown = 1,
+ }
+ 
++/// A borrowed native text edit before text, selection, composition or history
++/// is changed. The replacement range addresses Unicode boundaries in the
++/// current UTF-8 text; preedit is the composition that will remain afterward.
++#[doc(hidden)]
++pub struct TextInputEdit<'a> {
++    pub(crate) current_text: &'a str,
++    pub(crate) replacement_range: core::ops::Range<usize>,
++    pub(crate) inserted_text: &'a str,
++    pub(crate) preedit_text: &'a str,
++    pub(crate) single_line: bool,
++    pub(crate) password: bool,
++    pub(crate) numeric: bool,
++    pub(crate) enabled: bool,
++    pub(crate) read_only: bool,
++}
++
++impl TextInputEdit<'_> {
++    /// The one native text snapshot that will be edited.
++    pub fn current_text(&self) -> &str {
++        self.current_text
++    }
++
++    /// The exact byte range replaced by the inserted text.
++    pub fn replacement_range(&self) -> core::ops::Range<usize> {
++        self.replacement_range.clone()
++    }
++
++    /// The same borrowed insertion consumed by the accepted mutation.
++    pub fn inserted_text(&self) -> &str {
++        self.inserted_text
++    }
++
++    /// The composition displayed after the accepted mutation.
++    pub fn preedit_text(&self) -> &str {
++        self.preedit_text
++    }
++
++    /// Whether this native input is a single-line field.
++    pub fn is_single_line(&self) -> bool {
++        self.single_line
++    }
++
++    /// Whether this native input displays a password.
++    pub fn is_password(&self) -> bool {
++        self.password
++    }
++
++    /// Whether this native input accepts Number or Decimal input.
++    pub fn is_numeric(&self) -> bool {
++        self.numeric
++    }
++
++    /// Whether this native input is enabled.
++    pub fn is_enabled(&self) -> bool {
++        self.enabled
++    }
++
++    /// Whether this native input is read-only.
++    pub fn is_read_only(&self) -> bool {
++        self.read_only
++    }
++}
++
+ impl Window {
+     /// Create a new window from a window adapter
+     ///
+@@ -546,6 +613,30 @@ impl Window {
+         self.0.on_close_requested(callback);
+     }
+ 
++    /// Install this window's native text-edit admission callback.
++    ///
++    /// A refused request performs no native text, cursor, composition or history
++    /// mutation. The callback must inspect the borrowed request without
++    /// changing native input state or reading the clipboard again. Capture weak
++    /// application/window handles to avoid an ownership cycle. Reentrant native
++    /// edits are refused until the admitted operation has completed.
++    /// Register after associating the window's root component. Replacing that
++    /// component requires explicit registration for the new root; a stale or
++    /// expired registration refuses edits instead of becoming unguarded.
++    #[doc(hidden)]
++    pub fn on_text_input_edit_admission(
++        &self,
++        callback: impl for<'a> Fn(&TextInputEdit<'a>) -> bool + 'static,
++    ) {
++        self.0.set_text_input_edit_admission(Some(alloc::rc::Rc::new(callback)));
++    }
++
++    /// Release this window's native text-edit admission callback.
++    #[doc(hidden)]
++    pub fn clear_text_input_edit_admission(&self) {
++        self.0.set_text_input_edit_admission(None);
++    }
++
+     /// This function issues a request to the windowing system to redraw the contents of the window.
+     pub fn request_redraw(&self) {
+         self.0.window_adapter().request_redraw()
+diff --git a/items/text.rs b/items/text.rs
+index b56b9b7..2cd7585 100644
+--- a/items/text.rs
++++ b/items/text.rs
+@@ -892,8 +892,31 @@ impl Item for TextInput {
+                 self.ensure_focus_and_ime(window_adapter, self_rc);
+             }
+             MouseEvent::Released { position, button: PointerEventButton::Middle, .. } => {
++                if WindowInner::from_pub(window_adapter.window()).text_input_edit_in_progress() {
++                    return InputEventResult::EventAccepted;
++                }
+                 let clicked_offset =
+                     self.byte_offset_for_position(*position, window_adapter, self_rc) as i32;
++                // Keep the one fetched selection-clipboard snapshot through
++                // admission and mutation. Rejection cannot move the selection.
++                let text = WindowInner::from_pub(window_adapter.window())
++                    .context()
++                    .platform()
++                    .clipboard_text(Clipboard::SelectionClipboard);
++                let edit_guard = if let Some(text) = &text {
++                    let snapshot = NativeTextEditSnapshot::capture(self);
++                    let Some(guard) = self.admit_native_edit(
++                        text,
++                        "",
++                        TextEditReplacement::AtOffset(clicked_offset),
++                        window_adapter,
++                    ) else {
++                        return InputEventResult::EventAccepted;
++                    };
++                    Some((guard, snapshot))
++                } else {
++                    None
++                };
+                 self.as_ref().anchor_position_byte_offset.set(clicked_offset);
+                 self.set_cursor_position(
+                     clicked_offset,
+@@ -903,7 +926,22 @@ impl Item for TextInput {
+                     window_adapter,
+                     self_rc,
+                 );
+-                self.paste_clipboard(window_adapter, self_rc, Clipboard::SelectionClipboard);
++                if let Some(text) = text {
++                    // The original cursor callback may replace properties or
++                    // switch the root. Never consume an older admission after
++                    // that callback, and never overwrite its new context.
++                    if let Some((guard, snapshot)) = &edit_guard {
++                        if guard.requires_snapshot_validation()
++                            && (!guard.current_root_matches()
++                                || !snapshot.matches(self, clicked_offset, clicked_offset))
++                        {
++                            return InputEventResult::EventAccepted;
++                        }
++                    }
++                    self.preedit_text.set(Default::default());
++                    self.insert_admitted(&text, window_adapter, self_rc);
++                }
++                drop(edit_guard);
+             }
+             MouseEvent::Exit => self.as_ref().pressed.set(0),
+             MouseEvent::Moved { position, .. } => {
+@@ -1064,11 +1102,24 @@ impl Item for TextInput {
+                     (self.cursor_position(&text), self.anchor_position(&text))
+                 };
+ 
++                let preedit = self.preedit_text();
++                let Some(_edit_guard) = self.admit_native_edit(
++                    &event.key_event.text,
++                    &preedit,
++                    TextEditReplacement::Selection,
++                    window_adapter,
++                ) else {
++                    return KeyEventResult::EventIgnored;
++                };
+                 if !self.accept_text_input(event.key_event.text.as_str()) {
+                     return KeyEventResult::EventIgnored;
+                 }
+ 
+-                self.delete_selection(window_adapter, self_rc, TextChangeNotify::SkipCallbacks);
++                self.delete_selection_admitted(
++                    window_adapter,
++                    self_rc,
++                    TextChangeNotify::SkipCallbacks,
++                );
+ 
+                 let mut text: String = self.text().into();
+ 
+@@ -1114,6 +1165,24 @@ impl Item for TextInput {
+                 }
+             }
+             KeyEventType::UpdateComposition | KeyEventType::CommitComposition => {
++                let replacement = event.replacement_range.clone().map_or_else(
++                    || {
++                        if event.key_event.text.is_empty() {
++                            TextEditReplacement::AtCursor
++                        } else {
++                            TextEditReplacement::Selection
++                        }
++                    },
++                    TextEditReplacement::AroundCursor,
++                );
++                let Some(_edit_guard) = self.admit_native_edit(
++                    &event.key_event.text,
++                    &event.preedit_text,
++                    replacement,
++                    window_adapter,
++                ) else {
++                    return KeyEventResult::EventIgnored;
++                };
+                 if !self.accept_text_input(&event.key_event.text) {
+                     return KeyEventResult::EventIgnored;
+                 }
+@@ -1127,7 +1196,7 @@ impl Item for TextInput {
+                     self.anchor_position_byte_offset.set(cursor.saturating_add(r.start));
+                     self.cursor_position_byte_offset.set(cursor.saturating_add(r.end));
+                     if event.key_event.text.is_empty() {
+-                        self.delete_selection(
++                        self.delete_selection_admitted(
+                             window_adapter,
+                             self_rc,
+                             if event.cursor_position.is_none() {
+@@ -1139,7 +1208,7 @@ impl Item for TextInput {
+                         );
+                     }
+                 }
+-                self.insert(&event.key_event.text, window_adapter, self_rc);
++                self.insert_admitted(&event.key_event.text, window_adapter, self_rc);
+                 if let Some(cursor) = event.cursor_position {
+                     self.anchor_position_byte_offset.set(event.anchor_position.unwrap_or(cursor));
+                     self.set_cursor_position(
+@@ -1184,9 +1253,36 @@ impl Item for TextInput {
+                 }
+             }
+             FocusEvent::FocusOut(reason) => {
++                #[cfg(target_os = "android")]
++                let preedit_text = self.preedit_text();
++                #[cfg(target_os = "android")]
++                let edit_guard = if !self.read_only() && !preedit_text.is_empty() {
++                    self.admit_native_edit(
++                        &preedit_text,
++                        "",
++                        TextEditReplacement::AtCursor,
++                        window_adapter,
++                    )
++                } else {
++                    None
++                };
++                let preserve_edit = {
++                    #[cfg(target_os = "android")]
++                    {
++                        !self.read_only() && !preedit_text.is_empty() && edit_guard.is_none()
++                    }
++                    #[cfg(not(target_os = "android"))]
++                    {
++                        false
++                    }
++                };
++                // OS focus bookkeeping stays unchanged. A refused Android
++                // commit must keep its editable selection/preedit snapshot.
+                 self.has_focus.set(false);
+                 self.hide_cursor();
+-                if !matches!(reason, FocusReason::WindowActivation | FocusReason::PopupActivation) {
++                if !preserve_edit
++                    && !matches!(reason, FocusReason::WindowActivation | FocusReason::PopupActivation)
++                {
+                     self.as_ref()
+                         .anchor_position_byte_offset
+                         .set(self.as_ref().cursor_position_byte_offset());
+@@ -1196,8 +1292,7 @@ impl Item for TextInput {
+                     // commit the preedit text on android
+                     #[cfg(target_os = "android")]
+                     {
+-                        let preedit_text = self.preedit_text();
+-                        if !preedit_text.is_empty() {
++                        if let Some(_edit_guard) = edit_guard {
+                             let mut text = String::from(self.text());
+                             let cursor_position = self.cursor_position(&text);
+                             text.insert_str(cursor_position, &preedit_text);
+@@ -1214,7 +1309,9 @@ impl Item for TextInput {
+                             Self::FIELD_OFFSETS.edited().apply_pin(self).call(&());
+                         }
+                     }
+-                    self.preedit_text.set(Default::default());
++                    if !preserve_edit {
++                        self.preedit_text.set(Default::default());
++                    }
+                 }
+             }
+         }
+@@ -1328,6 +1425,12 @@ enum AnchorMode {
+     MoveAnchor,
+ }
+ 
++struct CursorMovePlan {
++    position: usize,
++    previous_position: usize,
++    reset_preferred_x_pos: bool,
++}
++
+ impl From<KeyboardModifiers> for AnchorMode {
+     fn from(modifiers: KeyboardModifiers) -> Self {
+         if modifiers.shift { Self::KeepAnchor } else { Self::MoveAnchor }
+@@ -1344,6 +1447,56 @@ pub enum TextChangeNotify {
+     SkipCallbacks,
+ }
+ 
++enum TextEditReplacement {
++    Selection,
++    AtCursor,
++    AtOffset(i32),
++    AroundCursor(core::ops::Range<i32>),
++    Exact(core::ops::Range<usize>),
++}
++
++/// SharedString snapshots retain existing storage without copying payloads.
++/// The expected offsets are supplied separately because middle-click performs
++/// its original cursor notification between admission and insertion.
++struct NativeTextEditSnapshot {
++    text: SharedString,
++    preedit_text: SharedString,
++    preedit_selection: PreEditSelection,
++    input_type: InputType,
++    single_line: bool,
++    enabled: bool,
++    read_only: bool,
++    has_focus: bool,
++}
++
++impl NativeTextEditSnapshot {
++    fn capture(input: Pin<&TextInput>) -> Self {
++        Self {
++            text: input.text(),
++            preedit_text: input.preedit_text(),
++            preedit_selection: input.preedit_selection(),
++            input_type: input.input_type(),
++            single_line: input.single_line(),
++            enabled: input.enabled(),
++            read_only: input.read_only(),
++            has_focus: input.has_focus(),
++        }
++    }
++
++    fn matches(&self, input: Pin<&TextInput>, anchor: i32, cursor: i32) -> bool {
++        input.text() == self.text
++            && input.preedit_text() == self.preedit_text
++            && input.preedit_selection() == self.preedit_selection
++            && input.input_type() == self.input_type
++            && input.single_line() == self.single_line
++            && input.enabled() == self.enabled
++            && input.read_only() == self.read_only
++            && input.has_focus() == self.has_focus
++            && input.anchor_position_byte_offset() == anchor
++            && input.cursor_position_byte_offset() == cursor
++    }
++}
++
+ fn safe_byte_offset(unsafe_byte_offset: i32, text: &str) -> usize {
+     if unsafe_byte_offset <= 0 {
+         return 0;
+@@ -1445,6 +1598,82 @@ fn cursor_uses_selection_color() -> bool {
+ }
+ 
+ impl TextInput {
++    fn admit_native_edit<'a>(
++        self: Pin<&Self>,
++        inserted_text: &str,
++        preedit_text: &str,
++        replacement: TextEditReplacement,
++        window_adapter: &'a Rc<dyn WindowAdapter>,
++    ) -> Option<crate::window::TextInputEditGuard<'a>> {
++        let window = WindowInner::from_pub(window_adapter.window());
++        if window.text_input_edit_in_progress() {
++            return None;
++        }
++        let text = self.text();
++        let old_cursor = self.cursor_position_byte_offset();
++        let old_anchor = self.anchor_position_byte_offset();
++        let old_preedit = self.preedit_text();
++        let old_preedit_selection = self.preedit_selection();
++        let input_type = self.input_type();
++        let single_line = self.single_line();
++        let enabled = self.enabled();
++        let read_only = self.read_only();
++        let has_focus = self.has_focus();
++        let cursor = safe_byte_offset(old_cursor, &text);
++        let anchor = safe_byte_offset(old_anchor, &text);
++        let range = match replacement {
++            TextEditReplacement::Selection => anchor.min(cursor)..anchor.max(cursor),
++            TextEditReplacement::AtCursor => cursor..cursor,
++            TextEditReplacement::AtOffset(offset) => {
++                let offset = safe_byte_offset(offset, &text);
++                offset..offset
++            }
++            TextEditReplacement::AroundCursor(range) => {
++                let cursor = cursor as i32;
++                let start = safe_byte_offset(cursor.saturating_add(range.start), &text);
++                let end = safe_byte_offset(cursor.saturating_add(range.end), &text);
++                start.min(end)..start.max(end)
++            }
++            TextEditReplacement::Exact(range) => range,
++        };
++        if range.start > range.end
++            || range.end > text.len()
++            || !text.is_char_boundary(range.start)
++            || !text.is_char_boundary(range.end)
++        {
++            return None;
++        }
++        let edit = crate::api::TextInputEdit {
++            current_text: &text,
++            replacement_range: range,
++            inserted_text,
++            preedit_text,
++            single_line,
++            password: matches!(input_type, InputType::Password),
++            numeric: matches!(input_type, InputType::Number | InputType::Decimal),
++            enabled,
++            read_only,
++        };
++        let guard = window.text_input_edit_guard(&edit)?;
++        // A Fn may still mutate native properties or replace the root through a
++        // weak handle. Never spend its admission on a different native snapshot.
++        if !guard.current_root_matches()
++            || self.text() != text
++            || self.cursor_position_byte_offset() != old_cursor
++            || self.anchor_position_byte_offset() != old_anchor
++            || self.preedit_text() != old_preedit
++            || self.preedit_selection() != old_preedit_selection
++            || self.input_type() != input_type
++            || self.single_line() != single_line
++            || self.enabled() != enabled
++            || self.read_only() != read_only
++            || self.has_focus() != has_focus
++        {
++            return None;
++        }
++        Some(guard)
++    }
++
+     fn show_cursor(&self, window_adapter: &Rc<dyn WindowAdapter>) {
+         WindowInner::from_pub(window_adapter.window())
+             .set_cursor_blink_binding(&self.cursor_visible);
+@@ -1454,18 +1683,17 @@ impl TextInput {
+         self.cursor_visible.set(false);
+     }
+ 
+-    /// Moves the cursor (and/or anchor) and returns true if the cursor position changed; false otherwise.
+-    fn move_cursor(
++    /// Compute the original cursor destination without changing selection.
++    fn cursor_move_plan(
+         self: Pin<&Self>,
+         direction: TextCursorDirection,
+-        anchor_mode: AnchorMode,
+-        trigger_callbacks: TextChangeNotify,
++        anchor_mode: &AnchorMode,
+         window_adapter: &Rc<dyn WindowAdapter>,
+         self_rc: &ItemRc,
+-    ) -> bool {
++    ) -> Option<CursorMovePlan> {
+         let text = self.text();
+         if text.is_empty() {
+-            return false;
++            return None;
+         }
+ 
+         let (anchor, cursor) = self.selection_anchor_and_cursor();
+@@ -1480,7 +1708,7 @@ impl TextInput {
+ 
+         let new_cursor_pos = match direction {
+             TextCursorDirection::Forward => {
+-                if anchor == cursor || anchor_mode == AnchorMode::KeepAnchor {
++                if anchor == cursor || *anchor_mode == AnchorMode::KeepAnchor {
+                     grapheme_cursor
+                         .next_boundary(&text, 0)
+                         .ok()
+@@ -1491,7 +1719,7 @@ impl TextInput {
+                 }
+             }
+             TextCursorDirection::Backward => {
+-                if anchor == cursor || anchor_mode == AnchorMode::KeepAnchor {
++                if anchor == cursor || *anchor_mode == AnchorMode::KeepAnchor {
+                     grapheme_cursor.prev_boundary(&text, 0).ok().flatten().unwrap_or(0)
+                 } else {
+                     anchor
+@@ -1560,7 +1788,7 @@ impl TextInput {
+             TextCursorDirection::PageUp => {
+                 let offset = self.page_height().get() - font_height;
+                 if offset <= 0 as Coord {
+-                    return false;
++                    return None;
+                 }
+                 reset_preferred_x_pos = false;
+                 let cursor_rect =
+@@ -1573,7 +1801,7 @@ impl TextInput {
+             TextCursorDirection::PageDown => {
+                 let offset = self.page_height().get() - font_height;
+                 if offset <= 0 as Coord {
+-                    return false;
++                    return None;
+                 }
+                 reset_preferred_x_pos = false;
+                 let cursor_rect =
+@@ -1585,6 +1813,28 @@ impl TextInput {
+             }
+         };
+ 
++        Some(CursorMovePlan {
++            position: new_cursor_pos,
++            previous_position: last_cursor_pos,
++            reset_preferred_x_pos,
++        })
++    }
++
++    /// Moves the cursor (and/or anchor) and returns true if the cursor position changed; false otherwise.
++    fn move_cursor(
++        self: Pin<&Self>,
++        direction: TextCursorDirection,
++        anchor_mode: AnchorMode,
++        trigger_callbacks: TextChangeNotify,
++        window_adapter: &Rc<dyn WindowAdapter>,
++        self_rc: &ItemRc,
++    ) -> bool {
++        let Some(plan) = self.cursor_move_plan(direction, &anchor_mode, window_adapter, self_rc) else {
++            return false;
++        };
++        let new_cursor_pos = plan.position;
++        let reset_preferred_x_pos = plan.reset_preferred_x_pos;
++        let last_cursor_pos = plan.previous_position;
+         match anchor_mode {
+             AnchorMode::KeepAnchor => {}
+             AnchorMode::MoveAnchor => {
+@@ -1649,16 +1899,54 @@ impl TextInput {
+         window_adapter: &Rc<dyn WindowAdapter>,
+         self_rc: &ItemRc,
+     ) {
+-        if !self.has_selection() {
+-            self.move_cursor(
+-                step,
+-                AnchorMode::KeepAnchor,
++        if WindowInner::from_pub(window_adapter.window()).text_input_edit_in_progress() {
++            return;
++        }
++        let snapshot = NativeTextEditSnapshot::capture(self);
++        let old_anchor = self.anchor_position_byte_offset();
++        let old_cursor = self.cursor_position_byte_offset();
++        let plan = if !self.has_selection() {
++            self.cursor_move_plan(step, &AnchorMode::KeepAnchor, window_adapter, self_rc)
++        } else {
++            None
++        };
++        let replacement = if let Some(plan) = &plan {
++            plan.previous_position.min(plan.position)..plan.previous_position.max(plan.position)
++        } else {
++            let (anchor, cursor) = self.selection_anchor_and_cursor();
++            anchor..cursor
++        };
++        let preedit = self.preedit_text();
++        let Some(guard) = self.admit_native_edit(
++            "",
++            &preedit,
++            TextEditReplacement::Exact(replacement),
++            window_adapter,
++        ) else {
++            return;
++        };
++        if guard.requires_snapshot_validation() && !snapshot.matches(self, old_anchor, old_cursor) {
++            return;
++        }
++        let mut expected_cursor = old_cursor;
++        if let Some(plan) = plan {
++            expected_cursor = plan.position as i32;
++            self.set_cursor_position(
++                expected_cursor,
++                plan.reset_preferred_x_pos,
+                 TextChangeNotify::SkipCallbacks,
+                 window_adapter,
+                 self_rc,
+             );
++            self.show_cursor(window_adapter);
+         }
+-        self.delete_selection(window_adapter, self_rc, TextChangeNotify::TriggerCallbacks);
++        if guard.requires_snapshot_validation()
++            && (!guard.current_root_matches()
++                || !snapshot.matches(self, old_anchor, expected_cursor))
++        {
++            return;
++        }
++        self.delete_selection_admitted(window_adapter, self_rc, TextChangeNotify::TriggerCallbacks);
+     }
+ 
+     pub fn delete_selection(
+@@ -1666,6 +1954,27 @@ impl TextInput {
+         window_adapter: &Rc<dyn WindowAdapter>,
+         self_rc: &ItemRc,
+         trigger_callbacks: TextChangeNotify,
++    ) {
++        if WindowInner::from_pub(window_adapter.window()).text_input_edit_in_progress() {
++            return;
++        }
++        let preedit = self.preedit_text();
++        let Some(_edit_guard) = self.admit_native_edit(
++            "",
++            &preedit,
++            TextEditReplacement::Selection,
++            window_adapter,
++        ) else {
++            return;
++        };
++        self.delete_selection_admitted(window_adapter, self_rc, trigger_callbacks);
++    }
++
++    fn delete_selection_admitted(
++        self: Pin<&Self>,
++        window_adapter: &Rc<dyn WindowAdapter>,
++        self_rc: &ItemRc,
++        trigger_callbacks: TextChangeNotify,
+     ) {
+         let text: String = self.text().into();
+         if text.is_empty() {
+@@ -1780,7 +2089,7 @@ impl TextInput {
+         anchor_pos != cursor_pos
+     }
+ 
+-    fn insert(
++    fn insert_admitted(
+         self: Pin<&Self>,
+         text_to_insert: &str,
+         window_adapter: &Rc<dyn WindowAdapter>,
+@@ -1795,7 +2104,7 @@ impl TextInput {
+             (self.cursor_position(&text), self.anchor_position(&text))
+         };
+ 
+-        self.delete_selection(window_adapter, self_rc, TextChangeNotify::SkipCallbacks);
++        self.delete_selection_admitted(window_adapter, self_rc, TextChangeNotify::SkipCallbacks);
+         let mut text: String = self.text().into();
+         let cursor_pos = self.selection_anchor_and_cursor().1;
+         let mut inserted_text: SharedString = text_to_insert.into();
+@@ -1828,8 +2137,31 @@ impl TextInput {
+     }
+ 
+     pub fn cut(self: Pin<&Self>, window_adapter: &Rc<dyn WindowAdapter>, self_rc: &ItemRc) {
++        if WindowInner::from_pub(window_adapter.window()).text_input_edit_in_progress() {
++            return;
++        }
++        let snapshot = NativeTextEditSnapshot::capture(self);
++        let old_anchor = self.anchor_position_byte_offset();
++        let old_cursor = self.cursor_position_byte_offset();
++        let preedit = self.preedit_text();
++        let Some(guard) = self.admit_native_edit(
++            "",
++            &preedit,
++            TextEditReplacement::Selection,
++            window_adapter,
++        ) else {
++            return;
++        };
+         self.copy(window_adapter, self_rc);
+-        self.delete_selection(window_adapter, self_rc, TextChangeNotify::TriggerCallbacks);
++        // Clipboard providers may run user code. Keep a pending deletion from
++        // consuming the old admission after a provider changes native context.
++        if guard.requires_snapshot_validation()
++            && (!guard.current_root_matches()
++                || !snapshot.matches(self, old_anchor, old_cursor))
++        {
++            return;
++        }
++        self.delete_selection_admitted(window_adapter, self_rc, TextChangeNotify::TriggerCallbacks);
+     }
+ 
+     pub fn set_selection_offsets(
+@@ -1947,13 +2279,26 @@ impl TextInput {
+         self_rc: &ItemRc,
+         clipboard: Clipboard,
+     ) {
++        if WindowInner::from_pub(window_adapter.window()).text_input_edit_in_progress() {
++            return;
++        }
+         if let Some(text) = WindowInner::from_pub(window_adapter.window())
+             .context()
+             .platform()
+             .clipboard_text(clipboard)
+         {
++            let replacement = if text.is_empty() {
++                TextEditReplacement::AtCursor
++            } else {
++                TextEditReplacement::Selection
++            };
++            let Some(_edit_guard) =
++                self.admit_native_edit(&text, "", replacement, window_adapter)
++            else {
++                return;
++            };
+             self.preedit_text.set(Default::default());
+-            self.insert(&text, window_adapter, self_rc);
++            self.insert_admitted(&text, window_adapter, self_rc);
+         }
+     }
+ 
+@@ -2099,7 +2444,38 @@ impl TextInput {
+         self.undo_items.set(items);
+     }
+ 
++    fn peek_history(self: Pin<&Self>, redo: bool) -> Option<UndoItem> {
++        let history = if redo { &self.redo_items } else { &self.undo_items };
++        let items = history.take();
++        let last = items.as_slice().last().cloned();
++        // No user code runs while taking this read-only snapshot. Restore the
++        // actual vector before policy sees it; do not pop or copy its payload.
++        history.set(items);
++        last
++    }
++
+     pub fn undo(self: Pin<&Self>, window_adapter: &Rc<dyn WindowAdapter>, self_rc: &ItemRc) {
++        let Some(last) = self.peek_history(false) else {
++            return;
++        };
++        let preedit = self.preedit_text();
++        let (replacement, insertion) = match last.kind {
++            UndoItemKind::TextInsert => {
++                let Some(end) = last.pos.checked_add(last.text.len()) else {
++                    return;
++                };
++                (last.pos..end, "")
++            }
++            UndoItemKind::TextRemove => (last.pos..last.pos, last.text.as_str()),
++        };
++        let Some(_edit_guard) = self.admit_native_edit(
++            insertion,
++            &preedit,
++            TextEditReplacement::Exact(replacement),
++            window_adapter,
++        ) else {
++            return;
++        };
+         let mut items = self.undo_items.take();
+         let Some(last) = items.pop() else {
+             return;
+@@ -2145,6 +2521,27 @@ impl TextInput {
+     }
+ 
+     pub fn redo(self: Pin<&Self>, window_adapter: &Rc<dyn WindowAdapter>, self_rc: &ItemRc) {
++        let Some(last) = self.peek_history(true) else {
++            return;
++        };
++        let preedit = self.preedit_text();
++        let (replacement, insertion) = match last.kind {
++            UndoItemKind::TextInsert => (last.pos..last.pos, last.text.as_str()),
++            UndoItemKind::TextRemove => {
++                let Some(end) = last.pos.checked_add(last.text.len()) else {
++                    return;
++                };
++                (last.pos..end, "")
++            }
++        };
++        let Some(_edit_guard) = self.admit_native_edit(
++            insertion,
++            &preedit,
++            TextEditReplacement::Exact(replacement),
++            window_adapter,
++        ) else {
++            return;
++        };
+         let mut items = self.redo_items.take();
+         let Some(last) = items.pop() else {
+             return;
+diff --git a/window.rs b/window.rs
+index dc1fba8..536d399 100644
+--- a/window.rs
++++ b/window.rs
+@@ -506,6 +506,38 @@ pub struct MouseDispatchResult {
+     pub accepted: bool,
+ }
+ 
++type TextInputEditAdmission = dyn for<'a> Fn(&crate::api::TextInputEdit<'a>) -> bool;
++
++/// A stack-local lease for one native edit. It prevents recursive guarded
++/// edits and retains the registered root until the private operation ends.
++pub(crate) struct TextInputEditGuard<'a> {
++    window: &'a WindowInner,
++    entered: bool,
++    owner: Option<ItemTreeRc>,
++}
++
++impl TextInputEditGuard<'_> {
++    pub(crate) fn requires_snapshot_validation(&self) -> bool {
++        self.entered
++    }
++
++    pub(crate) fn current_root_matches(&self) -> bool {
++        self.owner.as_ref().is_none_or(|owner| {
++            self.window
++                .try_component()
++                .is_some_and(|current| ItemTreeRc::ptr_eq(owner, &current))
++        })
++    }
++}
++
++impl Drop for TextInputEditGuard<'_> {
++    fn drop(&mut self) {
++        if self.entered {
++            self.window.text_input_edit_entered.set(false);
++        }
++    }
++}
++
+ /// Inner datastructure for the [`crate::api::Window`]
+ pub struct WindowInner {
+     window_adapter_weak: Weak<dyn WindowAdapter>,
+@@ -535,6 +567,9 @@ pub struct WindowInner {
+     next_popup_id: Cell<NonZeroU32>,
+     had_popup_on_press: Cell<bool>,
+     close_requested: Callback<(), CloseRequestResponse>,
++    text_input_edit_admission: RefCell<Option<Rc<TextInputEditAdmission>>>,
++    text_input_edit_owner: RefCell<ItemTreeWeak>,
++    text_input_edit_entered: Cell<bool>,
+     click_state: ClickState,
+     ctx: core::cell::OnceCell<crate::SlintContext>,
+ }
+@@ -595,6 +630,9 @@ impl WindowInner {
+             next_popup_id: Cell::new(NonZeroU32::MIN),
+             had_popup_on_press: Default::default(),
+             close_requested: Default::default(),
++            text_input_edit_admission: Default::default(),
++            text_input_edit_owner: Default::default(),
++            text_input_edit_entered: Default::default(),
+             click_state: ClickState::default(),
+             prevent_focus_change: Default::default(),
+             ctx: Default::default(),
+@@ -602,6 +640,47 @@ impl WindowInner {
+         }
+     }
+ 
++    pub(crate) fn set_text_input_edit_admission(
++        &self,
++        callback: Option<Rc<TextInputEditAdmission>>,
++    ) {
++        self.text_input_edit_owner.replace(if callback.is_some() {
++            self.component.borrow().clone()
++        } else {
++            Default::default()
++        });
++        self.text_input_edit_admission.replace(callback);
++    }
++
++    pub(crate) fn text_input_edit_in_progress(&self) -> bool {
++        self.text_input_edit_entered.get()
++    }
++
++    pub(crate) fn text_input_edit_guard(
++        &self,
++        edit: &crate::api::TextInputEdit<'_>,
++    ) -> Option<TextInputEditGuard<'_>> {
++        // Check the operation lease before testing the slot: a callback clearing
++        // itself must not turn a recursive edit into an unguarded operation.
++        if self.text_input_edit_entered.get() {
++            return None;
++        }
++        let callback = self.text_input_edit_admission.borrow().clone();
++        let Some(callback) = callback else {
++            return Some(TextInputEditGuard { window: self, entered: false, owner: None });
++        };
++        let owner = self.text_input_edit_owner.borrow().upgrade()?;
++        if !self.try_component().is_some_and(|current| ItemTreeRc::ptr_eq(&owner, &current)) {
++            return None;
++        }
++        self.text_input_edit_entered.set(true);
++        let guard = TextInputEditGuard { window: self, entered: true, owner: Some(owner) };
++        // The RefCell borrow has ended. The local Rc keeps the callback alive
++        // during policy evaluation; the returned lease retains only its root
++        // and the recursive-edit exclusion for the private operation.
++        (callback(edit) && guard.current_root_matches()).then_some(guard)
++    }
++
+     /// Associates this window with the specified component. Further event handling and rendering, etc. will be
+     /// done with that component.
+     pub fn set_component(&self, component: &ItemTreeRc) {

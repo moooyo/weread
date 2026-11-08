@@ -279,6 +279,10 @@ The existing rereader repository is a related implementation reference, not this
 
 - [Related project README at the inspected revision](https://github.com/RealZhouXin/wereader/blob/7dacfb2b8d670c04633d19e684e39aa6ba844551/README.md).
 
+## Desktop testing and Kindle firmware emulation
+
+The follow-up [testing feasibility research](TESTING_STRATEGY.md) identifies official Slint desktop and automated-testing facilities, plus a community full-system Kindle firmware emulator that lists the target device families. It proposes separate desktop, emulated-firmware, and physical-device verification layers. The emulator modifies guest behavior and does not reproduce physical panel response. No build, emulator run, or device test was performed by this project, and the candidate Slint backend's emulator compatibility remains unverified.
+
 ## Items that remain open
 
 1. Confirm the exact Scribe generation or generations and firmware versions in scope. Jobman's KS1 report must not be generalized to all Scribe models.

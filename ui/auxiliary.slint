@@ -1,0 +1,848 @@
+import { Theme } from "theme.slint";
+import { Strings } from "strings.slint";
+import { ActionButton, IconButton, Icon, PageBar, PageHeader, SegmentedControl, SegmentedOption, ProgressTrack, ToggleRow } from "widgets.slint";
+
+export struct PublicationRow {
+    id: string,
+    title: string,
+    subtitle: string,
+    meta: string,
+    initial: string,
+    unread: int,
+    cached: bool,
+}
+
+export struct StatisticMetric { label: string, value: string }
+export struct StatisticBar { label: string, value: float, selected: bool, future: bool }
+export struct RankingEntry { id: string, title: string, subtitle: string, value: float }
+export struct PreferenceEntry { label: string, value: float, offset: float, percent: int, tone: int }
+export struct SettingEntry {
+    id: string,
+    title: string,
+    subtitle: string,
+    value: string,
+    kind: string,
+    checked: bool,
+    enabled: bool,
+    options: [SegmentedOption],
+    selected-value: string,
+}
+
+export global AuxiliaryModel {
+    in-out property <string> publications-title;
+    in-out property <string> publications-subtitle;
+    in-out property <string> publications-query;
+    in-out property <string> publications-sort: "recent";
+    in-out property <string> publications-account-id;
+    in-out property <[PublicationRow]> publications-rows;
+    in-out property <int> publications-page: 1;
+    in-out property <int> publications-page-count: 1;
+    in-out property <string> publications-status;
+    in-out property <bool> publications-busy: false;
+
+    in-out property <string> stats-period: "week";
+    in-out property <string> stats-period-label;
+    in-out property <string> stats-summary;
+    in-out property <string> stats-chart-title;
+    in-out property <string> stats-selected-label;
+    in-out property <string> stats-status;
+    in-out property <bool> stats-can-next: false;
+    in-out property <[StatisticMetric]> stats-metrics;
+    in-out property <[StatisticBar]> stats-bars;
+    in-out property <[RankingEntry]> stats-ranking;
+    in-out property <[int]> stats-calendar;
+    in-out property <int> stats-calendar-offset: 0;
+    in-out property <string> stats-calendar-label;
+    in-out property <string> stats-calendar-days;
+    in-out property <[string]> stats-weekdays;
+    in-out property <[PreferenceEntry]> stats-preferences;
+
+    in-out property <string> settings-subpage;
+    in-out property <string> settings-title;
+    in-out property <string> settings-account-name;
+    in-out property <string> settings-account-detail;
+    in-out property <string> settings-account-initial;
+    in-out property <bool> settings-account-active: false;
+    in-out property <[SettingEntry]> settings-rows;
+    in-out property <int> settings-page: 1;
+    in-out property <int> settings-page-count: 1;
+    in-out property <string> settings-status;
+    callback event(string, string);
+}
+
+component UnderlineTab inherits Rectangle {
+    in property <string> text;
+    in property <bool> selected;
+    callback clicked();
+    min-width: 48px;
+    preferred-width: label.preferred-width + 24px;
+    height: 48px;
+    background: touch.pressed ? Theme.ink : Theme.paper;
+    accessible-role: button;
+    accessible-label: root.text;
+    label := Text {
+        text: root.text;
+        color: touch.pressed ? Theme.paper : root.selected ? Theme.ink : Theme.secondary;
+        font-family: Theme.ui-font;
+        font-size: 17px;
+        font-weight: root.selected ? 700 : 400;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    if root.selected: Rectangle {
+        y: parent.height - 3px;
+        height: 3px;
+        background: Theme.ink;
+    }
+    touch := TouchArea { clicked => { root.clicked(); } }
+}
+
+component PublicationItem inherits Rectangle {
+    in property <PublicationRow> entry;
+    in property <bool> articles;
+    callback open();
+    callback download();
+    height: 72px;
+    background: Theme.paper;
+    HorizontalLayout {
+        spacing: 12px;
+        content := Rectangle {
+            horizontal-stretch: 1;
+            background: touch.pressed ? Theme.ink : Theme.paper;
+            border-radius: 2px;
+            accessible-role: button;
+            accessible-label: root.entry.title;
+            HorizontalLayout {
+                padding-top: 8px;
+                padding-bottom: 8px;
+                spacing: 12px;
+                if !root.articles: Rectangle {
+                    width: 48px;
+                    height: 48px;
+                    border-radius: 24px;
+                    border-width: 2px;
+                    border-color: Theme.ink;
+                    background: root.entry.unread > 0 ? Theme.ink : Theme.fill;
+                    Text {
+                        text: root.entry.initial;
+                        color: root.entry.unread > 0 ? Theme.paper : Theme.ink;
+                        font-family: Theme.serif-font;
+                        font-size: 21px;
+                        font-weight: 700;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    alignment: center;
+                    spacing: 4px;
+                    Rectangle {
+                        height: 28px;
+                        if root.articles && root.entry.unread > 0: Rectangle {
+                            y: (parent.height - 8px) / 2;
+                            width: 8px;
+                            height: 8px;
+                            border-radius: 4px;
+                            background: touch.pressed ? Theme.paper : Theme.ink;
+                        }
+                        Text {
+                            x: root.articles && root.entry.unread > 0 ? 20px : 0px;
+                            width: parent.width - self.x;
+                            text: root.entry.title;
+                            color: touch.pressed ? Theme.paper : Theme.ink;
+                            font-family: Theme.ui-font;
+                            font-size: 18px;
+                            font-weight: root.entry.unread > 0 ? 700 : 400;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                    }
+                    Rectangle {
+                        height: 20px;
+                        Text {
+                            x: 0px;
+                            width: parent.width - self.x;
+                            text: root.articles ? root.entry.meta : root.entry.subtitle;
+                            color: touch.pressed ? Theme.paper : Theme.secondary;
+                            font-family: Theme.ui-font;
+                            font-size: 14px;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                    }
+                }
+                if !root.articles: VerticalLayout {
+                    alignment: center;
+                    spacing: 4px;
+                    Text {
+                        text: root.entry.meta;
+                        color: touch.pressed ? Theme.paper : Theme.secondary;
+                        font-family: Theme.ui-font;
+                        font-size: 14px;
+                        horizontal-alignment: right;
+                    }
+                    if root.entry.unread > 0: Rectangle {
+                        width: 28px;
+                        height: 24px;
+                        border-radius: 12px;
+                        background: touch.pressed ? Theme.paper : Theme.ink;
+                        Text {
+                            text: root.entry.unread;
+                            color: touch.pressed ? Theme.ink : Theme.paper;
+                            font-family: Theme.ui-font;
+                            font-size: 14px;
+                            font-weight: 700;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+                if Theme.scribe && !root.articles: Rectangle {
+                    width: 24px;
+                    Icon { y: (parent.height - 24px) / 2; kind: "next"; inverted: touch.pressed; }
+                }
+            }
+            touch := TouchArea { clicked => { root.open(); } }
+        }
+        if root.articles && !root.entry.cached: Rectangle {
+            width: Theme.touch-size;
+            Rectangle {
+                y: (parent.height - Theme.touch-size) / 2;
+                width: Theme.touch-size;
+                height: Theme.touch-size;
+                border-width: Theme.scribe ? 1px : 2px;
+                border-color: Theme.ink;
+                border-radius: Theme.scribe ? self.width / 2 : 6px;
+                background: download-touch.pressed ? Theme.ink : Theme.paper;
+                accessible-role: button;
+                accessible-label: Strings.download;
+                Icon {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    kind: "download";
+                    inverted: download-touch.pressed;
+                }
+                download-touch := TouchArea {
+                    pointer-event(event) => { if event.kind == PointerEventKind.down { Theme.refresh("press"); } else if event.kind == PointerEventKind.up { Theme.refresh("release"); } }
+                    clicked => { root.download(); }
+                }
+            }
+        }
+        if root.articles && root.entry.cached: Text {
+            text: Strings.downloaded;
+            font-family: Theme.ui-font;
+            font-size: 14px;
+            color: Theme.secondary;
+            vertical-alignment: center;
+        }
+    }
+    Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
+}
+
+export component PublicationScreen inherits Rectangle {
+    background: Theme.paper;
+    VerticalLayout {
+        spacing: 0px;
+        Rectangle {
+            height: 52px;
+            HorizontalLayout {
+                padding-left: Theme.page-margin;
+                padding-right: Theme.page-margin;
+                Rectangle {
+                    height: 48px;
+                    border-width: 2px;
+                    border-color: Theme.ink;
+                    border-radius: 24px;
+                    HorizontalLayout {
+                        padding-left: 4px;
+                        padding-right: 16px;
+                        spacing: 8px;
+                        IconButton {
+                            icon: "search";
+                            label: Strings.publication-search;
+                            clicked => { AuxiliaryModel.event("mp.search", AuxiliaryModel.publications-query); }
+                        }
+                        TextInput {
+                            horizontal-stretch: 1;
+                            text <=> AuxiliaryModel.publications-query;
+                            font-family: Theme.ui-font;
+                            font-size: 17px;
+                            color: Theme.ink;
+                            single-line: true;
+                            vertical-alignment: center;
+                            accessible-label: Strings.publication-search;
+                            changed has-focus => {
+                                if self.has-focus { AuxiliaryModel.event("mp.focus", ""); }
+                            }
+                            edited => { AuxiliaryModel.event("mp.edit-query", self.text); }
+                            accepted => { AuxiliaryModel.event("mp.search", self.text); }
+                        }
+                    }
+                    if AuxiliaryModel.publications-query == "": Text {
+                        x: 60px;
+                        width: parent.width - 76px;
+                        text: Strings.publication-search;
+                        font-family: Theme.ui-font;
+                        font-size: 17px;
+                        color: Theme.muted;
+                        vertical-alignment: center;
+                    }
+                    Rectangle {
+                        x: 0px;
+                        y: 0px;
+                        width: parent.width;
+                        height: parent.height;
+                        background: transparent;
+                        border-width: 2px;
+                        border-color: Theme.ink;
+                        border-radius: 24px;
+                    }
+                }
+            }
+        }
+        Rectangle {
+            height: 52px;
+            HorizontalLayout {
+                padding-left: Theme.page-margin;
+                padding-right: Theme.page-margin;
+                spacing: 12px;
+                Text { text: Strings.publications; font-family: Theme.serif-font; font-size: 28px; font-weight: 700; vertical-alignment: center; }
+                Text { text: AuxiliaryModel.publications-subtitle; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                IconButton { icon: "sync"; label: Strings.sync; enabled: !AuxiliaryModel.publications-busy; text: Theme.scribe ? Strings.sync : ""; clicked => { AuxiliaryModel.event("mp.sync", ""); } }
+            }
+        }
+        Rectangle {
+            height: 48px;
+            if AuxiliaryModel.publications-account-id == "": HorizontalLayout {
+                padding-left: Theme.page-margin - 8px;
+                padding-right: Theme.page-margin;
+                spacing: 8px;
+                UnderlineTab { text: Strings.recent-update; selected: AuxiliaryModel.publications-sort == "recent"; clicked => { AuxiliaryModel.event("mp.sort", "recent"); } }
+                UnderlineTab { text: Strings.unread; selected: AuxiliaryModel.publications-sort == "unread"; clicked => { AuxiliaryModel.event("mp.sort", "unread"); } }
+                UnderlineTab { text: Strings.name; selected: AuxiliaryModel.publications-sort == "name"; clicked => { AuxiliaryModel.event("mp.sort", "name"); } }
+                Rectangle { horizontal-stretch: 1; }
+            }
+            if AuxiliaryModel.publications-account-id != "": HorizontalLayout {
+                padding-left: 8px;
+                padding-right: Theme.page-margin;
+                spacing: 8px;
+                IconButton { icon: "back"; text: Strings.all-publications; clicked => { AuxiliaryModel.event("mp.back", ""); } }
+                Text { text: AuxiliaryModel.publications-title; font-family: Theme.ui-font; font-size: 17px; font-weight: 700; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+            }
+            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
+        }
+        Rectangle {
+            vertical-stretch: 1;
+            clip: true;
+            VerticalLayout {
+                padding-left: Theme.page-margin;
+                padding-right: Theme.page-margin;
+                spacing: 0px;
+                for entry in AuxiliaryModel.publications-rows: PublicationItem {
+                    entry: entry;
+                    articles: AuxiliaryModel.publications-account-id != "";
+                    open => { AuxiliaryModel.event(AuxiliaryModel.publications-account-id == "" ? "mp.account" : "mp.article", entry.id); }
+                    download => { AuxiliaryModel.event("mp.download", entry.id); }
+                }
+                Rectangle { vertical-stretch: 1; }
+            }
+            if AuxiliaryModel.publications-rows.length == 0: VerticalLayout {
+                padding: Theme.page-margin;
+                alignment: center;
+                spacing: 12px;
+                Text { text: Strings.empty-publications; font-family: Theme.serif-font; font-size: 24px; font-weight: 700; horizontal-alignment: center; }
+                Text { text: AuxiliaryModel.publications-status == "" ? Strings.empty-publications-hint : AuxiliaryModel.publications-status; font-family: Theme.ui-font; font-size: 16px; color: Theme.secondary; horizontal-alignment: center; wrap: word-wrap; }
+            }
+        }
+        if AuxiliaryModel.publications-status != "" && AuxiliaryModel.publications-rows.length > 0: Text {
+            height: 32px;
+            text: AuxiliaryModel.publications-status;
+            font-family: Theme.ui-font;
+            font-size: 14px;
+            color: Theme.secondary;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        PageBar {
+            page: AuxiliaryModel.publications-page;
+            count: AuxiliaryModel.publications-page-count;
+            turn(direction) => { AuxiliaryModel.event("mp.page", "" + direction); }
+            jump => { AuxiliaryModel.event("mp.jump", ""); }
+        }
+    }
+}
+
+component RankingRow inherits Rectangle {
+    in property <RankingEntry> entry;
+    in property <int> index;
+    callback clicked();
+    height: 48px;
+    accessible-role: button;
+    accessible-label: root.entry.title + " " + root.entry.subtitle;
+    background: touch.pressed ? Theme.ink : Theme.paper;
+    VerticalLayout {
+        spacing: 6px;
+        padding-top: 4px;
+        padding-bottom: 6px;
+        HorizontalLayout {
+            spacing: 12px;
+            Text { text: (root.index + 1) + ". " + root.entry.title; font-family: Theme.ui-font; font-size: 16px; color: touch.pressed ? Theme.paper : Theme.ink; overflow: elide; horizontal-stretch: 1; }
+            Text { text: root.entry.subtitle; font-family: Theme.ui-font; font-size: 15px; color: touch.pressed ? Theme.paper : Theme.secondary; }
+        }
+        ProgressTrack { value: root.entry.value; height: 6px; }
+    }
+    touch := TouchArea { clicked => { root.clicked(); } }
+}
+
+component StatisticsPeriodControl inherits SegmentedControl {
+    options: [
+        {id: "week", label: Strings.week},
+        {id: "month", label: Strings.month},
+        {id: "year", label: Strings.year},
+        {id: "total", label: Strings.total}
+    ];
+    value: AuxiliaryModel.stats-period;
+    chosen(value) => { AuxiliaryModel.event("stats.period", value); }
+}
+
+component StatisticsPeriodNavigation inherits Rectangle {
+    height: 48px;
+    HorizontalLayout {
+        spacing: 4px;
+        IconButton { icon: "back"; label: Strings.previous-period; enabled: AuxiliaryModel.stats-period != "total"; clicked => { AuxiliaryModel.event("stats.previous", ""); } }
+        Text { text: AuxiliaryModel.stats-period-label; font-family: Theme.ui-font; font-size: 17px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+        IconButton { icon: "next"; label: Strings.next-period; enabled: AuxiliaryModel.stats-can-next; clicked => { AuxiliaryModel.event("stats.next", ""); } }
+    }
+}
+
+export component StatisticsScreen inherits Rectangle {
+    background: Theme.paper;
+    VerticalLayout {
+        spacing: 0px;
+        Rectangle {
+            height: 56px;
+            HorizontalLayout {
+                padding-left: Theme.page-margin;
+                padding-right: Theme.page-margin;
+                spacing: 16px;
+                Text { text: Strings.reading-statistics; font-family: Theme.serif-font; font-size: 28px; font-weight: 700; vertical-alignment: center; }
+                Text { text: AuxiliaryModel.stats-status; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; vertical-alignment: center; horizontal-alignment: right; overflow: elide; horizontal-stretch: 1; }
+            }
+        }
+        Rectangle {
+            height: Theme.scribe ? 64px : 48px;
+            HorizontalLayout {
+                padding-left: Theme.page-margin;
+                padding-right: Theme.page-margin;
+                padding-top: Theme.scribe ? 8px : 0px;
+                padding-bottom: Theme.scribe ? 8px : 0px;
+                spacing: Theme.scribe ? 16px : 0px;
+                if !Theme.scribe: StatisticsPeriodControl { horizontal-stretch: 1; }
+                if Theme.scribe: StatisticsPeriodControl { width: 380px; }
+                if Theme.scribe: Rectangle { horizontal-stretch: 1; }
+                if Theme.scribe: StatisticsPeriodNavigation { width: 320px; }
+            }
+        }
+        if !Theme.scribe: Rectangle {
+            height: 48px;
+            HorizontalLayout {
+                padding-left: Theme.page-margin - 8px;
+                padding-right: Theme.page-margin - 8px;
+                StatisticsPeriodNavigation { horizontal-stretch: 1; }
+            }
+        }
+        Rectangle {
+            height: Theme.scribe ? 96px : 108px;
+            if !Theme.scribe: VerticalLayout {
+                padding-left: Theme.page-margin;
+                padding-right: Theme.page-margin;
+                padding-bottom: 12px;
+                spacing: 10px;
+                HorizontalLayout {
+                    spacing: 12px;
+                    Text { text: AuxiliaryModel.stats-summary; font-family: Theme.serif-font; font-size: 32px; font-weight: 700; vertical-alignment: center; overflow: elide; }
+                    Text { text: Strings.reading-time; font-family: Theme.ui-font; font-size: 15px; color: Theme.secondary; vertical-alignment: center; horizontal-stretch: 1; }
+                }
+                HorizontalLayout {
+                    spacing: 12px;
+                    for metric in AuxiliaryModel.stats-metrics: VerticalLayout {
+                        spacing: 4px;
+                        Text { text: metric.value; font-family: Theme.ui-font; font-size: 19px; font-weight: 700; overflow: elide; }
+                        Text { text: metric.label; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; overflow: elide; }
+                    }
+                }
+            }
+            if Theme.scribe: HorizontalLayout {
+                padding-left: Theme.page-margin;
+                padding-right: Theme.page-margin;
+                padding-bottom: 16px;
+                spacing: 16px;
+                VerticalLayout {
+                    horizontal-stretch: 1.7;
+                    alignment: end;
+                    spacing: 4px;
+                    Text { text: Strings.reading-time; font-family: Theme.ui-font; font-size: 15px; color: Theme.secondary; }
+                    Text { text: AuxiliaryModel.stats-summary; font-family: Theme.serif-font; font-size: 32px; font-weight: 700; overflow: elide; }
+                }
+                for metric in AuxiliaryModel.stats-metrics: VerticalLayout {
+                    horizontal-stretch: 1;
+                    alignment: end;
+                    spacing: 4px;
+                    Text { text: metric.label; font-family: Theme.ui-font; font-size: 15px; color: Theme.secondary; overflow: elide; }
+                    Text { text: metric.value; font-family: Theme.ui-font; font-size: 22px; font-weight: 700; overflow: elide; }
+                }
+            }
+            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
+        }
+        Rectangle {
+            height: Theme.scribe ? 256px : 240px;
+            VerticalLayout {
+                padding-left: Theme.page-margin;
+                padding-right: Theme.page-margin;
+                padding-top: 12px;
+                padding-bottom: 12px;
+                spacing: 8px;
+                HorizontalLayout {
+                    height: 48px;
+                    spacing: 8px;
+                    Text { text: AuxiliaryModel.stats-chart-title; font-family: Theme.ui-font; font-size: 18px; font-weight: 700; horizontal-stretch: 1; vertical-alignment: center; }
+                    Text { text: AuxiliaryModel.stats-selected-label; font-family: Theme.ui-font; font-size: 15px; color: Theme.secondary; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
+                    IconButton { icon: "back"; label: Strings.previous-value; enabled: AuxiliaryModel.stats-bars.length > 0; clicked => { AuxiliaryModel.event("stats.bar-previous", ""); } }
+                    IconButton { icon: "next"; label: Strings.next-value; enabled: AuxiliaryModel.stats-bars.length > 0; clicked => { AuxiliaryModel.event("stats.bar-next", ""); } }
+                }
+                Rectangle {
+                    height: Theme.scribe ? 144px : 128px;
+                    accessible-role: button;
+                    accessible-label: AuxiliaryModel.stats-chart-title + " " + AuxiliaryModel.stats-selected-label;
+                    HorizontalLayout {
+                        spacing: AuxiliaryModel.stats-bars.length > 14 ? 4px : 10px;
+                        for bar in AuxiliaryModel.stats-bars: Rectangle {
+                            horizontal-stretch: 1;
+                            Rectangle {
+                                y: parent.height - self.height;
+                                height: bar.future ? 0px : max(2px, parent.height * clamp(bar.value, 0, 1));
+                                background: bar.future ? Theme.paper : bar.selected ? Theme.ink : bar.value == 0 ? Theme.fill : Theme.muted;
+                            }
+                        }
+                    }
+                    Rectangle { y: parent.height - 2px; height: 2px; background: Theme.ink; }
+                    TouchArea {
+                        enabled: AuxiliaryModel.stats-bars.length > 0;
+                        clicked => {
+                            AuxiliaryModel.event("stats.bar", "" + min(AuxiliaryModel.stats-bars.length - 1, max(0, floor(self.mouse-x / self.width * AuxiliaryModel.stats-bars.length))));
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    height: 20px;
+                    spacing: AuxiliaryModel.stats-bars.length > 14 ? 4px : 10px;
+                    for bar in AuxiliaryModel.stats-bars: Text {
+                        text: bar.label;
+                        font-family: Theme.ui-font;
+                        font-size: 14px;
+                        font-weight: bar.selected ? 700 : 400;
+                        color: bar.selected ? Theme.ink : Theme.secondary;
+                        horizontal-alignment: center;
+                        overflow: elide;
+                        horizontal-stretch: 1;
+                    }
+                }
+            }
+            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
+        }
+        Rectangle {
+            vertical-stretch: Theme.scribe ? 0 : 1;
+            min-height: Theme.scribe ? 28px + AuxiliaryModel.stats-ranking.length * 48px + 12px : 0px;
+            clip: true;
+            VerticalLayout {
+                padding-left: Theme.page-margin;
+                padding-right: Theme.page-margin;
+                padding-top: 12px;
+                spacing: 0px;
+                Text { text: Strings.reading-ranking; font-family: Theme.ui-font; font-size: 18px; font-weight: 700; height: 28px; }
+                for entry[index] in AuxiliaryModel.stats-ranking: RankingRow {
+                    entry: entry;
+                    index: index;
+                    clicked => { AuxiliaryModel.event("stats.open", entry.id); }
+                }
+                if AuxiliaryModel.stats-ranking.length == 0: Text { text: Strings.stats-empty; font-family: Theme.ui-font; font-size: 16px; color: Theme.secondary; wrap: word-wrap; }
+                Rectangle { vertical-stretch: 1; }
+            }
+        }
+        if Theme.scribe && AuxiliaryModel.stats-calendar.length > 0: Rectangle {
+            height: 116px + ceil(AuxiliaryModel.stats-calendar.length / 7.0) * 20px;
+            VerticalLayout {
+                padding-left: Theme.page-margin;
+                padding-right: Theme.page-margin;
+                padding-top: 12px;
+                padding-bottom: 12px;
+                spacing: 8px;
+                HorizontalLayout {
+                    spacing: 12px;
+                    Text { text: Strings.reading-calendar; font-family: Theme.ui-font; font-size: 18px; font-weight: 700; }
+                    Text { text: AuxiliaryModel.stats-calendar-label; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; horizontal-stretch: 1; vertical-alignment: center; }
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    for day in AuxiliaryModel.stats-weekdays: Text { text: day; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; horizontal-alignment: center; horizontal-stretch: 1; }
+                }
+                Rectangle {
+                    height: ceil(AuxiliaryModel.stats-calendar.length / 7.0) * 20px;
+                    for level[index] in AuxiliaryModel.stats-calendar: Rectangle {
+                        x: mod(index, 7) * (parent.width + 8px) / 7;
+                        y: floor(index / 7.0) * 20px;
+                        width: (parent.width - 48px) / 7;
+                        height: 16px;
+                        border-radius: 2px;
+                        border-width: level == 0 ? 1px : 0px;
+                        border-color: Theme.line;
+                        background: level < 0 ? Theme.paper : level >= 3 ? Theme.ink : level == 2 ? Theme.muted : level == 1 ? Theme.fill : Theme.paper;
+                        Text {
+                            text: level < 0 ? "" : "" + (index - AuxiliaryModel.stats-calendar-offset + 1);
+                            color: level >= 2 ? Theme.paper : Theme.ink;
+                            font-family: Theme.ui-font;
+                            font-size: 14px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    height: 20px;
+                    spacing: 6px;
+                    Text { text: Strings.less; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; vertical-alignment: center; }
+                    for level in [0, 1, 2, 3]: Rectangle {
+                        width: 18px;
+                        height: 18px;
+                        border-width: level == 0 ? 1px : 0px;
+                        border-color: Theme.line;
+                        background: level == 3 ? Theme.ink : level == 2 ? Theme.muted : level == 1 ? Theme.fill : Theme.paper;
+                    }
+                    Text { text: Strings.more-amount; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; vertical-alignment: center; }
+                    Rectangle { horizontal-stretch: 1; }
+                    Text { text: AuxiliaryModel.stats-calendar-days; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; vertical-alignment: center; horizontal-alignment: right; }
+                }
+            }
+        }
+        if Theme.scribe && AuxiliaryModel.stats-preferences.length > 0: Rectangle {
+            height: 88px + ceil(AuxiliaryModel.stats-preferences.length / 3.0) * 28px;
+            VerticalLayout {
+                padding-left: Theme.page-margin;
+                padding-right: Theme.page-margin;
+                padding-top: 8px;
+                padding-bottom: 8px;
+                spacing: 8px;
+                Text { text: Strings.reading-preferences; font-family: Theme.ui-font; font-size: 18px; font-weight: 700; }
+                Rectangle {
+                    height: 28px;
+                    border-width: 2px;
+                    border-color: Theme.ink;
+                    border-radius: 4px;
+                    clip: true;
+                    for preference in AuxiliaryModel.stats-preferences: Rectangle {
+                        x: 2px + (parent.width - 4px) * preference.offset;
+                        y: 2px;
+                        width: (parent.width - 4px) * preference.value;
+                        height: parent.height - 4px;
+                        clip: true;
+                        background: preference.tone == 0 ? Theme.ink : preference.tone == 1 ? Theme.secondary : preference.tone == 2 ? Theme.line : preference.tone == 3 ? Theme.fill : Theme.paper;
+                        Text { text: preference.label; font-family: Theme.ui-font; font-size: 14px; color: preference.tone <= 1 ? Theme.paper : Theme.ink; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
+                    }
+                }
+                Rectangle {
+                    height: ceil(AuxiliaryModel.stats-preferences.length / 3.0) * 28px;
+                    for preference[index] in AuxiliaryModel.stats-preferences: Rectangle {
+                        x: mod(index, 3) * (parent.width + 24px) / 3;
+                        y: floor(index / 3.0) * 28px;
+                        width: (parent.width - 48px) / 3;
+                        height: 24px;
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Rectangle {
+                                width: 16px;
+                                height: 16px;
+                                border-width: 1px;
+                                border-color: Theme.ink;
+                                background: preference.tone == 0 ? Theme.ink : preference.tone == 1 ? Theme.secondary : preference.tone == 2 ? Theme.line : preference.tone == 3 ? Theme.fill : Theme.paper;
+                            }
+                            Text { text: preference.label + " " + preference.percent + "%"; font-family: Theme.ui-font; font-size: 16px; color: Theme.ink; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                        }
+                    }
+                }
+            }
+        }
+        if Theme.scribe: Rectangle { vertical-stretch: 1; }
+    }
+}
+
+component SettingItem inherits Rectangle {
+    in property <SettingEntry> entry;
+    callback action();
+    callback choose(string);
+    callback decrease();
+    callback increase();
+    height: root.entry.kind == "choice"
+        ? (Theme.scribe ? 104px : 100px) + (root.entry.subtitle == "" ? 0px : Theme.scribe ? 30px : 28px)
+        : root.entry.subtitle == "" ? 56px : 72px;
+    background: Theme.paper;
+    if root.entry.kind == "toggle": ToggleRow {
+        text: root.entry.title;
+        subtitle: root.entry.subtitle;
+        checked: root.entry.checked;
+        enabled: root.entry.enabled;
+        toggled => { root.action(); }
+    }
+    if root.entry.kind == "choice": VerticalLayout {
+        padding-top: 10px;
+        padding-bottom: 10px;
+        spacing: Theme.scribe ? 10px : 8px;
+        Text { text: root.entry.title; height: Theme.scribe ? 26px : 24px; font-family: Theme.ui-font; font-size: Theme.scribe ? 19px : 18px; color: root.entry.enabled ? Theme.ink : Theme.muted; vertical-alignment: center; }
+        if root.entry.subtitle != "": Text { text: root.entry.subtitle; height: 20px; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; overflow: elide; }
+        SegmentedControl {
+            options: root.entry.options;
+            value: root.entry.selected-value;
+            enabled: root.entry.enabled;
+            chosen(value) => { root.choose(value); }
+        }
+    }
+    if root.entry.kind == "stepper": HorizontalLayout {
+        padding-top: 4px;
+        padding-bottom: 4px;
+        spacing: 8px;
+        VerticalLayout {
+            alignment: center;
+            spacing: 4px;
+            Text { text: root.entry.title; font-family: Theme.ui-font; font-size: 18px; color: root.entry.enabled ? Theme.ink : Theme.muted; overflow: elide; }
+            if root.entry.subtitle != "": Text { text: root.entry.subtitle; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; overflow: elide; }
+        }
+        Rectangle { horizontal-stretch: 1; }
+        ActionButton { text: "−"; accessible-label: root.entry.title + " " + Strings.decrease; width: 48px; enabled: root.entry.enabled; clicked => { root.decrease(); } }
+        Text { text: root.entry.value; width: 64px; font-family: Theme.ui-font; font-size: 18px; font-weight: 700; color: root.entry.enabled ? Theme.ink : Theme.muted; horizontal-alignment: center; vertical-alignment: center; }
+        ActionButton { text: "+"; accessible-label: root.entry.title + " " + Strings.increase; width: 48px; enabled: root.entry.enabled; clicked => { root.increase(); } }
+    }
+    if root.entry.kind == "info": Rectangle {
+        HorizontalLayout {
+            spacing: 12px;
+            VerticalLayout {
+                horizontal-stretch: 1;
+                alignment: center;
+                spacing: 4px;
+                Text { text: root.entry.title; font-family: Theme.ui-font; font-size: 18px; color: Theme.ink; overflow: elide; }
+                if root.entry.subtitle != "": Text { text: root.entry.subtitle; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; overflow: elide; }
+            }
+            Text { text: root.entry.value; max-width: root.width * 0.44; horizontal-stretch: 0; font-family: Theme.ui-font; font-size: 15px; color: Theme.secondary; vertical-alignment: center; overflow: elide; }
+        }
+    }
+    if root.entry.kind != "toggle" && root.entry.kind != "stepper" && root.entry.kind != "info" && root.entry.kind != "choice": Rectangle {
+        background: touch.pressed ? Theme.ink : Theme.paper;
+        accessible-role: button;
+        accessible-label: root.entry.title + " " + root.entry.value;
+        accessible-enabled: root.entry.enabled;
+        HorizontalLayout {
+            spacing: 12px;
+            VerticalLayout {
+                horizontal-stretch: 1;
+                alignment: center;
+                spacing: 4px;
+                Text { text: root.entry.title; font-family: Theme.ui-font; font-size: 18px; color: !root.entry.enabled ? Theme.muted : touch.pressed ? Theme.paper : Theme.ink; overflow: elide; }
+                if root.entry.subtitle != "": Text { text: root.entry.subtitle; font-family: Theme.ui-font; font-size: 14px; color: touch.pressed ? Theme.paper : Theme.secondary; overflow: elide; }
+            }
+            Text { text: root.entry.value; max-width: root.width * 0.44; horizontal-stretch: 0; font-family: Theme.ui-font; font-size: 15px; color: touch.pressed ? Theme.paper : Theme.secondary; vertical-alignment: center; overflow: elide; }
+            if root.entry.kind == "link": Rectangle {
+                width: 24px;
+                horizontal-stretch: 0;
+                Icon { x: 0px; y: (parent.height - 24px) / 2; kind: "next"; inverted: touch.pressed; }
+            }
+        }
+        touch := TouchArea { enabled: root.entry.enabled && root.entry.kind != "info"; clicked => { root.action(); } }
+    }
+    Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
+}
+
+export component SettingsScreen inherits Rectangle {
+    background: Theme.paper;
+    VerticalLayout {
+        spacing: 0px;
+        if AuxiliaryModel.settings-subpage == "": Rectangle {
+            height: 56px;
+            Text { x: Theme.page-margin; width: parent.width - Theme.page-margin * 2; text: Strings.settings; font-family: Theme.serif-font; font-size: 28px; font-weight: 700; vertical-alignment: center; }
+        }
+        if AuxiliaryModel.settings-subpage != "": PageHeader {
+            title: AuxiliaryModel.settings-title;
+            back-text: Theme.scribe ? Strings.settings : "";
+            separator: true;
+            back => { AuxiliaryModel.event("settings.back", ""); }
+        }
+        Rectangle {
+            vertical-stretch: 1;
+            clip: true;
+            VerticalLayout {
+                padding-left: Theme.page-margin;
+                padding-right: Theme.page-margin;
+                spacing: 0px;
+                if AuxiliaryModel.settings-subpage == "": Rectangle {
+                    height: 104px;
+                    Rectangle {
+                        height: 88px;
+                        border-width: 2px;
+                        border-color: Theme.ink;
+                        border-radius: 6px;
+                        HorizontalLayout {
+                            padding: 14px;
+                            spacing: 14px;
+                            Rectangle {
+                                width: 52px;
+                                height: 52px;
+                                border-radius: 26px;
+                                background: Theme.ink;
+                                Text { text: AuxiliaryModel.settings-account-initial; font-family: Theme.serif-font; font-size: 22px; font-weight: 700; color: Theme.paper; horizontal-alignment: center; vertical-alignment: center; }
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                spacing: 4px;
+                                Text { text: AuxiliaryModel.settings-account-name; font-family: Theme.ui-font; font-size: 19px; font-weight: 700; overflow: elide; }
+                                Text { text: AuxiliaryModel.settings-account-detail; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; overflow: elide; }
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                            ActionButton { text: AuxiliaryModel.settings-account-active ? Strings.renew : Strings.login-title; clicked => { AuxiliaryModel.event(AuxiliaryModel.settings-account-active ? "settings.renew" : "settings.action", AuxiliaryModel.settings-account-active ? "" : "login"); } }
+                        }
+                    }
+                }
+                for entry in AuxiliaryModel.settings-rows: SettingItem {
+                    entry: entry;
+                    action => { AuxiliaryModel.event(entry.kind == "toggle" ? "settings.toggle" : AuxiliaryModel.settings-subpage == "" ? "settings.open" : "settings.action", entry.id); }
+                    choose(value) => { AuxiliaryModel.event("settings.choice", entry.id + ":" + value); }
+                    decrease => { AuxiliaryModel.event("settings.decrease", entry.id); }
+                    increase => { AuxiliaryModel.event("settings.increase", entry.id); }
+                }
+                if AuxiliaryModel.settings-subpage == "": Rectangle { height: 16px; }
+                if AuxiliaryModel.settings-subpage == "": SettingItem {
+                    entry: {id: "exit", title: Strings.exit-app, subtitle: "", value: Strings.exit-app-hint, kind: "action", checked: false, enabled: true, options: [], selected-value: ""};
+                    action => { AuxiliaryModel.event("settings.exit", ""); }
+                }
+                if AuxiliaryModel.settings-subpage == "": SettingItem {
+                    entry: {id: "logout", title: Strings.logout, subtitle: "", value: "", kind: "action", checked: false, enabled: AuxiliaryModel.settings-account-active, options: [], selected-value: ""};
+                    action => { AuxiliaryModel.event("settings.logout", ""); }
+                }
+                Rectangle { vertical-stretch: 1; }
+            }
+        }
+        if AuxiliaryModel.settings-status != "": Text {
+            height: 48px;
+            text: AuxiliaryModel.settings-status;
+            font-family: Theme.ui-font;
+            font-size: 14px;
+            color: Theme.secondary;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            wrap: word-wrap;
+        }
+        if AuxiliaryModel.settings-page-count > 1: PageBar {
+            page: AuxiliaryModel.settings-page;
+            count: AuxiliaryModel.settings-page-count;
+            turn(direction) => { AuxiliaryModel.event("settings.page", "" + direction); }
+            jump => { AuxiliaryModel.event("settings.jump", ""); }
+        }
+    }
+}

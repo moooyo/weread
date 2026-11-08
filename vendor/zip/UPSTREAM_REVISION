@@ -1,0 +1,20 @@
+Component: zip
+Version: 4.6.1
+Registry: crates.io
+Repository: https://github.com/zip-rs/zip2.git
+Upstream VCS commit: 56fa5f6e1f3e29d747e5875867e7a647aa612b8c
+Crate SHA-256 from the pre-vendor Cargo.lock: caa8cd6af31c3b31c6631b8f483848b91589021b28fffe50adada48d4f4d2ed1
+License: MIT; original LICENSE is retained unchanged.
+
+Source provenance: the existing Cargo registry source already selected by this
+project's lockfile, copied read-only without downloading or upgrading a release.
+The upstream .cargo_vcs_info.json and normalized/original manifests are retained.
+The complete src tree and the three bench target sources named by the normalized
+manifest are included. Registry caches, the upstream lockfile, repository workflow
+files, and unavailable upstream tests/data fixtures are not included.
+
+Decision: pin this reviewed revision for the RL-20 bounded ZIP-initialization
+patch. The existing post-construction import quota cannot prevent this revision's
+earlier file-index reservation. This component pin supports that local resource
+boundary; it does not freeze unrelated dependencies or select a project license.
+Local changes and verification scope are described in PATCHES.md.

@@ -1,0 +1,470 @@
+{
+  "$schema-note": "WeRead for Kindle design tokens v0.2. Units are dp unless noted; 1 dp = 2 px on every supported Kindle (all 300 ppi). Values mirror the prototype (prototype/*.dc.html), which wins if anything disagrees.",
+  "version": "0.2.0",
+  "unit": {
+    "dp_to_px": 2,
+    "ppi": 300,
+    "note": "Do NOT use KOReader scaleBySize (short edge / 600). Same dp = same physical size on both devices; the bigger screen shows more content instead of bigger controls."
+  },
+  "devices": {
+    "pw5": {
+      "name": "Kindle Paperwhite 5 (2021)",
+      "px": [
+        1236,
+        1648
+      ],
+      "dp": [
+        618,
+        824
+      ],
+      "layout": "pw",
+      "note": "PW layout, widths shrink proportionally"
+    },
+    "pw6": {
+      "name": "Kindle Paperwhite 6 (2024)",
+      "px": [
+        1264,
+        1680
+      ],
+      "dp": [
+        632,
+        840
+      ],
+      "layout": "pw",
+      "note": "PW design baseline"
+    },
+    "scribe": {
+      "name": "Kindle Scribe (2022 / 2024)",
+      "px": [
+        1860,
+        2480
+      ],
+      "dp": [
+        930,
+        1240
+      ],
+      "layout": "scribe",
+      "note": "Scribe design baseline; has pen"
+    },
+    "scribe2025": {
+      "name": "Kindle Scribe (2025)",
+      "px": [
+        1980,
+        2640
+      ],
+      "dp": [
+        990,
+        1320
+      ],
+      "layout": "scribe",
+      "note": "Scribe layout; cover grid may add a column"
+    },
+    "input": "touch only, no page-turn keys; Scribe adds an EMR pen (tip = highlight, eraser end = delete own highlight)",
+    "display": "16-level grayscale e-ink; orientation portrait in v1 (Scribe landscape two-page is an open question)"
+  },
+  "color": {
+    "ink": "#000000",
+    "ink-2": "#444444",
+    "ink-3": "#666666",
+    "line": "#AAAAAA",
+    "fill": "#DDDDDD",
+    "paper": "#FFFFFF",
+    "usage": {
+      "#000000": "body text, icons, selected/pressed background, emphasis borders",
+      "#444444": "secondary text (9.7:1)",
+      "#666666": "tertiary / disabled text; lightest allowed text color (5.7:1)",
+      "#AAAAAA": "dividers, unselected outlines; never for text",
+      "#DDDDDD": "progress tracks, input backgrounds, placeholder covers",
+      "#FFFFFF": "background"
+    },
+    "rules": [
+      "Only full 16-level steps (0x00, 0x11 ... 0xFF) to avoid dithering noise.",
+      "No gradients, shadows or translucent scrims.",
+      "Selected and pressed states invert (black background, white text)."
+    ],
+    "cover-tones": [
+      "#000000",
+      "#444444",
+      "#DDDDDD",
+      "#FFFFFF"
+    ]
+  },
+  "font": {
+    "family": {
+      "ui": {
+        "name": "Source Han Sans SC / Noto Sans SC",
+        "weights": [
+          400,
+          500,
+          700
+        ],
+        "subset": true
+      },
+      "serif": {
+        "name": "Source Han Serif SC / Noto Serif SC",
+        "weights": [
+          300,
+          400,
+          500,
+          600,
+          700
+        ],
+        "use": "titles, reading body"
+      },
+      "kai": {
+        "name": "LXGW WenKai TC (OFL)",
+        "weights": [
+          300,
+          400,
+          700
+        ],
+        "use": "optional reading font"
+      }
+    },
+    "scale": {
+      "display": {
+        "family": "serif",
+        "weight": 700,
+        "size": 32,
+        "line": 40
+      },
+      "title": {
+        "family": "serif",
+        "weight": 700,
+        "size": 24,
+        "line": 32
+      },
+      "subtitle": {
+        "family": "ui",
+        "weight": 500,
+        "size": 20,
+        "line": 28
+      },
+      "body": {
+        "family": "ui",
+        "weight": 400,
+        "size": 18,
+        "line": 28
+      },
+      "secondary": {
+        "family": "ui",
+        "weight": 400,
+        "size": 16,
+        "line": 24,
+        "color": "#444444"
+      },
+      "caption": {
+        "family": "ui",
+        "weight": 400,
+        "size": 14,
+        "line": 20,
+        "note": "smallest size allowed"
+      }
+    }
+  },
+  "reader": {
+    "pw": {
+      "fontSize": {
+        "default": 22,
+        "steps": [
+          16,
+          18,
+          20,
+          22,
+          24,
+          26,
+          28,
+          30,
+          32
+        ]
+      },
+      "lineHeight": {
+        "default": "mid",
+        "tight": 1.55,
+        "mid": 1.8,
+        "loose": 2.1
+      },
+      "margin": {
+        "default": "mid",
+        "narrow": 20,
+        "mid": 32,
+        "wide": 52,
+        "note": "page header/footer follow the body margin"
+      }
+    },
+    "scribe": {
+      "fontSize": {
+        "default": 24,
+        "steps": [
+          18,
+          20,
+          22,
+          24,
+          26,
+          28,
+          30,
+          32,
+          34,
+          36,
+          38
+        ]
+      },
+      "lineHeight": {
+        "default": "mid",
+        "tight": 1.6,
+        "mid": 1.9,
+        "loose": 2.15
+      },
+      "margin": {
+        "default": "mid",
+        "narrow": 40,
+        "mid": 64,
+        "wide": 96
+      },
+      "notePanelWidth": 300
+    },
+    "fonts": {
+      "default": "song",
+      "options": {
+        "song": "Source Han Serif SC",
+        "kai": "LXGW WenKai TC",
+        "hei": "Source Han Sans SC"
+      },
+      "userFonts": "ttf/otf dropped into the app's fonts folder appear after restart"
+    },
+    "weight": {
+      "default": 400,
+      "options": [
+        300,
+        400,
+        500,
+        700
+      ]
+    },
+    "indent": {
+      "default": "2",
+      "options": [
+        "0",
+        "1",
+        "2"
+      ],
+      "unit": "em"
+    },
+    "paragraphGap": {
+      "default": "none",
+      "none": "0",
+      "small": "0.4em",
+      "big": "0.9em"
+    },
+    "justify": true,
+    "perBookOverride": "font size toggle 'only for this book'",
+    "highlight": {
+      "others": "1px dashed underline + count superscript",
+      "mine": "2px solid underline"
+    }
+  },
+  "article": {
+    "pw": {
+      "fontSize": {
+        "default": 19,
+        "steps": [
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          22,
+          24,
+          26
+        ]
+      }
+    },
+    "scribe": {
+      "fontSize": {
+        "default": 22,
+        "steps": [
+          16,
+          18,
+          20,
+          22,
+          24,
+          26,
+          28,
+          30,
+          32
+        ]
+      }
+    },
+    "lineHeight": 1.85,
+    "fonts": {
+      "default": "hei",
+      "options": [
+        "hei",
+        "song",
+        "kai"
+      ]
+    },
+    "weight": {
+      "options": [
+        300,
+        400,
+        700
+      ]
+    },
+    "paragraphGap": {
+      "default": "mid",
+      "tight": "0.5em",
+      "mid": "0.9em",
+      "loose": "1.4em"
+    },
+    "note": "Article typography is stored separately from book typography."
+  },
+  "space": {
+    "scale": [
+      4,
+      8,
+      12,
+      16,
+      20,
+      24,
+      32,
+      48
+    ],
+    "pageMargin": {
+      "pw": 20,
+      "scribe": 32
+    },
+    "minGapBetweenTargets": 8
+  },
+  "size": {
+    "touchMin": 48,
+    "icon": 24,
+    "iconStroke": 2,
+    "statusBar": 28,
+    "searchBar": 52,
+    "titleBar": 52,
+    "sortTabs": 44,
+    "bottomNav": {
+      "pw": 64,
+      "scribe": 76
+    },
+    "button": 48,
+    "chip": 36,
+    "row": {
+      "single": 56,
+      "double": 72,
+      "toc": 52
+    }
+  },
+  "border": {
+    "divider": 1,
+    "control": 2,
+    "activeTab": 3
+  },
+  "radius": {
+    "control": 6,
+    "dialog": 10,
+    "cover": 2,
+    "pill": 999
+  },
+  "layout": {
+    "pw": {
+      "libraryCover": {
+        "cols": 3,
+        "perPage": 6
+      },
+      "libraryList": {
+        "perPage": 7
+      },
+      "mpAccounts": {
+        "perPage": 7
+      },
+      "detailToc": {
+        "perPage": 7
+      },
+      "detailReviews": {
+        "perPage": 3
+      },
+      "readerToc": {
+        "perPage": 11
+      },
+      "detail": "single column, tabs 简介 / 目录 / 书评",
+      "settings": "single column: list -> sub-page (back to 我的, bottom tabs kept)"
+    },
+    "scribe": {
+      "libraryCover": {
+        "cols": 5,
+        "perPage": 15
+      },
+      "libraryList": {
+        "perPage": 10
+      },
+      "mpAccounts": {
+        "perPage": 9
+      },
+      "mpArticles": {
+        "perPage": 8
+      },
+      "detailToc": {
+        "perPage": 12
+      },
+      "detailReviews": {
+        "perPage": 5
+      },
+      "readerToc": {
+        "perPage": 16
+      },
+      "loginQr": 520,
+      "detail": "single column: header (cover left, title/progress/buttons right) on top; tabs 简介 / 目录 / 书评 / 我的笔记 below",
+      "settings": "single column: list -> sub-page (back to 我的, bottom tabs kept)"
+    },
+    "rule": "Every screen is a single column on both devices (the Scribe reader's collapsible highlight panel is the only exception); no split panes, no side tabs. Scribe uses the extra space for more rows / columns."
+  },
+  "gesture": {
+    "readerZones": {
+      "prev": [
+        0,
+        0.3
+      ],
+      "menu": [
+        0.3,
+        0.7
+      ],
+      "next": [
+        0.7,
+        1.0
+      ],
+      "options": [
+        "default",
+        "mirrored (left-hand)",
+        "swipe only"
+      ]
+    },
+    "swipeMinDistance": 64,
+    "verticalSwipe": "ignored in reader",
+    "longPress": "select text -> 划线 / 写想法 / 复制",
+    "pinch": "font size, reflow on release",
+    "edgeGuard": {
+      "default": true,
+      "widthFraction": 0.2,
+      "note": "taps in edge zones turn pages instead of opening highlights"
+    }
+  },
+  "refresh": {
+    "names": "KOReader UIManager:setDirty names; waveforms GC16 / GL16 / DU / A2",
+    "enterScreen": "flashui",
+    "tabSwitchOrListPage": "ui (a full refresh after every 6 partial updates)",
+    "pressFeedback": "fast (invert within ~100 ms, restore with ui on release)",
+    "overlayOpen": "ui (overlay rect only)",
+    "overlayClose": "flashpartial (former rect)",
+    "progressTick": "fast, at most once per second",
+    "readerPageTurn": "partial; full every N pages (N default 6; options 1 / 6 / 12 / never)",
+    "imageFirstShow": "full (GC16 for 16 gray levels)"
+  },
+  "timing": {
+    "toast": 2000,
+    "progressMinInterval": 1000,
+    "animations": "none"
+  }
+}

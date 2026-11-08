@@ -1,0 +1,7 @@
+Package: swash 0.2.10
+Published crate SHA-256: 6c2499c2d826531388872b2268718aed907a39bd785ab0dcfe57fab26283f92e
+Git revision: 7773843df0d63cd468db61a29c152b5e7a99d4ab
+The original published source and Apache-2.0 OR MIT licensing are retained.
+The RL95 physical outline-mask allocation patch applies to the current Slint Outline/Alpha producer.
+The existing resolved flate2 1.1.10 is reused for package tests, with no upgrade.
+This record is source provenance only; matching complete verification and artifact provenance are recorded separately.

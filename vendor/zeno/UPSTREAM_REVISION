@@ -1,0 +1,6 @@
+Package: zeno 0.3.3
+Published crate SHA-256: 6df3dc4292935e51816d896edcd52aa30bc297907c26167fec31e2b0c6a32524
+Git revision: 698399439f8035736d01de00cbcdc413b3976a18
+The original Apache-2.0 OR MIT source and license files are retained.
+The RL101 opt-in FillRasterBudget source patch is used by current Swash Outline/Alpha rendering.
+This source record is not an execution receipt. Matching complete verification and artifact identity are recorded separately.

@@ -1,0 +1,60 @@
+{
+  "format_version": 1,
+  "encoding": "little-endian u32 width, u32 height, then row-major grayscale u8 pixels",
+  "source_font": "NotoSansSC-Regular.otf.gz",
+  "source_font_sha256": "be3992b12717e7cfa6fa268e7b97eaf5ec2c2aaac95284aed42cbfce4dbc4d4a",
+  "font_license": "OFL-1.1; see assets/fonts/OFL.txt and assets/fonts/NOTICES.txt",
+  "tool": "Pillow 11.1.0",
+  "images": [
+    {
+      "file": "app-name.gray",
+      "translation_key": "app_name",
+      "translation_sha256": "629fb64fc6f883f745b057b1ccf17d91cb1b4a068fe81235e7d6e60f914117c9",
+      "font_size_px": 54,
+      "foreground_gray": 0,
+      "width": 472,
+      "height": 57,
+      "sha256": "1256f677459cead7396e85b387b6edc9b518f431554fe7d663e7f58d55daa455"
+    },
+    {
+      "file": "starting.gray",
+      "translation_key": "startup_starting",
+      "translation_sha256": "2bed96e2a925d15f810f155995e584caca88f3918273ad867ba643264989d9f3",
+      "font_size_px": 40,
+      "foreground_gray": 0,
+      "width": 212,
+      "height": 50,
+      "sha256": "757c7155a5461394ad9b3355bc7dd40aff9e1d3ebf6b263c096675c71c24cce5"
+    },
+    {
+      "file": "fonts.gray",
+      "translation_key": "startup_fonts",
+      "translation_sha256": "c697579a3bb81f7501f0de2d9f1c978ddb86a34c9fe1091fbf9f377d5100be44",
+      "font_size_px": 30,
+      "foreground_gray": 68,
+      "width": 192,
+      "height": 41,
+      "sha256": "8cd89324e6e976de77d845a3b4632150baf6ed59f35282a7d2cc04bf1624265d"
+    },
+    {
+      "file": "display.gray",
+      "translation_key": "startup_display",
+      "translation_sha256": "78016a950d321e6b6d242205282c6ca6ffa9975acf4c5f0603647fd0367552d8",
+      "font_size_px": 30,
+      "foreground_gray": 68,
+      "width": 192,
+      "height": 41,
+      "sha256": "83520847d2933141eab77aad778c908a8842209d632ce9ca0aed9d5eaf8f3631"
+    },
+    {
+      "file": "library.gray",
+      "translation_key": "startup_library",
+      "translation_sha256": "1434c3ace0e8cf28d611d42ad046c6807ba3dcc94c4bfec291a17977bb3211b7",
+      "font_size_px": 30,
+      "foreground_gray": 68,
+      "width": 192,
+      "height": 41,
+      "sha256": "27e720921a21a2b1d53343650ffc988a299869bf1242ec21f49a9d1292efd868"
+    }
+  ]
+}

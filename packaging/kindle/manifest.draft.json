@@ -1,0 +1,10 @@
+{
+  "manifest_version": 2,
+  "id": "weread",
+  "name": "WeRead for Kindle",
+  "author": "weread contributors",
+  "description": "Independent Rust and Slint WeRead client; unreleased packaging draft",
+  "version": [0, 2, 0],
+  "dependencies": [],
+  "supported_platforms": ["kindlehf"]
+}

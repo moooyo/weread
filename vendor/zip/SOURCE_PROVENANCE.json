@@ -1,0 +1,27 @@
+{
+  "package": "zip",
+  "version": "4.6.1",
+  "scope": "Source-integration record only; same resolved package/version, no application execution or projectlicense choice",
+  "patch": "Existing boundedconstructors/readwork/extra length contract plus R30 retainedtimestamp/NTFS extra-record and requestedcapacity gate",
+  "limited_review": "R30 fixed sixpath/7case independent source review0extra; no build/test or device claims",
+  "original_source": "Original published source/revision/license are retained as recorded in UPSTREAM_REVISION/PATCHES",
+  "source_overlay": "r30-zip-extra-overlay",
+  "overlay_manifest_sha256": "f8f21a42fbcc5e8f69666175a67f0c4ff5646a435591764647243c4dd76bc589",
+  "modified_files": [
+    {
+      "path": "src/read.rs",
+      "sha256": "40e60bd8ada213d03292da2e7444fa04313695a36d54757142c8ce37821166d3",
+      "bytes": 95066
+    },
+    {
+      "path": "src/read/metadata_retention.rs",
+      "sha256": "b9e47d8c9d8cbc1896cb6c70e55946f14e1c0a6886f9779241c1d5fad075b6c9",
+      "bytes": 10320
+    },
+    {
+      "path": "PATCHES.md",
+      "sha256": "cefd976e4774bb2065ccae04f68d2af52ea4c53dc6e40436e099706e2fee8724",
+      "bytes": 10937
+    }
+  ]
+}

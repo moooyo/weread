@@ -1,0 +1,183 @@
+import { Theme } from "theme.slint";
+import { Strings } from "strings.slint";
+import { ActionButton, IconButton, Icon, RadioChoiceRow, ProgressTrack } from "widgets.slint";
+import { LibraryScreen, LibraryModel, DetailScreen, DetailModel } from "bookstore.slint";
+import { LoginScreen, LoginModel, SearchScreen, SearchModel } from "auth.slint";
+import { ReaderScreen, ReaderModel, ArticleScreen, ArticleModel } from "reader.slint";
+import { PublicationScreen, StatisticsScreen, SettingsScreen, AuxiliaryModel } from "auxiliary.slint";
+
+export { Theme } from "theme.slint";
+export { SegmentedOption } from "widgets.slint";
+export { LibraryModel, DetailModel, BookTile, DetailChapter, DetailReview } from "bookstore.slint";
+export { LoginModel, SearchModel, SearchResult, RecentSearchChip } from "auth.slint";
+export { ReaderModel, ArticleModel, ReaderLine, ReaderMark, ReaderImage, ReaderChapter, ThoughtEntry, ReaderEntry, ReaderFont, ArticleBlock } from "reader.slint";
+export { AuxiliaryModel, PublicationRow, StatisticMetric, StatisticBar, RankingEntry, PreferenceEntry, SettingEntry } from "auxiliary.slint";
+
+export global ShellModel {
+    in-out property <string> route: "login";
+    in-out property <string> active-tab: "library";
+    in-out property <string> clock;
+    in-out property <string> network-label;
+    in-out property <string> battery-label;
+    in-out property <bool> online: true;
+    in-out property <bool> demo;
+    in-out property <string> toast;
+    in-out property <string> task-label;
+    in-out property <string> dialog-kind;
+    in-out property <string> dialog-title;
+    in-out property <string> dialog-body;
+    in-out property <string> dialog-summary;
+    in-out property <string> dialog-size;
+    in-out property <string> dialog-chapter;
+    in-out property <string> dialog-primary;
+    in-out property <string> dialog-secondary;
+    in-out property <bool> dialog-destructive;
+    in-out property <bool> dialog-images;
+    in-out property <float> dialog-progress;
+    in-out property <string> dialog-input;
+    in-out property <int> selection-count;
+    in-out property <bool> can-download;
+    callback event(string, string);
+}
+
+component NavigationItem inherits Rectangle {
+    horizontal-stretch: 1;
+    in property <string> text;
+    in property <string> icon;
+    in property <bool> active;
+    callback clicked();
+    accessible-role: tab;
+    accessible-label: root.text;
+    accessible-item-selected: root.active;
+    VerticalLayout {
+        alignment: center; spacing: 3px;
+        Rectangle {
+            height: 30px;
+            Rectangle {
+                x: (parent.width - 56px) / 2; width: 56px; height: 30px; border-radius: 15px;
+                background: root.active || touch.pressed ? Theme.ink : Theme.paper;
+                Icon { kind: root.icon; x: 16px; y: 3px; inverted: root.active || touch.pressed; }
+            }
+        }
+        Text { text: root.text; color: root.active ? Theme.ink : Theme.secondary; font-family: Theme.ui-font; font-size: 14px; font-weight: root.active ? 700 : 400; horizontal-alignment: center; }
+    }
+    touch := TouchArea { clicked => { root.clicked(); } }
+}
+
+export component AppWindow inherits Window {
+    title: Strings.app-name;
+    preferred-width: 632px;
+    preferred-height: 840px;
+    min-width: 618px;
+    min-height: 824px;
+    background: Theme.paper;
+    default-font-family: Theme.ui-font;
+    default-font-size: 18px;
+    property <bool> reading: ShellModel.route == "reader" || ShellModel.route == "article";
+    property <bool> show-navigation: ShellModel.route == "library" || ShellModel.route == "mp" || ShellModel.route == "stats" || ShellModel.route == "settings";
+    VerticalLayout {
+        spacing: 0px;
+        if !root.reading: Rectangle {
+            height: 28px;
+            HorizontalLayout {
+                padding-left: Theme.page-margin; padding-right: Theme.page-margin; spacing: 8px;
+                Text { text: ShellModel.clock; font-family: Theme.ui-font; font-size: 14px; font-weight: 500; vertical-alignment: center; }
+                Rectangle { horizontal-stretch: 1; }
+                if ShellModel.demo: Text { text: Strings.demo-notice; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; vertical-alignment: center; }
+                if ShellModel.online: Icon { kind: "wifi"; width: 20px; height: 20px; }
+                if !ShellModel.online: Text { text: Strings.offline; font-family: Theme.ui-font; font-size: 14px; vertical-alignment: center; }
+                if ShellModel.battery-label != "": Icon { kind: "battery"; width: 22px; height: 18px; }
+                Text { text: ShellModel.battery-label; font-family: Theme.ui-font; font-size: 14px; vertical-alignment: center; }
+            }
+        }
+        Rectangle {
+            vertical-stretch: 1;
+            clip: true;
+            if ShellModel.route == "login": LoginScreen { }
+            if ShellModel.route == "library": LibraryScreen { }
+            if ShellModel.route == "search": SearchScreen { }
+            if ShellModel.route == "detail": DetailScreen { }
+            if ShellModel.route == "reader": ReaderScreen { }
+            if ShellModel.route == "article": ArticleScreen { }
+            if ShellModel.route == "mp": PublicationScreen { }
+            if ShellModel.route == "stats": StatisticsScreen { }
+            if ShellModel.route == "settings": SettingsScreen { }
+        }
+        if root.show-navigation && !(ShellModel.route == "library" && LibraryModel.selecting): Rectangle {
+            height: Theme.nav-height;
+            Rectangle { x: 0px; y: 0px; height: 1px; background: Theme.ink; }
+            HorizontalLayout {
+                spacing: 0px;
+                NavigationItem { text: Strings.library; icon: "book"; active: ShellModel.active-tab == "library"; clicked => { ShellModel.event("tab", "library"); } }
+                NavigationItem { text: Strings.publications; icon: "publication"; active: ShellModel.active-tab == "mp"; clicked => { ShellModel.event("tab", "mp"); } }
+                NavigationItem { text: Strings.statistics; icon: "stats"; active: ShellModel.active-tab == "stats"; clicked => { ShellModel.event("tab", "stats"); } }
+                NavigationItem { text: Strings.settings; icon: "user"; active: ShellModel.active-tab == "settings"; clicked => { ShellModel.event("tab", "settings"); } }
+            }
+        }
+        if ShellModel.route == "library" && LibraryModel.selecting: Rectangle {
+            height: Theme.nav-height;
+            Rectangle { x: 0px; y: 0px; height: 2px; background: Theme.ink; }
+            HorizontalLayout {
+                padding-left: Theme.page-margin; padding-right: Theme.page-margin; spacing: 12px;
+                Text { text: Strings.selected-book-label + ShellModel.selection-count; font-family: Theme.ui-font; font-size: 18px; vertical-alignment: center; horizontal-stretch: 1; }
+                ActionButton { text: Strings.remove; enabled: ShellModel.selection-count > 0; clicked => { ShellModel.event("remove-selected", ""); } }
+                ActionButton { text: Strings.download; primary: true; enabled: ShellModel.can-download && ShellModel.selection-count > 0; clicked => { ShellModel.event("download-selected", ""); } }
+            }
+        }
+    }
+    if ShellModel.toast != "": Rectangle {
+        x: Theme.page-margin; y: root.reading ? 20px : 32px; width: parent.width - Theme.page-margin * 2; height: 52px;
+        border-width: 2px; border-color: Theme.ink; border-radius: 6px; background: Theme.paper;
+        Text { x: 16px; width: parent.width - 32px; text: ShellModel.toast; font-family: Theme.ui-font; font-size: 16px; vertical-alignment: center; overflow: elide; }
+    }
+    if ShellModel.dialog-kind != "": Rectangle {
+        background: transparent;
+        TouchArea { clicked => { ShellModel.event("dialog-outside", ""); } }
+        Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: ShellModel.dialog-kind == "more" ? parent.height - self.height : (parent.height - self.height) / 2;
+            width: ShellModel.dialog-kind == "more" ? parent.width : min(parent.width - Theme.page-margin * 2, Theme.scribe ? 580px : parent.width);
+            height: min(parent.height - 80px, dialog-content.preferred-height + 48px);
+            background: Theme.paper; border-width: ShellModel.dialog-kind == "more" ? 0px : 2px; border-color: Theme.ink; border-radius: ShellModel.dialog-kind == "more" ? 0px : 10px;
+            TouchArea { }
+            dialog-content := VerticalLayout {
+                padding: 24px; spacing: 20px;
+                Text { text: ShellModel.dialog-title; font-family: Theme.serif-font; font-size: 24px; font-weight: 700; wrap: word-wrap; }
+                if ShellModel.dialog-body != "": Text { text: ShellModel.dialog-body; font-family: Theme.ui-font; font-size: 17px; color: Theme.secondary; wrap: word-wrap; }
+                if ShellModel.dialog-kind == "download": VerticalLayout {
+                    spacing: 0px;
+                    if ShellModel.dialog-summary != "": Text { text: ShellModel.dialog-summary; font-family: Theme.ui-font; font-size: 17px; wrap: word-wrap; }
+                    if ShellModel.dialog-size != "": Text { text: ShellModel.dialog-size; color: Theme.secondary; font-family: Theme.ui-font; font-size: 14px; wrap: word-wrap; }
+                    Rectangle { height: 1px; background: Theme.line; }
+                    RadioChoiceRow { text: Strings.text-only; selected: !ShellModel.dialog-images; clicked => { ShellModel.event("dialog-images", "false"); } }
+                    RadioChoiceRow { text: Strings.text-with-images; selected: ShellModel.dialog-images; clicked => { ShellModel.event("dialog-images", "true"); } }
+                    Text { text: Strings.download-awake; color: Theme.secondary; font-family: Theme.ui-font; font-size: 14px; wrap: word-wrap; }
+                }
+                if ShellModel.dialog-kind == "downloading": VerticalLayout {
+                    spacing: 12px;
+                    Text { text: ShellModel.dialog-chapter; font-family: Theme.ui-font; font-size: 17px; wrap: word-wrap; }
+                    Text { text: ShellModel.task-label; font-family: Theme.ui-font; font-size: 17px; font-weight: 700; }
+                    ProgressTrack { value: ShellModel.dialog-progress; height: 12px; }
+                }
+                if ShellModel.dialog-kind == "jump": Rectangle {
+                    height: 48px; border-width: 2px; border-color: Theme.ink; border-radius: 6px;
+                    TextInput { x: 12px; width: parent.width - 24px; text <=> ShellModel.dialog-input; input-type: number; font-family: Theme.ui-font; font-size: 20px; vertical-alignment: center; edited => { ShellModel.event("dialog-input", self.text); } accepted => { ShellModel.event("dialog-primary", ""); } }
+                }
+                if ShellModel.dialog-kind == "more": VerticalLayout {
+                    spacing: 8px;
+                    ActionButton { text: Strings.refresh-book; quiet: true; height: 56px; clicked => { ShellModel.event("more-refresh", ""); } }
+                    ActionButton { text: Strings.import-book; quiet: true; height: 56px; clicked => { ShellModel.event("more-import", ""); } }
+                    ActionButton { text: Strings.clear-book-cache; quiet: true; height: 56px; clicked => { ShellModel.event("more-clear", ""); } }
+                    ActionButton { text: Strings.remove; quiet: true; height: 56px; clicked => { ShellModel.event("more-remove", ""); } }
+                }
+                HorizontalLayout {
+                    spacing: 12px;
+                    if ShellModel.dialog-secondary != "": ActionButton { text: ShellModel.dialog-secondary; clicked => { ShellModel.event("dialog-secondary", ""); } }
+                    Rectangle { horizontal-stretch: 1; }
+                    if ShellModel.dialog-primary != "": ActionButton { text: ShellModel.dialog-primary; primary: true; clicked => { ShellModel.event("dialog-primary", ""); } }
+                }
+            }
+            if ShellModel.dialog-kind == "more": Rectangle { x: 0px; y: 0px; width: parent.width; height: 2px; background: Theme.ink; }
+        }
+    }
+}

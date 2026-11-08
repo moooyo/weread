@@ -17,6 +17,7 @@
 /target/
 /dist/
 /build/
+/artifacts/
 
 # Editor and operating-system files
 .idea/

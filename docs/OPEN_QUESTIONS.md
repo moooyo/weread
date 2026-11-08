@@ -22,6 +22,7 @@ These are unresolved items, not reasons to change the accepted independent-clien
 - Which Slint/backend revision supports Chinese composition and search input on those devices?
 - What are the confirmed touch, scaling, orientation, refresh, and sleep behaviors?
 - How will the application safely hand control to a reader and restore system state?
+- Investigate the single first-start gzip trailer mismatch on emulator candidate `f603f71974bea950fd115d23ea4ae84ad76df181d817576f04980d1f9b2a8b92`. The identical file passed on retry, all source gzip checks passed, and the next immutable candidate completed six startup/interaction cases without recurrence. Preserve integrity checks; FUSE/mapping/cache or emulator transience remains a hypothesis, not a confirmed cause. See [the emulator record](EMULATOR.md).
 
 ## UI specification
 
@@ -41,4 +42,4 @@ The earlier UI principles and size suggestions are proposals. They are not a com
 
 ## Current evidence limitation
 
-The project has no application implementation, upstream API contract, device test report, or verified build. Public community test reports and static source inspection are useful references, but they do not establish this application's compatibility or feature availability.
+The original planning questions above predate implementation. The user subsequently authorized design handoff v0.2; application code, source-derived protocol contracts, remote desktop verification, and an ARM development build are now present. See [Implementation status](IMPLEMENTATION_STATUS.md) and [Verification](VERIFICATION.md) for current evidence. Public community reports and our own desktop/cross-compilation results still do not establish physical-device compatibility or live-account feature availability. Exact firmware acceptance, release licensing, and unsupported hardware capabilities remain unresolved.

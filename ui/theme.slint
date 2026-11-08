@@ -1,0 +1,15 @@
+export global Theme {
+    callback refresh(string);
+    in-out property <bool> scribe: false;
+    out property <color> ink: #000000;
+    out property <color> secondary: #444444;
+    out property <color> muted: #666666;
+    out property <color> line: #aaaaaa;
+    out property <color> fill: #dddddd;
+    out property <color> paper: #ffffff;
+    out property <length> page-margin: scribe ? 32px : 20px;
+    out property <length> nav-height: scribe ? 76px : 64px;
+    in-out property <string> ui-font: "Noto Sans CJK SC";
+    in-out property <string> serif-font: "Noto Serif CJK SC";
+    out property <length> touch-size: 48px;
+}

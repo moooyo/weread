@@ -1,0 +1,1559 @@
+import { Theme } from "theme.slint";
+import { Strings } from "strings.slint";
+import { ActionButton, IconButton, Icon, PageBar, Choice, ToggleRow, ProgressTrack, ScaleControl, SegmentedControl, SegmentedOption, DashedOutline, SwipeTouchArea } from "widgets.slint";
+
+export struct ReaderMark {
+    id: string,
+    x: float,
+    width: float,
+    mine: bool,
+    selected: bool,
+    count: int,
+}
+
+export struct ReaderLine {
+    text: string,
+    start: int,
+    end: int,
+    indent: bool,
+    highlight: bool,
+    mine: bool,
+    count: int,
+    letter-spacing: float,
+    gap-after: float,
+    paragraph-end: bool,
+    y: float,
+    height: float,
+    marks: [ReaderMark],
+}
+
+export struct ReaderFont {
+    id: string,
+    label: string,
+    family: string,
+    available: bool,
+}
+
+export struct ReaderImage {
+    id: string,
+    picture: image,
+    loaded: bool,
+    y: float,
+    height: float,
+    width: float,
+    caption: string,
+}
+
+export struct ReaderChapter {
+    id: string,
+    title: string,
+    meta: string,
+    cached: bool,
+    current: bool,
+}
+
+export struct ThoughtEntry {
+    id: string,
+    quote: string,
+    quote-lines: [string],
+    meta: string,
+    body: string,
+    mine: bool,
+}
+
+export struct ReaderEntry {
+    id: string,
+    title: string,
+    subtitle: string,
+    kind: string,
+    chapter: string,
+    date: string,
+    page-label: string,
+    body: string,
+    cached: bool,
+}
+
+export struct ArticleBlock {
+    id: string,
+    kind: string,
+    text: string,
+    meta: string,
+    picture: image,
+    loaded: bool,
+    height: int,
+    frame-height: float,
+    caption-height: float,
+    caption-gap: float,
+    letter-spacing: float,
+    inset-top: float,
+    inset-bottom: float,
+    inset-horizontal: float,
+    content-height: float,
+}
+
+export global ReaderModel {
+    callback event(string, string);
+    in-out property <string> title;
+    in-out property <string> chapter-title;
+    in-out property <string> chapter-meta;
+    in-out property <string> author;
+    in-out property <string> clock;
+    in-out property <string> footer;
+    in-out property <string> status;
+    in-out property <string> access-label;
+    in-out property <string> access-hint;
+    in-out property <string> access-action;
+    in-out property <bool> access-notice;
+    in-out property <float> access-offset;
+    in-out property <[ReaderLine]> lines;
+    in-out property <[ReaderImage]> images;
+    in-out property <bool> show-heading: true;
+    in-out property <string> font-family: Theme.serif-font;
+    in-out property <[ReaderFont]> fonts: [
+        {id: "song", label: Strings.song-font, family: Theme.serif-font, available: true},
+        {id: "kai", label: Strings.kai-font, family: "LXGW WenKai", available: false},
+        {id: "hei", label: Strings.hei-font, family: Theme.ui-font, available: true}
+    ];
+    in-out property <int> font-size: 22;
+    in-out property <int> weight: 400;
+    in-out property <float> line-height: 1.8;
+    in-out property <int> margin: 32;
+    in-out property <int> page: 1;
+    in-out property <int> page-count: 1;
+    in-out property <float> progress;
+    in-out property <bool> menu;
+    in-out property <string> tool: "progress";
+    in-out property <string> subtool;
+    in-out property <bool> notes-panel;
+    in-out property <bool> thought-open;
+    in-out property <string> thought-title;
+    in-out property <string> thought-meta;
+    in-out property <string> note-id;
+    in-out property <[ThoughtEntry]> thoughts;
+    in-out property <int> thought-page: 1;
+    in-out property <int> thought-pages: 1;
+    in-out property <string> thought-position: "center";
+    in-out property <int> thought-height: 62;
+    in-out property <bool> toc-open;
+    in-out property <string> toc-tab: "toc";
+    in-out property <[ReaderChapter]> chapters;
+    in-out property <[ReaderEntry]> entries;
+    in-out property <int> chapter-count;
+    in-out property <int> mark-count;
+    in-out property <int> note-count;
+    in-out property <int> thought-count;
+    in-out property <int> chapter-page: 1;
+    in-out property <int> chapter-pages: 1;
+    in-out property <string> chapter-summary;
+    in-out property <bool> bookmarked;
+    in-out property <bool> book-only: true;
+    in-out property <bool> popular: true;
+    in-out property <bool> mine: true;
+    in-out property <string> margin-choice: "mid";
+    in-out property <string> line-choice: "mid";
+    in-out property <string> font-choice: "song";
+    in-out property <string> font-label;
+    in-out property <string> indent-choice: "2";
+    in-out property <string> gap-choice: "none";
+    in-out property <string> tap-mode: "default";
+    in-out property <string> refresh-choice: "6";
+    in-out property <bool> justify: true;
+    in-out property <int> brightness;
+    in-out property <int> warmth;
+    in-out property <bool> hardware-light;
+    in-out property <bool> hardware-warmth;
+    in-out property <bool> brightness-known;
+    in-out property <bool> warmth-known;
+    in-out property <bool> night-supported;
+    in-out property <bool> native-theme-sync;
+    in-out property <bool> night;
+    in-out property <bool> pen-enabled;
+    in-out property <bool> pen-supported;
+    in-out property <bool> sync-conflict;
+    in-out property <string> cloud-summary;
+    in-out property <string> local-summary;
+    in-out property <bool> selection-open;
+    in-out property <string> selection-text;
+    in-out property <int> press-generation;
+    in-out property <bool> writing-thought;
+    in-out property <string> thought-draft;
+    in-out property <bool> can-download: true;
+    in-out property <bool> download-busy;
+}
+
+export global ArticleModel {
+    callback event(string, string);
+    in-out property <string> title;
+    in-out property <string> account;
+    in-out property <string> account-initial;
+    in-out property <string> meta;
+    in-out property <string> clock;
+    in-out property <string> footer;
+    in-out property <string> status;
+    in-out property <[ArticleBlock]> blocks;
+    in-out property <string> font-family: Theme.ui-font;
+    in-out property <[ReaderFont]> fonts;
+    in-out property <int> font-size: 19;
+    in-out property <int> weight: 400;
+    in-out property <float> line-height: 1.85;
+    in-out property <string> font-choice: "hei";
+    in-out property <string> gap-choice: "mid";
+    in-out property <int> page: 1;
+    in-out property <int> page-count: 1;
+    in-out property <bool> menu;
+    in-out property <string> tool;
+    in-out property <bool> starred;
+    in-out property <bool> auto-images;
+    in-out property <bool> list-open;
+    in-out property <[ReaderEntry]> articles;
+    in-out property <string> list-summary;
+    in-out property <string> next-title;
+    in-out property <string> image-summary;
+    in-out property <int> list-page: 1;
+    in-out property <int> list-pages: 1;
+    in-out property <bool> qr-open;
+    in-out property <image> qr;
+    in-out property <bool> has-next;
+    in-out property <string> current-id;
+    in-out property <bool> can-download: true;
+    in-out property <bool> download-busy;
+}
+
+component OptionRow inherits Rectangle {
+    in property <string> label;
+    in property <string> current;
+    in property <[SegmentedOption]> options;
+    callback selected(string);
+    height: 56px;
+    HorizontalLayout {
+        spacing: 12px;
+        Text { text: root.label; width: 76px; font-family: Theme.ui-font; font-size: 16px; color: Theme.secondary; vertical-alignment: center; }
+        SegmentedControl {
+            options: root.options;
+            value: root.current;
+            radius: 24px;
+            horizontal-stretch: 1;
+            chosen(value) => { root.selected(value); }
+        }
+    }
+}
+
+component OptionGroup inherits Rectangle {
+    in property <string> label;
+    in property <string> current;
+    in property <[SegmentedOption]> options;
+    callback selected(string);
+    height: 76px;
+    VerticalLayout {
+        spacing: 8px;
+        Text { text: root.label; height: 20px; font-family: Theme.ui-font; font-size: 15px; color: Theme.secondary; }
+        SegmentedControl { options: root.options; value: root.current; radius: 24px; chosen(value) => { root.selected(value); } }
+    }
+}
+
+component ToolButton inherits Rectangle {
+    in property <string> label;
+    in property <string> icon;
+    in property <bool> selected;
+    in property <bool> enabled: true;
+    callback clicked();
+    min-width: 48px;
+    height: Theme.scribe ? 76px : 64px;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-enabled: root.enabled;
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: 8px;
+        width: Theme.scribe ? 64px : 52px; height: Theme.scribe ? 34px : 30px; border-radius: Theme.scribe ? 17px : 15px;
+        background: root.selected || touch.pressed ? Theme.ink : Theme.paper;
+        if root.icon != "type": Icon { x: (parent.width - 24px) / 2; y: (parent.height - 24px) / 2; kind: root.icon; inverted: root.selected || touch.pressed; }
+        if root.icon == "type": Text { text: "Aa"; color: root.selected || touch.pressed ? Theme.paper : Theme.ink; font-family: Theme.serif-font; font-size: 22px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+    }
+    Text { x: 0px; y: Theme.scribe ? 44px : 38px; width: parent.width; height: parent.height - self.y; text: root.label; color: root.enabled ? Theme.ink : Theme.muted; font-family: Theme.ui-font; font-size: Theme.scribe ? 16px : 14px; font-weight: root.selected ? 700 : 400; horizontal-alignment: center; vertical-alignment: center; }
+    touch := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
+}
+
+component DashedUnderline inherits Rectangle {
+    in property <color> line-color: Theme.ink;
+    height: 1px;
+    clip: true;
+    for dash in 128: Rectangle {
+        x: dash * 10px;
+        width: 6px;
+        height: 1px;
+        background: root.line-color;
+    }
+}
+
+component ThoughtCard inherits Rectangle {
+    in property <ThoughtEntry> entry;
+    in property <bool> side-panel: Theme.scribe;
+    callback clicked();
+    height: root.entry.quote == "" ? (Theme.scribe ? 112px : 104px) : (Theme.scribe ? 164px : 144px);
+    background: touch.pressed ? Theme.ink : Theme.paper;
+    VerticalLayout {
+        padding-left: root.side-panel ? 24px : 16px;
+        padding-right: root.side-panel ? 20px : 16px;
+        padding-top: 16px;
+        padding-bottom: 16px;
+        spacing: 6px;
+        Text { text: root.entry.meta; font-family: Theme.ui-font; font-size: 14px; color: touch.pressed ? Theme.paper : Theme.secondary; overflow: elide; }
+        if root.entry.quote != "": VerticalLayout {
+            spacing: 0px;
+            for line in root.entry.quote-lines: Rectangle {
+                height: Theme.scribe ? 27px : 28px;
+                quote-text := Text { x: 0px; y: 0px; width: parent.width; height: parent.height - 4px; text: line; font-family: Theme.serif-font; font-size: Theme.scribe ? 17px : 18px; font-weight: 600; color: touch.pressed ? Theme.paper : Theme.ink; overflow: elide; }
+                Rectangle {
+                    x: 0px; y: parent.height - 2px;
+                    width: min(parent.width, quote-text.preferred-width);
+                    height: root.entry.mine ? 2px : 1px;
+                    if root.entry.mine: Rectangle { background: touch.pressed ? Theme.paper : Theme.ink; }
+                    if !root.entry.mine: DashedUnderline { line-color: touch.pressed ? Theme.paper : Theme.ink; }
+                }
+            }
+        }
+        if root.entry.body != "": Text { text: root.entry.body; font-family: Theme.ui-font; font-size: root.entry.quote == "" ? 16px : Theme.scribe ? 15px : 16px; color: touch.pressed ? Theme.paper : Theme.ink; wrap: word-wrap; overflow: elide; vertical-stretch: 1; }
+        if root.entry.body == "": Rectangle { vertical-stretch: 1; }
+    }
+    Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
+    touch := TouchArea { clicked => { root.clicked(); } }
+}
+
+component FontPicker inherits Rectangle {
+    property <int> page: 0;
+    property <int> per-page: 3;
+    property <int> page-count: max(1, ceil(ReaderModel.fonts.length / root.per-page));
+    height: (Theme.scribe ? 96px : min(ReaderModel.fonts.length, root.per-page) * 72px) + (root.page-count > 1 ? 112px : 56px);
+    VerticalLayout {
+        spacing: 12px;
+        Rectangle {
+            height: Theme.scribe ? 96px : min(ReaderModel.fonts.length, root.per-page) * 72px;
+            clip: true;
+            for option[index] in ReaderModel.fonts: Rectangle {
+                property <int> slot: index - root.page * root.per-page;
+                x: Theme.scribe ? self.slot * ((parent.width - 28px) / 3 + 14px) : 0px;
+                y: Theme.scribe ? 0px : self.slot * 72px;
+                width: Theme.scribe ? (parent.width - 28px) / 3 : parent.width;
+                height: Theme.scribe ? 96px : 72px;
+                visible: self.slot >= 0 && self.slot < root.per-page;
+                background: font-touch.pressed ? Theme.ink : Theme.paper;
+                border-width: Theme.scribe ? ReaderModel.font-choice == option.id ? 2px : 1px : 0px;
+                border-color: ReaderModel.font-choice == option.id ? Theme.ink : Theme.line;
+                border-radius: Theme.scribe ? 8px : 0px;
+                accessible-role: button;
+                accessible-label: option.label;
+                accessible-enabled: option.available;
+                VerticalLayout {
+                    padding-left: Theme.scribe ? 14px : 0px; padding-right: Theme.scribe ? 14px : 0px;
+                    padding-top: 12px; padding-bottom: 12px;
+                    spacing: 4px;
+                    HorizontalLayout {
+                        Text { text: option.label; font-family: option.family; font-size: Theme.scribe ? 20px : 19px; font-weight: 600; color: !option.available ? Theme.muted : font-touch.pressed ? Theme.paper : Theme.ink; overflow: elide; horizontal-stretch: 1; }
+                        if ReaderModel.font-choice == option.id: Icon { kind: "check"; inverted: font-touch.pressed; }
+                    }
+                    Text { text: Strings.font-sample; font-family: option.family; font-size: Theme.scribe ? 16px : 15px; color: !option.available ? Theme.muted : font-touch.pressed ? Theme.paper : Theme.secondary; overflow: elide; }
+                }
+                if !Theme.scribe: Rectangle { x: 0px; y: parent.height - 1px; width: parent.width; height: 1px; background: Theme.line; }
+                font-touch := TouchArea { enabled: option.available && parent.slot >= 0 && parent.slot < root.per-page; clicked => { ReaderModel.event("reader.font", option.id); } }
+            }
+        }
+        if root.page-count > 1: PageBar {
+            page: root.page + 1;
+            count: root.page-count;
+            turn(value) => { root.page = clamp(root.page + value, 0, root.page-count - 1); }
+        }
+        Text { text: Strings.font-import-hint; height: 44px; font-family: Theme.ui-font; font-size: Theme.scribe ? 15px : 14px; color: Theme.secondary; wrap: word-wrap; }
+    }
+}
+
+component FontSegments inherits Rectangle {
+    in property <[ReaderFont]> fonts;
+    in property <string> current;
+    in property <bool> article-mode;
+    callback selected(string);
+    height: 48px;
+    border-radius: 24px;
+    border-width: 1px;
+    border-color: Theme.ink;
+    background: Theme.paper;
+    clip: true;
+    for option[index] in root.fonts: Rectangle {
+        property <int> slot: root.article-mode ? (option.id == "hei" ? 0 : option.id == "song" ? 1 : option.id == "kai" ? 2 : -1) : index;
+        x: self.slot * parent.width / max(1, min(3, root.fonts.length));
+        y: 1px;
+        width: parent.width / max(1, min(3, root.fonts.length));
+        height: parent.height - 2px;
+        visible: self.slot >= 0 && self.slot < 3;
+        background: transparent;
+        accessible-role: button;
+        accessible-label: option.label;
+        accessible-enabled: option.available;
+        // Round the outside edges without rounding the internal segment boundaries.
+        if option.available && (root.current == option.id || font-touch.pressed): Rectangle {
+            x: 0px; y: 0px; width: parent.width; height: parent.height;
+            border-radius: parent.slot == 0 || parent.slot == min(3, root.fonts.length) - 1 ? parent.height / 2 : 0px;
+            background: Theme.ink;
+        }
+        if option.available && (root.current == option.id || font-touch.pressed) && (root.article-mode ? option.id == "hei" : index == 0) && min(3, root.fonts.length) > 1: Rectangle {
+            x: parent.width / 2; y: 0px; width: parent.width / 2; height: parent.height;
+            background: Theme.ink;
+        }
+        if option.available && (root.current == option.id || font-touch.pressed) && (root.article-mode ? option.id == "kai" : index == min(3, root.fonts.length) - 1) && min(3, root.fonts.length) > 1: Rectangle {
+            x: 0px; y: 0px; width: parent.width / 2; height: parent.height;
+            background: Theme.ink;
+        }
+        Text { text: option.id == "song" ? Strings.song-font-short : option.id == "kai" ? Strings.kai-font-short : option.id == "hei" ? Strings.hei-font-short : option.label; font-family: option.family; font-size: 16px; font-weight: root.current == option.id ? 700 : 400; color: !option.available ? Theme.muted : root.current == option.id || font-touch.pressed ? Theme.paper : Theme.ink; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
+        font-touch := TouchArea { enabled: option.available && parent.slot >= 0 && parent.slot < 3; clicked => { root.selected(option.id); } }
+    }
+}
+
+component SubtoolLink inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+    callback clicked();
+    height: Theme.scribe ? 56px : 52px;
+    border-width: 1px;
+    border-color: Theme.ink;
+    border-radius: 8px;
+    background: touch.pressed ? Theme.ink : Theme.paper;
+    accessible-role: button;
+    accessible-label: root.label + " " + root.value;
+    if Theme.scribe: HorizontalLayout {
+        padding-left: 12px; padding-right: 12px; spacing: 8px;
+        Text { text: root.label; font-family: Theme.ui-font; font-size: 16px; font-weight: 700; color: touch.pressed ? Theme.paper : Theme.ink; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+        Text { text: root.value + " ›"; font-family: Theme.ui-font; font-size: 14px; color: touch.pressed ? Theme.paper : Theme.secondary; vertical-alignment: center; overflow: elide; }
+    }
+    if !Theme.scribe: VerticalLayout {
+        padding: 4px; alignment: center; spacing: 1px;
+        Text { text: root.label + " ›"; font-family: Theme.ui-font; font-size: 15px; font-weight: 700; color: touch.pressed ? Theme.paper : Theme.ink; horizontal-alignment: center; overflow: elide; }
+        Text { text: root.value; font-family: Theme.ui-font; font-size: 13px; color: touch.pressed ? Theme.paper : Theme.secondary; horizontal-alignment: center; overflow: elide; }
+    }
+    touch := TouchArea { clicked => { root.clicked(); } }
+}
+
+component TurnCard inherits Rectangle {
+    in property <string> label;
+    in property <string> description;
+    in property <bool> selected;
+    callback clicked();
+    height: Theme.scribe ? 64px : 48px;
+    border-width: root.selected ? 2px : 1px;
+    border-color: root.selected ? Theme.ink : Theme.line;
+    border-radius: 8px;
+    background: root.selected || touch.pressed ? Theme.ink : Theme.paper;
+    accessible-role: button;
+    accessible-label: root.label + " " + root.description;
+    if Theme.scribe: VerticalLayout {
+        padding-left: 12px; padding-right: 12px; alignment: center; spacing: 2px;
+        Text { text: root.label; font-family: Theme.ui-font; font-size: 16px; font-weight: root.selected ? 700 : 400; color: root.selected || touch.pressed ? Theme.paper : Theme.ink; overflow: elide; }
+        Text { text: root.description; font-family: Theme.ui-font; font-size: 14px; color: root.selected || touch.pressed ? Theme.paper : Theme.secondary; overflow: elide; }
+    }
+    if !Theme.scribe: HorizontalLayout {
+        padding-left: 14px; padding-right: 14px; spacing: 8px;
+        Text { text: root.label; font-family: Theme.ui-font; font-size: 15px; font-weight: root.selected ? 700 : 400; color: root.selected || touch.pressed ? Theme.paper : Theme.ink; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+        Text { text: root.description; font-family: Theme.ui-font; font-size: 14px; color: root.selected || touch.pressed ? Theme.paper : Theme.secondary; vertical-alignment: center; overflow: elide; }
+    }
+    touch := TouchArea { clicked => { root.clicked(); } }
+}
+
+component PageTurnChoices inherits Rectangle {
+    height: Theme.scribe ? 64px : 160px;
+    if Theme.scribe: HorizontalLayout {
+        spacing: 12px;
+        for option in [{id: "default", label: Strings.left-prev-center-menu-right-next, description: Strings.default-sort}, {id: "mirrored", label: Strings.mirrored, description: Strings.left-handed}, {id: "swipe", label: Strings.swipe-only, description: Strings.tap-opens-menu}]: TurnCard {
+            label: option.label; description: option.description; selected: ReaderModel.tap-mode == option.id;
+            clicked => { ReaderModel.event("reader.tap-mode", option.id); }
+        }
+    }
+    if !Theme.scribe: VerticalLayout {
+        spacing: 8px;
+        for option in [{id: "default", label: Strings.left-prev-center-menu-right-next, description: Strings.default-sort}, {id: "mirrored", label: Strings.mirrored, description: Strings.left-handed}, {id: "swipe", label: Strings.swipe-only, description: Strings.tap-opens-menu}]: TurnCard {
+            label: option.label; description: option.description; selected: ReaderModel.tap-mode == option.id;
+            clicked => { ReaderModel.event("reader.tap-mode", option.id); }
+        }
+    }
+}
+
+component MenuHeaderTitle inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle;
+    in property <bool> book;
+    in property <bool> centered;
+    height: 52px;
+    min-width: 0px;
+    horizontal-stretch: 1;
+    VerticalLayout {
+        alignment: center; spacing: 2px;
+        Text { text: root.title; font-family: root.book ? Theme.serif-font : Theme.ui-font; font-size: root.book ? (Theme.scribe ? 20px : 18px) : (Theme.scribe ? 18px : 17px); font-weight: 700; horizontal-alignment: root.centered ? center : left; overflow: elide; }
+        Text { text: root.subtitle; font-family: Theme.ui-font; font-size: Theme.scribe ? 15px : 14px; color: Theme.secondary; horizontal-alignment: root.centered ? center : left; overflow: elide; }
+    }
+}
+
+component ReaderMenu inherits Rectangle {
+    property <[int]> font-values-pw: [16, 18, 20, 22, 24, 26, 28, 30, 32];
+    property <[int]> font-values-sc: [18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38];
+    property <length> content-height: ReaderModel.subtool == "font" ? (Theme.scribe ? 96px : min(ReaderModel.fonts.length, 3) * 72px) + (ReaderModel.fonts.length > 3 ? 184px : 128px) : ReaderModel.subtool == "indent" ? (Theme.scribe ? 180px : 276px) : ReaderModel.subtool == "turn" ? (Theme.scribe ? 296px : 376px) : ReaderModel.tool == "type" ? (Theme.scribe ? 390px : 344px) : ReaderModel.tool == "notes" ? (Theme.scribe ? 336px : 220px) : ReaderModel.tool == "light" ? 256px : 164px;
+    TouchArea { clicked => { ReaderModel.event("reader.menu", "false"); } }
+    Rectangle {
+        x: 0px; y: 0px; width: root.width;
+        height: 80px;
+        background: Theme.paper;
+        TouchArea { }
+        VerticalLayout {
+            spacing: 0px;
+            Rectangle {
+                height: 28px;
+                HorizontalLayout {
+                    padding-left: Theme.page-margin;
+                    padding-right: Theme.page-margin;
+                    Text { text: ReaderModel.clock; font-family: Theme.ui-font; font-size: 14px; vertical-alignment: center; horizontal-stretch: 1; }
+                    Icon { kind: "wifi"; width: 18px; height: 18px; }
+                }
+            }
+            Rectangle {
+                height: 52px;
+                if Theme.scribe: HorizontalLayout {
+                    padding-left: 8px; padding-right: 8px; spacing: 8px;
+                    Rectangle { width: 112px; IconButton { x: 0px; y: 2px; icon: "back"; text: Strings.back; clicked => { ReaderModel.event("reader.back", ""); } } }
+                    MenuHeaderTitle { title: ReaderModel.title; subtitle: ReaderModel.chapter-title; book: true; centered: true; }
+                    Rectangle {
+                        width: 112px;
+                        HorizontalLayout {
+                            alignment: end; spacing: 8px;
+                            IconButton { icon: "bookmark"; label: Strings.bookmark; selected: ReaderModel.bookmarked; clicked => { ReaderModel.event("reader.bookmark", "toggle"); } }
+                            IconButton { icon: "more"; label: Strings.book-detail; clicked => { ReaderModel.event("reader.detail", ""); } }
+                        }
+                    }
+                }
+                if !Theme.scribe: HorizontalLayout {
+                    padding-left: 8px; padding-right: 8px; spacing: 8px;
+                    IconButton { icon: "back"; label: Strings.back; clicked => { ReaderModel.event("reader.back", ""); } }
+                    MenuHeaderTitle { title: ReaderModel.title; subtitle: ReaderModel.chapter-title; book: true; }
+                    IconButton { icon: "bookmark"; label: Strings.bookmark; selected: ReaderModel.bookmarked; clicked => { ReaderModel.event("reader.bookmark", "toggle"); } }
+                    IconButton { icon: "more"; label: Strings.book-detail; clicked => { ReaderModel.event("reader.detail", ""); } }
+                }
+            }
+        }
+        Rectangle { y: parent.height - 1px; height: 1px; background: Theme.ink; }
+    }
+    Rectangle {
+        y: root.height - root.content-height - (Theme.scribe ? 76px : 64px);
+        height: root.content-height + (Theme.scribe ? 76px : 64px);
+        background: Theme.paper;
+        TouchArea { }
+        Rectangle { x: 0px; y: 0px; width: parent.width; height: 2px; background: Theme.ink; }
+        Rectangle {
+            x: Theme.page-margin;
+            y: 8px;
+            width: parent.width - Theme.page-margin * 2;
+            height: root.content-height - 12px;
+
+            if ReaderModel.tool == "progress": VerticalLayout {
+                spacing: 12px;
+                HorizontalLayout {
+                    ActionButton { text: Strings.previous-chapter; quiet: true; clicked => { ReaderModel.event("reader.chapter", "-1"); } }
+                    Text { text: ReaderModel.chapter-title; font-family: Theme.ui-font; font-size: 17px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                    ActionButton { text: Strings.next-chapter; quiet: true; clicked => { ReaderModel.event("reader.chapter", "1"); } }
+                }
+                ProgressTrack { value: ReaderModel.progress; height: 8px; }
+                HorizontalLayout {
+                    Text { text: ReaderModel.footer; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; vertical-alignment: center; horizontal-stretch: 1; }
+                    IconButton { icon: "sync"; text: Strings.sync-progress; clicked => { ReaderModel.event("reader.sync", ""); } }
+                }
+            }
+
+            if ReaderModel.tool == "notes": VerticalLayout {
+                spacing: 4px;
+                if Theme.scribe: ToggleRow { text: Strings.side-panel; checked: ReaderModel.notes-panel; toggled => { ReaderModel.event("reader.panel", ReaderModel.notes-panel ? "false" : "true"); } }
+                ToggleRow { text: Strings.show-popular; checked: ReaderModel.popular; toggled => { ReaderModel.event("reader.popular", "toggle"); } }
+                ToggleRow { text: Strings.show-mine; checked: ReaderModel.mine; toggled => { ReaderModel.event("reader.mine", "toggle"); } }
+                if Theme.scribe: OptionRow {
+                    label: Strings.notes-position;
+                    current: ReaderModel.thought-position;
+                    options: [{id: "side", label: Strings.side-panel}, {id: "center", label: Strings.center-popup}, {id: "bottom", label: Strings.bottom-popup}];
+                    selected(value) => { ReaderModel.event("reader.thought-position", value); }
+                }
+                if !Theme.scribe: OptionRow {
+                    label: Strings.notes-position;
+                    current: ReaderModel.thought-position;
+                    options: [{id: "center", label: Strings.center-popup}, {id: "bottom", label: Strings.bottom-popup}];
+                    selected(value) => { ReaderModel.event("reader.thought-position", value); }
+                }
+                if Theme.scribe: ToggleRow { text: Strings.pen-highlight; enabled: ReaderModel.pen-supported; checked: ReaderModel.pen-enabled; toggled => { ReaderModel.event("reader.pen", "toggle"); } }
+            }
+
+            if ReaderModel.tool == "light": VerticalLayout {
+                spacing: 8px;
+                VerticalLayout {
+                    spacing: 0px;
+                    HorizontalLayout { height: 20px; Text { text: Strings.brightness; font-family: Theme.ui-font; font-size: 17px; horizontal-stretch: 1; } Text { text: ReaderModel.brightness-known ? "" + ReaderModel.brightness : "—"; font-family: Theme.ui-font; font-size: 17px; color: Theme.secondary; } }
+                    ScaleControl { values: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24]; value: ReaderModel.brightness; enabled: ReaderModel.hardware-light && ReaderModel.brightness-known; label: Strings.brightness; small-label: "−"; large-label: "+"; segments: true; chosen(value) => { ReaderModel.event("reader.brightness-select", "" + value); } step(value) => { ReaderModel.event("reader.brightness", "" + value); } }
+                }
+                VerticalLayout {
+                    spacing: 0px;
+                    HorizontalLayout { height: 20px; Text { text: Strings.warmth; font-family: Theme.ui-font; font-size: 17px; horizontal-stretch: 1; } Text { text: ReaderModel.warmth-known ? "" + ReaderModel.warmth : "—"; font-family: Theme.ui-font; font-size: 17px; color: Theme.secondary; } }
+                    ScaleControl { values: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24]; value: ReaderModel.warmth; enabled: ReaderModel.hardware-warmth && ReaderModel.warmth-known; label: Strings.warmth; small-label: "−"; large-label: "+"; segments: true; chosen(value) => { ReaderModel.event("reader.warmth-select", "" + value); } step(value) => { ReaderModel.event("reader.warmth", "" + value); } }
+                }
+                ToggleRow { text: Strings.night-mode; subtitle: ReaderModel.night-supported ? (ReaderModel.native-theme-sync ? Strings.native-dark-mode-persist-hint : Strings.application-dark-mode-hint) : Strings.application-dark-mode-unavailable; checked: ReaderModel.night; enabled: ReaderModel.night-supported; toggled => { ReaderModel.event("reader.night", "toggle"); } }
+            }
+
+            if ReaderModel.tool == "type" && ReaderModel.subtool == "": VerticalLayout {
+                spacing: Theme.scribe ? 12px : 8px;
+                HorizontalLayout {
+                    height: 48px;
+                    Text { text: Strings.font-size; font-family: Theme.ui-font; font-size: Theme.scribe ? 18px : 17px; font-weight: 700; vertical-alignment: center; horizontal-stretch: 1; }
+                    ToggleRow { text: Strings.book-only; width: Theme.scribe ? 224px : 204px; height: 48px; checked: ReaderModel.book-only; toggled => { ReaderModel.event("reader.book-only", "toggle"); } }
+                }
+                ScaleControl { values: Theme.scribe ? root.font-values-sc : root.font-values-pw; value: ReaderModel.font-size; label: Strings.font-size; chosen(value) => { ReaderModel.event("reader.font-size-select", "" + value); } step(value) => { ReaderModel.event("reader.font-size", "" + value); } }
+                if Theme.scribe: HorizontalLayout {
+                    spacing: 32px;
+                    VerticalLayout { spacing: 8px; height: 76px; Text { text: Strings.font; height: 20px; font-family: Theme.ui-font; font-size: 15px; color: Theme.secondary; } FontSegments { fonts: ReaderModel.fonts; current: ReaderModel.font-choice; selected(value) => { ReaderModel.event("reader.font", value); } } }
+                    OptionGroup { label: Strings.font-weight; current: "" + ReaderModel.weight; options: [{id: "300", label: Strings.thin}, {id: "400", label: Strings.regular}, {id: "500", label: Strings.medium}, {id: "700", label: Strings.bold}]; selected(value) => { ReaderModel.event("reader.weight", value); } }
+                }
+                if !Theme.scribe: OptionRow { label: Strings.font-weight; current: "" + ReaderModel.weight; options: [{id: "300", label: Strings.thin}, {id: "400", label: Strings.regular}, {id: "500", label: Strings.medium}, {id: "700", label: Strings.bold}]; selected(value) => { ReaderModel.event("reader.weight", value); } }
+                HorizontalLayout {
+                    spacing: Theme.scribe ? 32px : 14px;
+                    OptionGroup { label: Strings.margin; current: ReaderModel.margin-choice; options: [{id: "narrow", label: Strings.narrow}, {id: "mid", label: Strings.normal}, {id: "wide", label: Strings.wide}]; selected(value) => { ReaderModel.event("reader.margin", value); } }
+                    OptionGroup { label: Strings.line-spacing; current: ReaderModel.line-choice; options: [{id: "tight", label: Strings.tight}, {id: "mid", label: Strings.normal}, {id: "loose", label: Strings.loose}]; selected(value) => { ReaderModel.event("reader.line-spacing", value); } }
+                }
+                HorizontalLayout {
+                    spacing: Theme.scribe ? 14px : 10px;
+                    SubtoolLink { label: Theme.scribe ? Strings.more-fonts : Strings.font; value: ReaderModel.font-label; horizontal-stretch: 1; clicked => { ReaderModel.event("reader.subtool", "font"); } }
+                    SubtoolLink { label: Strings.indent-and-spacing; value: ReaderModel.indent-choice == "0" ? Strings.no-indent : ReaderModel.indent-choice == "1" ? Strings.one-character : Strings.two-characters; horizontal-stretch: 1; clicked => { ReaderModel.event("reader.subtool", "indent"); } }
+                    SubtoolLink { label: Strings.turn-and-refresh; value: ReaderModel.refresh-choice == "1" ? Strings.every-page : ReaderModel.refresh-choice == "6" ? Strings.six-pages : ReaderModel.refresh-choice == "12" ? Strings.twelve-pages : Strings.never; horizontal-stretch: 1; clicked => { ReaderModel.event("reader.subtool", "turn"); } }
+                }
+            }
+
+            if ReaderModel.tool == "type" && ReaderModel.subtool != "": VerticalLayout {
+                spacing: 12px;
+                Rectangle {
+                    height: 52px;
+                    HorizontalLayout {
+                        IconButton { icon: "back"; text: Strings.typography; clicked => { ReaderModel.event("reader.subtool", ""); } }
+                        Text { text: "· " + (ReaderModel.subtool == "font" ? Strings.font : ReaderModel.subtool == "indent" ? Strings.indent-and-spacing : Strings.turn-and-refresh); font-family: Theme.ui-font; font-size: 18px; font-weight: 700; vertical-alignment: center; horizontal-stretch: 1; }
+                    }
+                    Rectangle { x: 0px; y: parent.height - 1px; width: parent.width; height: 1px; background: Theme.line; }
+                }
+                if ReaderModel.subtool == "font": FontPicker { }
+                if ReaderModel.subtool == "indent" && Theme.scribe: HorizontalLayout {
+                    spacing: 28px;
+                    OptionGroup { label: Strings.indent; current: ReaderModel.indent-choice; options: [{id: "0", label: Strings.no-indent}, {id: "1", label: Strings.one-character}, {id: "2", label: Strings.two-characters}]; selected(value) => { ReaderModel.event("reader.indent", value); } }
+                    OptionGroup { label: Strings.paragraph-spacing; current: ReaderModel.gap-choice; options: [{id: "none", label: Strings.none}, {id: "small", label: Strings.small}, {id: "big", label: Strings.large}]; selected(value) => { ReaderModel.event("reader.paragraph-gap", value); } }
+                    VerticalLayout { Rectangle { vertical-stretch: 1; } ToggleRow { height: 48px; text: Strings.justify; checked: ReaderModel.justify; toggled => { ReaderModel.event("reader.justify", "toggle"); } } }
+                }
+                if ReaderModel.subtool == "indent" && !Theme.scribe: VerticalLayout {
+                    spacing: 8px;
+                    OptionRow { label: Strings.indent; current: ReaderModel.indent-choice; options: [{id: "0", label: Strings.no-indent}, {id: "1", label: Strings.one-character}, {id: "2", label: Strings.two-characters}]; selected(value) => { ReaderModel.event("reader.indent", value); } }
+                    OptionRow { label: Strings.paragraph-spacing; current: ReaderModel.gap-choice; options: [{id: "none", label: Strings.none}, {id: "small", label: Strings.small}, {id: "big", label: Strings.large}]; selected(value) => { ReaderModel.event("reader.paragraph-gap", value); } }
+                    ToggleRow { text: Strings.justify; checked: ReaderModel.justify; toggled => { ReaderModel.event("reader.justify", "toggle"); } }
+                }
+                if ReaderModel.subtool == "turn": VerticalLayout {
+                    spacing: 8px;
+                    Text { text: Strings.tap-zones; height: 24px; font-family: Theme.ui-font; font-size: 16px; }
+                    PageTurnChoices { }
+                    HorizontalLayout { height: 32px; spacing: 8px; Text { text: Strings.full-refresh; font-family: Theme.ui-font; font-size: 16px; vertical-alignment: center; } Text { text: Strings.refresh-explanation; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; } }
+                    SegmentedControl { width: Theme.scribe ? 480px : parent.width; radius: 24px; value: ReaderModel.refresh-choice; options: [{id: "1", label: Strings.every-page}, {id: "6", label: Strings.six-pages}, {id: "12", label: Strings.twelve-pages}, {id: "0", label: Strings.never}]; chosen(value) => { ReaderModel.event("reader.refresh", value); } }
+                }
+            }
+        }
+        Rectangle {
+            y: root.content-height;
+            height: Theme.scribe ? 76px : 64px;
+            Rectangle { x: 0px; y: 0px; width: parent.width; height: 1px; background: Theme.line; }
+            HorizontalLayout {
+                ToolButton { label: Strings.catalog; icon: "list"; clicked => { ReaderModel.event("reader.toc", "toc"); } }
+                ToolButton { label: Strings.progress; icon: "stats"; selected: ReaderModel.tool == "progress"; clicked => { ReaderModel.event("reader.tool", "progress"); } }
+                ToolButton { label: Strings.notes; icon: "notes"; selected: ReaderModel.tool == "notes"; clicked => { ReaderModel.event("reader.tool", "notes"); } }
+                if Theme.scribe: ToolButton { label: Strings.pen-highlight; icon: "notes"; selected: ReaderModel.pen-enabled; enabled: ReaderModel.pen-supported; clicked => { ReaderModel.event("reader.pen", "toggle"); } }
+                ToolButton { label: Strings.brightness; icon: "light"; selected: ReaderModel.tool == "light"; clicked => { ReaderModel.event("reader.tool", "light"); } }
+                ToolButton { label: Strings.font; icon: "type"; selected: ReaderModel.tool == "type"; clicked => { ReaderModel.event("reader.tool", "type"); } }
+            }
+        }
+    }
+}
+
+component ReaderContents inherits Rectangle {
+    TouchArea { clicked => { ReaderModel.event("reader.toc-close", ""); } }
+    Rectangle {
+        x: 0px; y: 0px;
+        width: Theme.scribe ? 540px : root.width;
+        height: root.height;
+        background: Theme.paper;
+        border-width: Theme.scribe ? 2px : 0px;
+        border-color: Theme.ink;
+        TouchArea { }
+        VerticalLayout {
+            spacing: 0px;
+            Rectangle {
+                height: 96px;
+                Rectangle {
+                    x: 0px; y: 0px; width: parent.width; height: 28px;
+                    Text { x: Theme.page-margin; y: 0px; height: parent.height; text: ReaderModel.clock; font-family: Theme.ui-font; font-size: 14px; vertical-alignment: center; }
+                }
+                HorizontalLayout {
+                    y: 28px; height: 68px;
+                    padding-left: Theme.page-margin; padding-right: 8px; spacing: 16px;
+                    Rectangle { width: 40px; height: 56px; background: Theme.ink; Text { text: ReaderModel.title; color: Theme.paper; font-family: Theme.serif-font; font-size: 14px; wrap: word-wrap; horizontal-alignment: center; vertical-alignment: center; } }
+                    VerticalLayout {
+                        alignment: center; spacing: 4px; horizontal-stretch: 1;
+                        Text { text: ReaderModel.title; font-family: Theme.serif-font; font-size: 24px; font-weight: 700; overflow: elide; }
+                        Text { text: ReaderModel.chapter-summary; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; overflow: elide; }
+                    }
+                    IconButton { icon: "close"; label: Strings.close; clicked => { ReaderModel.event("reader.toc-close", ""); } }
+                }
+            }
+            HorizontalLayout {
+                height: 52px;
+                for tab in [{value: "toc", label: Strings.catalog + " " + ReaderModel.chapter-count}, {value: "marks", label: Strings.bookmarks + " " + ReaderModel.mark-count}, {value: "notes", label: Strings.my-notes + " " + ReaderModel.note-count}]: Rectangle {
+                    background: tab-touch.pressed ? Theme.ink : Theme.paper;
+                    Text { text: tab.label; font-family: Theme.ui-font; font-size: 18px; font-weight: ReaderModel.toc-tab == tab.value ? 700 : 400; color: tab-touch.pressed ? Theme.paper : ReaderModel.toc-tab == tab.value ? Theme.ink : Theme.secondary; horizontal-alignment: center; vertical-alignment: center; }
+                    if ReaderModel.toc-tab == tab.value: Rectangle { y: parent.height - 3px; height: 3px; background: Theme.ink; }
+                    tab-touch := TouchArea { clicked => { ReaderModel.event("reader.toc-tab", tab.value); } }
+                }
+            }
+            Rectangle {
+                vertical-stretch: 1;
+                clip: true;
+                VerticalLayout {
+                    spacing: 0px;
+                    if ReaderModel.toc-tab == "toc": VerticalLayout {
+                        spacing: 0px;
+                        for chapter in ReaderModel.chapters: Rectangle {
+                            height: 52px;
+                            background: chapter.current || row-touch.pressed ? Theme.ink : Theme.paper;
+                            HorizontalLayout {
+                                padding-left: Theme.page-margin; padding-right: Theme.page-margin; spacing: 12px;
+                                Text { text: chapter.title; font-family: Theme.ui-font; font-size: 18px; color: chapter.current || row-touch.pressed ? Theme.paper : Theme.ink; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                                if chapter.cached: Icon { kind: "download"; width: 20px; height: 20px; inverted: chapter.current || row-touch.pressed; }
+                                Text { text: chapter.meta; font-family: Theme.ui-font; font-size: 14px; color: chapter.current || row-touch.pressed ? Theme.paper : Theme.secondary; vertical-alignment: center; }
+                            }
+                            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
+                            row-touch := SwipeTouchArea { tapped => { ReaderModel.event("reader.open-chapter", chapter.id); } swiped(value) => { ReaderModel.event("reader.toc-page", "" + value); } }
+                        }
+                    }
+                    if ReaderModel.toc-tab != "toc": VerticalLayout {
+                        spacing: 0px;
+                        for entry in ReaderModel.entries: Rectangle {
+                            height: entry.kind == "note" ? (Theme.scribe ? 136px : 128px) : 80px;
+                            background: entry-touch.pressed ? Theme.ink : Theme.paper;
+                            if entry.kind == "bookmark": HorizontalLayout {
+                                padding-left: Theme.page-margin; padding-right: Theme.page-margin; spacing: 16px;
+                                Icon { kind: "bookmark"; inverted: entry-touch.pressed; }
+                                VerticalLayout {
+                                    alignment: center; spacing: 4px;
+                                    Text { text: entry.title; font-family: Theme.ui-font; font-size: 18px; font-weight: 500; color: entry-touch.pressed ? Theme.paper : Theme.ink; overflow: elide; }
+                                    Text { text: (entry.id == "" ? entry.chapter : entry.page-label) + ((entry.id == "" || entry.page-label != "") && entry.date != "" ? " · " : "") + entry.date; font-family: Theme.ui-font; font-size: Theme.scribe ? 15px : 14px; color: entry-touch.pressed ? Theme.paper : Theme.secondary; overflow: elide; }
+                                }
+                            }
+                            if entry.kind == "note": VerticalLayout {
+                                padding-left: Theme.page-margin; padding-right: Theme.page-margin; padding-top: 12px; padding-bottom: 12px; spacing: 8px;
+                                HorizontalLayout {
+                                    height: 20px; spacing: 8px;
+                                    Text { text: entry.chapter; font-family: Theme.ui-font; font-size: Theme.scribe ? 15px : 14px; color: entry-touch.pressed ? Theme.paper : Theme.secondary; overflow: elide; horizontal-stretch: 1; }
+                                    Text { text: entry.date; font-family: Theme.ui-font; font-size: Theme.scribe ? 15px : 14px; color: entry-touch.pressed ? Theme.paper : Theme.secondary; }
+                                }
+                                Rectangle {
+                                    height: 30px;
+                                    note-quote := Text { x: 0px; y: 0px; width: parent.width; height: 26px; text: entry.title; font-family: Theme.serif-font; font-size: Theme.scribe ? 19px : 18px; color: entry-touch.pressed ? Theme.paper : Theme.ink; overflow: elide; }
+                                    Rectangle { x: 0px; y: 28px; width: min(parent.width, note-quote.preferred-width); height: 2px; background: entry-touch.pressed ? Theme.paper : Theme.ink; }
+                                }
+                                if entry.body != "": HorizontalLayout {
+                                    spacing: 8px;
+                                    Icon { kind: "notes"; width: 18px; height: 18px; inverted: entry-touch.pressed; }
+                                    Text { text: entry.body; font-family: Theme.ui-font; font-size: 16px; color: entry-touch.pressed ? Theme.paper : Theme.ink; overflow: elide; horizontal-stretch: 1; }
+                                }
+                                Rectangle { vertical-stretch: 1; }
+                            }
+                            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
+                            entry-touch := SwipeTouchArea { tapped => { if entry.id != "" { ReaderModel.event("reader.open-entry", entry.id); } } swiped(value) => { ReaderModel.event("reader.toc-page", "" + value); } }
+                        }
+                        if ReaderModel.entries.length == 0: Text { text: ReaderModel.toc-tab == "marks" ? Strings.no-bookmarks : Strings.no-notes; font-family: Theme.ui-font; font-size: 18px; color: Theme.secondary; wrap: word-wrap; horizontal-alignment: center; }
+                    }
+                    Rectangle { vertical-stretch: 1; }
+                }
+            }
+            HorizontalLayout {
+                height: Theme.scribe ? 64px : 56px;
+                ActionButton { text: Strings.previous-page; quiet: true; enabled: ReaderModel.chapter-page > 1; clicked => { ReaderModel.event("reader.toc-page", "-1"); } }
+                ActionButton { text: Strings.locate-current + " " + ReaderModel.chapter-page + " / " + ReaderModel.chapter-pages; quiet: true; horizontal-stretch: 1; clicked => { ReaderModel.event("reader.toc-locate", ""); } }
+                ActionButton { text: Strings.next-page; quiet: true; enabled: ReaderModel.chapter-page < ReaderModel.chapter-pages; clicked => { ReaderModel.event("reader.toc-page", "1"); } }
+            }
+        }
+    }
+}
+
+component ThoughtPopup inherits Rectangle {
+    property <bool> side: Theme.scribe && ReaderModel.notes-panel && ReaderModel.thought-position == "side";
+    property <bool> bottom: !root.side && ReaderModel.thought-position == "bottom";
+    property <bool> full-width: root.bottom && !Theme.scribe;
+    TouchArea { enabled: !root.side; clicked => { ReaderModel.event("reader.thought-close", ""); } }
+    Rectangle {
+        x: root.side ? root.width - 300px : root.full-width ? -2px : Theme.scribe ? (root.width - 540px) / 2 : 63px;
+        y: root.side ? 0px : root.bottom ? root.height - self.height + (root.full-width ? 2px : 0px) : (root.height - self.height) / 2;
+        width: root.side ? 300px : root.full-width ? root.width + 4px : Theme.scribe ? 540px : root.width - 126px;
+        height: root.side ? root.height : root.height * ReaderModel.thought-height / 100;
+        background: Theme.paper;
+        border-top-left-radius: root.side ? 0px : 10px;
+        border-top-right-radius: root.side ? 0px : 10px;
+        border-bottom-left-radius: root.side || root.bottom ? 0px : 10px;
+        border-bottom-right-radius: root.side || root.bottom ? 0px : 10px;
+        TouchArea { }
+        VerticalLayout {
+            padding: root.side ? 0px : 2px;
+            spacing: 0px;
+            if root.side: Rectangle {
+                height: 76px;
+                HorizontalLayout {
+                    padding-left: 8px; padding-right: 8px; padding-top: 20px;
+                    IconButton { icon: "back"; text: Strings.current-page-notes; label: Strings.return-page-notes; clicked => { ReaderModel.event("reader.thought-close", ""); } }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+                Rectangle { x: 0px; y: parent.height - 2px; width: parent.width; height: 2px; background: Theme.ink; }
+            }
+            Rectangle {
+                height: 160px;
+                VerticalLayout {
+                    padding-left: 20px; padding-right: 8px; padding-top: 12px; padding-bottom: 12px; spacing: 6px;
+                    HorizontalLayout {
+                        Text { text: ReaderModel.thought-title; font-family: Theme.serif-font; font-size: 19px; font-weight: 700; wrap: word-wrap; overflow: elide; horizontal-stretch: 1; }
+                        if !root.side: IconButton { icon: "close"; label: Strings.close; clicked => { ReaderModel.event("reader.thought-close", ""); } }
+                    }
+                    Text { text: ReaderModel.thought-meta; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; overflow: elide; }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        ActionButton { text: Strings.highlight; clicked => { ReaderModel.event("reader.highlight", "thread"); } }
+                        ActionButton { text: Strings.write-thought; clicked => { ReaderModel.event("reader.write-thought", "thread"); } }
+                        if ReaderModel.note-id != "": ActionButton { text: Strings.delete-note; clicked => { ReaderModel.event("reader.delete-annotation", ReaderModel.note-id); } }
+                        Rectangle { horizontal-stretch: 1; }
+                    }
+                }
+                Rectangle { x: 0px; y: parent.height - 1px; width: parent.width; height: 1px; background: Theme.line; }
+            }
+            Rectangle {
+                vertical-stretch: 1;
+                clip: true;
+                VerticalLayout {
+                    spacing: 0px;
+                    for thought in ReaderModel.thoughts: ThoughtCard { entry: thought; side-panel: root.side; clicked => { ReaderModel.event("reader.thought-entry", thought.id); } }
+                    if ReaderModel.thoughts.length == 0: Text { text: Strings.no-notes; font-family: Theme.ui-font; font-size: 16px; color: Theme.secondary; horizontal-alignment: center; }
+                    Rectangle { vertical-stretch: 1; }
+                }
+            }
+            if !root.side: PageBar { page: ReaderModel.thought-page; count: ReaderModel.thought-pages; turn(value) => { ReaderModel.event("reader.thought-page", "" + value); } }
+            if root.side: HorizontalLayout {
+                height: 56px;
+                padding-left: 8px; padding-right: 8px;
+                IconButton { icon: "back"; label: Strings.previous-page; enabled: ReaderModel.thought-page > 1; clicked => { ReaderModel.event("reader.thought-page", "-1"); } }
+                Text { text: ReaderModel.thought-page + " / " + ReaderModel.thought-pages; font-family: Theme.ui-font; font-size: 16px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; horizontal-stretch: 1; }
+                IconButton { icon: "next"; label: Strings.next-page; enabled: ReaderModel.thought-page < ReaderModel.thought-pages; clicked => { ReaderModel.event("reader.thought-page", "1"); } }
+            }
+        }
+        if root.side: Rectangle { x: 0px; y: 0px; width: 1px; height: parent.height; background: Theme.line; }
+        if !root.side: Rectangle {
+            x: 0px; y: 0px; width: parent.width; height: parent.height;
+            border-width: 2px; border-color: Theme.ink;
+            border-top-left-radius: 10px; border-top-right-radius: 10px;
+            border-bottom-left-radius: root.bottom ? 0px : 10px;
+            border-bottom-right-radius: root.bottom ? 0px : 10px;
+        }
+    }
+}
+
+component SelectionPopup inherits Rectangle {
+    copy-source := TextInput {
+        text: ReaderModel.selection-text;
+        read-only: true;
+        visible: false;
+        width: 1px;
+        height: 1px;
+    }
+    TouchArea { clicked => { ReaderModel.event("reader.selection-close", ""); } }
+    Rectangle {
+        x: Theme.page-margin;
+        y: (root.height - self.height) / 2;
+        width: root.width - Theme.page-margin * 2;
+        height: ReaderModel.writing-thought ? 360px : 224px;
+        background: Theme.paper;
+        border-width: 2px;
+        border-color: Theme.ink;
+        border-radius: 10px;
+        TouchArea { }
+        VerticalLayout {
+            padding: 20px;
+            spacing: 16px;
+            HorizontalLayout {
+                Text { text: ReaderModel.writing-thought ? Strings.write-thought : Strings.highlight; font-family: Theme.ui-font; font-size: 20px; font-weight: 700; vertical-alignment: center; horizontal-stretch: 1; }
+                IconButton { icon: "close"; label: Strings.close; clicked => { ReaderModel.event("reader.selection-close", ""); } }
+            }
+            Text { text: ReaderModel.selection-text; font-family: Theme.serif-font; font-size: 18px; wrap: word-wrap; overflow: elide; height: 48px; }
+            if ReaderModel.writing-thought: Rectangle {
+                vertical-stretch: 1;
+                border-width: 2px;
+                border-color: Theme.ink;
+                border-radius: 6px;
+                TextInput {
+                    x: 12px; y: 8px; width: parent.width - 24px; height: parent.height - 16px;
+                    text <=> ReaderModel.thought-draft;
+                    font-family: Theme.ui-font;
+                    font-size: 18px;
+                    wrap: word-wrap;
+                    single-line: false;
+                    edited => { ReaderModel.event("reader.thought-draft", self.text); }
+                }
+            }
+            HorizontalLayout {
+                spacing: 12px;
+                if !ReaderModel.writing-thought: ActionButton { text: Strings.highlight; primary: true; horizontal-stretch: 1; clicked => { ReaderModel.event("reader.highlight", "selection"); } }
+                if !ReaderModel.writing-thought: ActionButton { text: Strings.write-thought; horizontal-stretch: 1; clicked => { ReaderModel.event("reader.write-thought", "selection"); } }
+                if !ReaderModel.writing-thought: ActionButton { text: Strings.copy; horizontal-stretch: 1; clicked => { copy-source.select-all(); copy-source.copy(); ReaderModel.event("reader.copy", ""); } }
+                if ReaderModel.writing-thought: ActionButton { text: Strings.cancel; horizontal-stretch: 1; clicked => { ReaderModel.event("reader.selection-close", ""); } }
+                if ReaderModel.writing-thought: ActionButton { text: Strings.save; primary: true; enabled: ReaderModel.thought-draft != ""; horizontal-stretch: 1; clicked => { ReaderModel.event("reader.save-thought", ""); } }
+            }
+        }
+    }
+}
+
+component SyncConflictPopup inherits Rectangle {
+    Rectangle {
+        x: Theme.scribe ? (root.width - 520px) / 2 : 20px;
+        y: Theme.scribe ? 360px : 180px;
+        width: Theme.scribe ? 520px : root.width - 40px;
+        height: 500px;
+        background: Theme.paper;
+        border-width: 2px;
+        border-color: Theme.ink;
+        border-radius: 10px;
+        VerticalLayout {
+            padding: 24px;
+            spacing: 14px;
+            Text { text: Strings.sync-conflict; font-family: Theme.ui-font; font-size: 24px; font-weight: 700; }
+            Text { text: Strings.sync-conflict-hint; font-family: Theme.ui-font; font-size: 16px; color: Theme.secondary; wrap: word-wrap; }
+            Rectangle {
+                height: 88px;
+                border-width: 2px; border-color: Theme.ink; border-radius: 6px;
+                VerticalLayout {
+                    padding: 12px; spacing: 6px;
+                    Text { text: Strings.cloud-progress; font-family: Theme.ui-font; font-size: 17px; font-weight: 700; }
+                    Text { text: ReaderModel.cloud-summary; font-family: Theme.ui-font; font-size: 15px; color: Theme.secondary; wrap: word-wrap; }
+                }
+            }
+            Rectangle {
+                height: 88px;
+                border-width: 1px; border-color: Theme.line; border-radius: 6px;
+                VerticalLayout {
+                    padding: 12px; spacing: 6px;
+                    Text { text: Strings.local-progress; font-family: Theme.ui-font; font-size: 17px; font-weight: 700; }
+                    Text { text: ReaderModel.local-summary; font-family: Theme.ui-font; font-size: 15px; color: Theme.secondary; wrap: word-wrap; }
+                }
+            }
+            HorizontalLayout {
+                spacing: 12px;
+                ActionButton { text: Strings.keep-local; horizontal-stretch: 1; clicked => { ReaderModel.event("reader.resolve-progress", "local"); } }
+                ActionButton { text: Strings.use-cloud; primary: true; horizontal-stretch: 1; clicked => { ReaderModel.event("reader.resolve-progress", "cloud"); } }
+            }
+        }
+    }
+}
+
+component ArticleMenu inherits Rectangle {
+    property <[int]> font-values-pw: [15, 16, 17, 18, 19, 20, 22, 24, 26];
+    property <[int]> font-values-sc: [16, 18, 20, 22, 24, 26, 28, 30, 32];
+    property <length> content-height: ArticleModel.tool == "images" ? 176px : ArticleModel.tool == "type" ? (Theme.scribe ? 220px : 316px) : 0px;
+    TouchArea { clicked => { ArticleModel.event("article.menu", "false"); } }
+    Rectangle {
+        x: 0px; y: 0px; width: root.width;
+        height: 80px;
+        background: Theme.paper;
+        TouchArea { }
+        VerticalLayout {
+            spacing: 0px;
+            Rectangle {
+                height: 28px;
+                Text { x: Theme.page-margin; text: ArticleModel.clock; font-family: Theme.ui-font; font-size: 14px; vertical-alignment: center; }
+            }
+            Rectangle {
+                height: 52px;
+                if Theme.scribe: HorizontalLayout {
+                    padding-left: 8px; padding-right: 8px; spacing: 8px;
+                    Rectangle { width: 112px; IconButton { x: 0px; y: 2px; icon: "back"; text: Strings.publications; label: Strings.back; clicked => { ArticleModel.event("article.back", ""); } } }
+                    MenuHeaderTitle { title: ArticleModel.title; subtitle: ArticleModel.account + " · " + ArticleModel.meta; centered: true; }
+                    Rectangle {
+                        width: 112px;
+                        HorizontalLayout { alignment: end; IconButton { icon: "star"; label: Strings.favorite; selected: ArticleModel.starred; clicked => { ArticleModel.event("article.star", "toggle"); } } }
+                    }
+                }
+                if !Theme.scribe: HorizontalLayout {
+                    padding-left: 8px; padding-right: 8px; spacing: 8px;
+                    IconButton { icon: "back"; label: Strings.back; clicked => { ArticleModel.event("article.back", ""); } }
+                    MenuHeaderTitle { title: ArticleModel.title; subtitle: ArticleModel.account + " · " + ArticleModel.meta; }
+                    IconButton { icon: "star"; label: Strings.favorite; selected: ArticleModel.starred; clicked => { ArticleModel.event("article.star", "toggle"); } }
+                }
+            }
+        }
+        Rectangle { y: parent.height - 1px; height: 1px; background: Theme.ink; }
+    }
+    Rectangle {
+        y: root.height - root.content-height - (Theme.scribe ? 76px : 64px);
+        height: root.content-height + (Theme.scribe ? 76px : 64px);
+        background: Theme.paper;
+        TouchArea { }
+        Rectangle { x: 0px; y: 0px; width: parent.width; height: 2px; background: Theme.ink; }
+        Rectangle {
+            x: Theme.page-margin; y: 8px;
+            width: parent.width - Theme.page-margin * 2;
+            height: root.content-height - 12px;
+            if ArticleModel.tool == "images": VerticalLayout {
+                spacing: 0px;
+                ToggleRow { text: Strings.auto-images; subtitle: Strings.images-off-hint; checked: ArticleModel.auto-images; toggled => { ArticleModel.event("article.auto-images", "toggle"); } }
+                Rectangle { height: 1px; background: Theme.line; }
+                HorizontalLayout {
+                    height: 72px; spacing: 12px;
+                    VerticalLayout {
+                        alignment: center; spacing: 4px; horizontal-stretch: 1;
+                        Text { text: Strings.article-images; font-family: Theme.ui-font; font-size: Theme.scribe ? 18px : 17px; }
+                        Text { text: ArticleModel.image-summary; font-family: Theme.ui-font; font-size: Theme.scribe ? 15px : 14px; color: Theme.secondary; overflow: elide; }
+                    }
+                    ActionButton { text: Theme.scribe ? Strings.load-all-images : Strings.load-all-short; primary: true; border-radius: 24px; clicked => { ArticleModel.event("article.load-all-images", ""); } }
+                }
+            }
+            if ArticleModel.tool == "type": VerticalLayout {
+                spacing: Theme.scribe ? 16px : 8px;
+                HorizontalLayout { height: 28px; spacing: 8px; Text { text: Strings.article-typography; font-family: Theme.ui-font; font-size: 18px; font-weight: 700; horizontal-stretch: 1; } Text { text: Strings.article-independent-typography; font-family: Theme.ui-font; font-size: Theme.scribe ? 15px : 14px; color: Theme.secondary; } }
+                ScaleControl { values: Theme.scribe ? root.font-values-sc : root.font-values-pw; value: ArticleModel.font-size; label: Strings.font-size; chosen(value) => { ArticleModel.event("article.font-size-select", "" + value); } step(value) => { ArticleModel.event("article.font-size", "" + value); } }
+                if Theme.scribe: HorizontalLayout {
+                    spacing: 24px;
+                    VerticalLayout { height: 76px; spacing: 8px; Text { text: Strings.font; height: 20px; font-family: Theme.ui-font; font-size: 15px; color: Theme.secondary; } FontSegments { fonts: ArticleModel.fonts; current: ArticleModel.font-choice; article-mode: true; selected(value) => { ArticleModel.event("article.font", value); } } }
+                    OptionGroup { label: Strings.font-weight; current: "" + ArticleModel.weight; options: [{id: "300", label: Strings.thin}, {id: "400", label: Strings.regular}, {id: "700", label: Strings.bold}]; selected(value) => { ArticleModel.event("article.weight", value); } }
+                    OptionGroup { label: Strings.paragraph-spacing; current: ArticleModel.gap-choice; options: [{id: "tight", label: Strings.tight}, {id: "mid", label: Strings.normal}, {id: "loose", label: Strings.loose}]; selected(value) => { ArticleModel.event("article.paragraph-gap", value); } }
+                }
+                if !Theme.scribe: HorizontalLayout { height: 56px; spacing: 12px; Text { text: Strings.font; width: 76px; font-family: Theme.ui-font; font-size: 16px; color: Theme.secondary; vertical-alignment: center; } FontSegments { fonts: ArticleModel.fonts; current: ArticleModel.font-choice; article-mode: true; selected(value) => { ArticleModel.event("article.font", value); } } }
+                if !Theme.scribe: OptionRow { label: Strings.font-weight; current: "" + ArticleModel.weight; options: [{id: "300", label: Strings.thin}, {id: "400", label: Strings.regular}, {id: "700", label: Strings.bold}]; selected(value) => { ArticleModel.event("article.weight", value); } }
+                if !Theme.scribe: OptionRow { label: Strings.paragraph-spacing; current: ArticleModel.gap-choice; options: [{id: "tight", label: Strings.tight}, {id: "mid", label: Strings.normal}, {id: "loose", label: Strings.loose}]; selected(value) => { ArticleModel.event("article.paragraph-gap", value); } }
+            }
+        }
+        Rectangle {
+            y: root.content-height;
+            height: Theme.scribe ? 76px : 64px;
+            Rectangle { x: 0px; y: 0px; width: parent.width; height: 1px; background: Theme.line; }
+            HorizontalLayout {
+                ToolButton { label: Strings.article-list; icon: "list"; clicked => { ArticleModel.event("article.list", "true"); } }
+                ToolButton { label: Strings.images; icon: "picture"; selected: ArticleModel.tool == "images"; clicked => { ArticleModel.event("article.tool", "images"); } }
+                ToolButton { label: Strings.font; icon: "type"; selected: ArticleModel.tool == "type"; clicked => { ArticleModel.event("article.tool", "type"); } }
+                ToolButton { label: Strings.phone-open; icon: "phone"; clicked => { ArticleModel.event("article.qr", "true"); } }
+            }
+        }
+    }
+}
+
+component ArticleList inherits Rectangle {
+    TouchArea { clicked => { ArticleModel.event("article.list", "false"); } }
+    Rectangle {
+        x: 0px; y: 0px;
+        width: Theme.scribe ? 560px : root.width;
+        height: root.height;
+        background: Theme.paper;
+        border-width: Theme.scribe ? 2px : 0px;
+        border-color: Theme.ink;
+        TouchArea { }
+        VerticalLayout {
+            spacing: 0px;
+            Rectangle {
+                height: 96px;
+                Rectangle { x: 0px; y: 0px; width: parent.width; height: 28px; Text { x: Theme.page-margin; y: 0px; height: parent.height; text: ArticleModel.clock; font-family: Theme.ui-font; font-size: 14px; vertical-alignment: center; } }
+                HorizontalLayout {
+                    y: 28px; height: 68px; padding-left: Theme.page-margin; padding-right: 8px; spacing: 12px;
+                    Rectangle { width: 44px; height: 44px; border-radius: 22px; background: Theme.ink; Text { text: ArticleModel.account-initial; font-family: Theme.serif-font; font-size: 18px; font-weight: 700; color: Theme.paper; horizontal-alignment: center; vertical-alignment: center; } }
+                    VerticalLayout {
+                        alignment: center; spacing: 2px; horizontal-stretch: 1;
+                        Text { text: ArticleModel.account; font-family: Theme.ui-font; font-size: Theme.scribe ? 22px : 19px; font-weight: 700; overflow: elide; }
+                        Text { text: ArticleModel.list-summary; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; overflow: elide; }
+                    }
+                    IconButton { icon: "close"; label: Strings.close; clicked => { ArticleModel.event("article.list", "false"); } }
+                }
+                Rectangle { x: 0px; y: parent.height - 1px; width: parent.width; height: 1px; background: Theme.line; }
+            }
+            Rectangle {
+                vertical-stretch: 1; clip: true;
+                VerticalLayout {
+                    spacing: 0px;
+                    for entry in ArticleModel.articles: Rectangle {
+                        height: Theme.scribe ? 92px : 80px;
+                        background: entry.id == ArticleModel.current-id || row-touch.pressed ? Theme.ink : Theme.paper;
+                        VerticalLayout {
+                            padding-top: 12px; padding-bottom: 12px; padding-left: Theme.page-margin; padding-right: Theme.page-margin; spacing: 8px;
+                            Text { text: entry.title; font-family: Theme.serif-font; font-size: Theme.scribe ? 19px : 17px; font-weight: entry.id == ArticleModel.current-id ? 700 : 400; color: entry.id == ArticleModel.current-id || row-touch.pressed ? Theme.paper : Theme.ink; overflow: elide; }
+                            Text { text: entry.subtitle + (entry.id == ArticleModel.current-id ? " · " + Strings.reading-current : ""); font-family: Theme.ui-font; font-size: 14px; color: entry.id == ArticleModel.current-id || row-touch.pressed ? Theme.paper : Theme.secondary; overflow: elide; }
+                        }
+                        Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
+                        row-touch := SwipeTouchArea { tapped => { ArticleModel.event("article.open", entry.id); } swiped(value) => { ArticleModel.event("article.list-page", "" + value); } }
+                    }
+                    Rectangle { vertical-stretch: 1; }
+                }
+            }
+            PageBar { page: ArticleModel.list-page; count: ArticleModel.list-pages; turn(value) => { ArticleModel.event("article.list-page", "" + value); } }
+        }
+    }
+}
+
+component ArticleQr inherits Rectangle {
+    TouchArea { clicked => { ArticleModel.event("article.qr", "false"); } }
+    Rectangle {
+        x: Theme.scribe ? (root.width - 480px) / 2 : 40px;
+        y: Theme.scribe ? 300px : 150px;
+        width: Theme.scribe ? 480px : root.width - 80px;
+        height: qr-content.preferred-height;
+        background: Theme.paper;
+        border-width: 2px;
+        border-color: Theme.ink;
+        border-radius: 10px;
+        TouchArea { }
+        qr-content := VerticalLayout {
+            padding: Theme.scribe ? 28px : 24px; spacing: Theme.scribe ? 16px : 14px;
+            Text { text: Strings.phone-qr-title; font-family: Theme.serif-font; font-size: Theme.scribe ? 26px : 23px; font-weight: 700; horizontal-alignment: center; }
+            Rectangle { height: Theme.scribe ? 300px : 260px; Image { x: (parent.width - self.width) / 2; y: 0px; source: ArticleModel.qr; width: Theme.scribe ? 300px : 260px; height: parent.height; image-fit: contain; } }
+            Text { text: Strings.phone-qr-hint; font-family: Theme.ui-font; font-size: Theme.scribe ? 17px : 16px; color: Theme.secondary; wrap: word-wrap; horizontal-alignment: center; }
+            ActionButton { text: Strings.close; height: Theme.scribe ? 52px : 48px; clicked => { ArticleModel.event("article.qr", "false"); } }
+        }
+    }
+}
+
+component ArticleEnding inherits Rectangle {
+    height: 180px;
+    VerticalLayout {
+        padding-top: Theme.scribe ? 22px : 16px;
+        spacing: Theme.scribe ? 16px : 14px;
+        alignment: start;
+        Text { text: Strings.article-complete; height: Theme.scribe ? 30px : 26px; font-family: Theme.serif-font; font-size: Theme.scribe ? 20px : 18px; letter-spacing: Theme.scribe ? 6px : 5.4px; horizontal-alignment: center; }
+        if !Theme.scribe && ArticleModel.has-next: HorizontalLayout {
+            height: 48px; alignment: center;
+            ActionButton { text: Strings.next-article + ": " + ArticleModel.next-title + " ›"; primary: true; border-radius: 24px; max-width: parent.width; clicked => { ArticleModel.event("article.next", ""); } }
+        }
+        if !Theme.scribe: HorizontalLayout {
+            height: 48px; alignment: center; spacing: 10px;
+            ActionButton { text: Strings.return-article-list; border-width: 1px; border-radius: 24px; clicked => { ArticleModel.event("article.list", "true"); } }
+            ActionButton { text: Strings.phone-comments; border-width: 1px; border-radius: 24px; clicked => { ArticleModel.event("article.qr", "true"); } }
+        }
+        if Theme.scribe: HorizontalLayout {
+            height: 48px; alignment: center; spacing: 12px;
+            ActionButton { text: Strings.return-article-list; border-width: 1px; border-radius: 24px; clicked => { ArticleModel.event("article.list", "true"); } }
+            if ArticleModel.has-next: ActionButton { text: Strings.next-article + ": " + ArticleModel.next-title + " ›"; primary: true; border-radius: 24px; max-width: parent.width - 200px; clicked => { ArticleModel.event("article.next", ""); } }
+        }
+        if Theme.scribe: HorizontalLayout {
+            height: 48px; alignment: center;
+            ActionButton { text: Strings.phone-comments; border-width: 1px; border-radius: 24px; clicked => { ArticleModel.event("article.qr", "true"); } }
+        }
+    }
+}
+
+export component ReaderScreen inherits Rectangle {
+    background: Theme.paper;
+    property <length> text-width: root.width - (Theme.scribe && ReaderModel.notes-panel ? 300px : 0px);
+    property <length> body-top: ReaderModel.show-heading ? (Theme.scribe ? 204px : 164px) : (Theme.scribe ? 76px : 54px);
+    property <length> start-x;
+    property <length> start-y;
+    property <bool> swiped;
+    property <length> indent-width: ReaderModel.font-size * (ReaderModel.indent-choice == "0" ? 0px : ReaderModel.indent-choice == "1" ? 1px : 2px);
+    Rectangle {
+        x: 0px; y: 0px;
+        width: root.text-width;
+        height: root.height;
+        Rectangle {
+            x: 0px; y: 0px; width: parent.width;
+            height: Theme.scribe ? 48px : 36px;
+            HorizontalLayout {
+                padding-left: ReaderModel.margin * 1px;
+                padding-right: ReaderModel.margin * 1px;
+                Text { text: ReaderModel.title; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; vertical-alignment: bottom; overflow: elide; horizontal-stretch: 1; }
+                Text { text: ReaderModel.clock; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; vertical-alignment: bottom; }
+            }
+        }
+        if ReaderModel.bookmarked: Rectangle {
+            x: parent.width - ReaderModel.margin * 1px - 16px;
+            y: 0px;
+            width: 16px; height: 32px; background: Theme.ink;
+        }
+        if ReaderModel.show-heading: VerticalLayout {
+            x: ReaderModel.margin * 1px;
+            y: Theme.scribe ? 80px : 58px;
+            width: parent.width - ReaderModel.margin * 2px;
+            height: Theme.scribe ? 108px : 92px;
+            spacing: 8px;
+            Text { text: ReaderModel.chapter-meta; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; }
+            Text { text: ReaderModel.chapter-title; font-family: ReaderModel.font-family; font-size: Theme.scribe ? 36px : 30px; font-weight: 700; overflow: elide; }
+            Text { text: ReaderModel.author; font-family: Theme.ui-font; font-size: 16px; color: Theme.secondary; }
+        }
+        body := Rectangle {
+            x: ReaderModel.margin * 1px;
+            y: root.body-top;
+            width: parent.width - ReaderModel.margin * 2px;
+            height: parent.height - root.body-top - 48px;
+            clip: true;
+            for line[index] in ReaderModel.lines: Rectangle {
+                x: 0px; width: parent.width;
+                y: line.height > 0 ? line.y * 1px : index * ReaderModel.font-size * ReaderModel.line-height * 1px;
+                height: line.height > 0 ? line.height * 1px : ReaderModel.font-size * ReaderModel.line-height * 1px;
+                Text {
+                    x: line.indent ? root.indent-width : 0px;
+                    y: 0px;
+                    width: parent.width - self.x;
+                    height: parent.height;
+                    text: line.text;
+                    horizontal-alignment: left;
+                    font-family: ReaderModel.font-family;
+                    font-size: ReaderModel.font-size * 1px;
+                    font-weight: ReaderModel.weight;
+                    letter-spacing: line.letter-spacing * 1px;
+                    color: Theme.ink;
+                    vertical-alignment: center;
+                    overflow: clip;
+                }
+                for mark in line.marks: Rectangle {
+                    x: mark.x * 1px;
+                    y: min(parent.height - self.height - 1px, (parent.height + ReaderModel.font-size * 1px) / 2 + 1px);
+                    width: mark.width * 1px;
+                    height: mark.selected ? 3px : 2px;
+                    background: mark.selected || (mark.mine && ReaderModel.mine) ? Theme.ink : transparent;
+                    if mark.selected: Rectangle {
+                        x: 0px; y: -5px; width: 3px; height: 8px;
+                        background: Theme.ink;
+                    }
+                    if mark.selected: Rectangle {
+                        x: max(0px, parent.width - 3px); y: -5px; width: 3px; height: 8px;
+                        background: Theme.ink;
+                    }
+                    if !mark.selected && !mark.mine && ReaderModel.popular: DashedUnderline { }
+                    if !mark.selected && !mark.mine && ReaderModel.popular && mark.count > 0: Text {
+                        x: max(0px, parent.width - 36px);
+                        y: -(line.height > 0 ? line.height * 1px : ReaderModel.font-size * ReaderModel.line-height * 1px) + 5px;
+                        width: 36px;
+                        height: 20px;
+                        text: mark.count;
+                        font-family: Theme.ui-font;
+                        font-size: 14px;
+                        horizontal-alignment: right;
+                        color: Theme.secondary;
+                    }
+                }
+            }
+            if ReaderModel.lines.length == 0 && ReaderModel.images.length == 0 && !ReaderModel.access-notice: Text {
+                y: 80px;
+                text: ReaderModel.status == "" ? Strings.no-content : ReaderModel.status;
+                font-family: Theme.ui-font;
+                font-size: 18px;
+                color: Theme.secondary;
+                wrap: word-wrap;
+                horizontal-alignment: center;
+            }
+        }
+        Rectangle {
+            x: 0px; width: parent.width;
+            y: parent.height - (Theme.scribe ? 48px : 40px);
+            height: Theme.scribe ? 48px : 40px;
+            HorizontalLayout {
+                padding-left: ReaderModel.margin * 1px;
+                padding-right: ReaderModel.margin * 1px;
+                spacing: 16px;
+                Text { text: ReaderModel.chapter-title + (ReaderModel.access-label == "" ? "" : " · " + ReaderModel.access-label); font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                Text { text: ReaderModel.footer; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; vertical-alignment: center; }
+            }
+        }
+        surface := TouchArea {
+            enabled: !ReaderModel.toc-open && !(ReaderModel.thought-open && !(Theme.scribe && ReaderModel.notes-panel && ReaderModel.thought-position == "side")) && !ReaderModel.selection-open && !ReaderModel.sync-conflict;
+            pointer-event(event) => {
+                if event.kind == PointerEventKind.down {
+                    root.start-x = self.mouse-x;
+                    root.start-y = self.mouse-y;
+                    root.swiped = false;
+                    ReaderModel.event("reader.press", "" + self.mouse-x / root.text-width + "," + (self.mouse-y - root.body-top) / (ReaderModel.font-size * ReaderModel.line-height * 1px) + "," + (self.mouse-y - root.body-top) / 1px);
+                }
+                if event.kind == PointerEventKind.move && self.pressed {
+                    ReaderModel.event("reader.move", "" + self.mouse-x / root.text-width + "," + (self.mouse-y - root.body-top) / (ReaderModel.font-size * ReaderModel.line-height * 1px) + "," + (self.mouse-y - root.body-top) / 1px);
+                }
+                if event.kind == PointerEventKind.up {
+                    if abs(self.mouse-x - root.start-x) >= 64px && abs(self.mouse-x - root.start-x) > abs(self.mouse-y - root.start-y) {
+                        root.swiped = true;
+                    }
+                    if abs(self.mouse-y - root.start-y) >= 64px { root.swiped = true; }
+                    ReaderModel.event("reader.release", "" + self.mouse-x / root.text-width + "," + (self.mouse-y - root.body-top) / (ReaderModel.font-size * ReaderModel.line-height * 1px) + "," + (self.mouse-y - root.body-top) / 1px);
+                    if !ReaderModel.selection-open {
+                        if abs(self.mouse-x - root.start-x) >= 64px && abs(self.mouse-x - root.start-x) > abs(self.mouse-y - root.start-y) {
+                            ReaderModel.event("reader.turn", self.mouse-x < root.start-x ? "1" : "-1");
+                        } else if !root.swiped {
+                            ReaderModel.event("reader.tap", "" + self.mouse-x / root.text-width);
+                        }
+                    }
+                }
+                if event.kind == PointerEventKind.cancel {
+                    ReaderModel.event("reader.cancel", "");
+                }
+            }
+        }
+        Rectangle {
+            x: ReaderModel.margin * 1px;
+            y: root.body-top;
+            width: parent.width - ReaderModel.margin * 2px;
+            height: parent.height - root.body-top - 48px;
+            clip: true;
+            for picture in ReaderModel.images: Rectangle {
+                x: (parent.width - self.width) / 2;
+                y: picture.y * 1px;
+                width: min(parent.width, picture.width * 1px);
+                height: picture.height * 1px;
+                if picture.loaded: Image {
+                    x: 0px; y: 0px;
+                    width: parent.width;
+                    height: max(1px, parent.height - 24px);
+                    source: picture.picture;
+                    image-fit: contain;
+                }
+                if !picture.loaded: Rectangle {
+                    x: 0px; y: 0px;
+                    width: parent.width;
+                    height: max(1px, parent.height - 24px);
+                    border-width: 2px;
+                    border-color: Theme.line;
+                    background: image-touch.pressed ? Theme.ink : Theme.paper;
+                    VerticalLayout {
+                        padding: 16px;
+                        alignment: center;
+                        spacing: 8px;
+                        Text { text: Strings.load-image; font-family: Theme.ui-font; font-size: 18px; color: image-touch.pressed ? Theme.paper : Theme.ink; horizontal-alignment: center; wrap: word-wrap; }
+                        Text { text: Strings.images-off-hint; font-family: Theme.ui-font; font-size: 14px; color: image-touch.pressed ? Theme.paper : Theme.secondary; horizontal-alignment: center; wrap: word-wrap; }
+                    }
+                    accessible-role: button;
+                    accessible-label: Strings.load-image;
+                    image-touch := TouchArea {
+                        pointer-event(event) => { if event.kind == PointerEventKind.down { Theme.refresh("press"); } else if event.kind == PointerEventKind.up { Theme.refresh("release"); } }
+                        clicked => { ReaderModel.event("reader.load-image", picture.id); }
+                    }
+                }
+                Text {
+                    x: 0px; y: max(0px, parent.height - 24px);
+                    width: parent.width; height: 24px;
+                    text: picture.caption;
+                    font-family: Theme.ui-font;
+                    font-size: 14px;
+                    color: Theme.secondary;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+            }
+        }
+        if ReaderModel.lines.length == 0 && ReaderModel.images.length == 0 && !ReaderModel.access-notice: ActionButton {
+            x: (parent.width - 280px) / 2;
+            y: root.body-top + 200px;
+            width: 280px;
+            text: Strings.download;
+            primary: true;
+            enabled: ReaderModel.can-download && !ReaderModel.download-busy;
+            clicked => { ReaderModel.event("reader.download", "current"); }
+        }
+        if ReaderModel.access-notice: Rectangle {
+            x: ReaderModel.margin * 1px;
+            y: root.body-top + ReaderModel.access-offset * 1px;
+            width: parent.width - ReaderModel.margin * 2px;
+            height: 148px;
+            background: Theme.paper;
+            VerticalLayout {
+                spacing: 12px;
+                alignment: start;
+                Text {
+                    height: 64px;
+                    text: ReaderModel.access-hint;
+                    font-family: Theme.ui-font;
+                    font-size: 16px;
+                    color: Theme.secondary;
+                    wrap: word-wrap;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+                HorizontalLayout {
+                    alignment: center;
+                    ActionButton {
+                        width: min(280px, parent.width);
+                        text: ReaderModel.download-busy ? Strings.content-refreshing : ReaderModel.access-action;
+                        enabled: ReaderModel.can-download && !ReaderModel.download-busy;
+                        clicked => { ReaderModel.event("reader.refresh-access", ""); }
+                    }
+                }
+            }
+        }
+    }
+
+    if Theme.scribe && ReaderModel.notes-panel: Rectangle {
+        x: root.text-width;
+        y: 0px;
+        width: 300px;
+        height: root.height;
+        background: Theme.paper;
+        Rectangle { x: 0px; y: 0px; width: 1px; height: parent.height; background: Theme.line; }
+        VerticalLayout {
+            spacing: 0px;
+            Rectangle {
+                height: 76px;
+                HorizontalLayout {
+                    padding-left: 24px; padding-right: 8px;
+                    Text { text: Strings.current-page-notes + " " + ReaderModel.thought-count; font-family: Theme.ui-font; font-size: 19px; font-weight: 700; vertical-alignment: center; horizontal-stretch: 1; }
+                    IconButton { icon: "close"; label: Strings.close; clicked => { ReaderModel.event("reader.panel", "false"); } }
+                }
+                Rectangle { y: parent.height - 2px; height: 2px; background: Theme.ink; }
+            }
+            Rectangle {
+                clip: true;
+                vertical-stretch: 1;
+                VerticalLayout {
+                    spacing: 0px;
+                    for thought in ReaderModel.thoughts: ThoughtCard { entry: thought; clicked => { ReaderModel.event("reader.thought", thought.id); } }
+                    if ReaderModel.thoughts.length == 0: Text { text: Strings.no-annotations; font-family: Theme.ui-font; font-size: 16px; color: Theme.secondary; wrap: word-wrap; width: 252px; x: 24px; }
+                    Rectangle { vertical-stretch: 1; }
+                }
+            }
+            if ReaderModel.thought-pages > 1: HorizontalLayout {
+                height: 48px;
+                padding-left: 8px; padding-right: 8px;
+                IconButton { icon: "back"; label: Strings.previous-page; enabled: ReaderModel.thought-page > 1; clicked => { ReaderModel.event("reader.thought-page", "-1"); } }
+                Text { text: ReaderModel.thought-page + " / " + ReaderModel.thought-pages; font-family: Theme.ui-font; font-size: 16px; horizontal-alignment: center; vertical-alignment: center; horizontal-stretch: 1; }
+                IconButton { icon: "next"; label: Strings.next-page; enabled: ReaderModel.thought-page < ReaderModel.thought-pages; clicked => { ReaderModel.event("reader.thought-page", "1"); } }
+            }
+        }
+    }
+
+    if ReaderModel.menu: ReaderMenu { }
+    if ReaderModel.toc-open: ReaderContents { }
+    if ReaderModel.thought-open: ThoughtPopup { }
+    if ReaderModel.selection-open: SelectionPopup { }
+    if ReaderModel.sync-conflict: SyncConflictPopup { }
+}
+
+export component ArticleScreen inherits Rectangle {
+    background: Theme.paper;
+    property <length> page-margin: Theme.scribe ? 72px : 32px;
+    property <length> start-x;
+    property <length> start-y;
+    property <bool> swiped;
+    Rectangle {
+        x: 0px; y: 0px; width: root.width;
+        height: Theme.scribe ? 48px : 36px;
+        HorizontalLayout {
+            padding-left: root.page-margin; padding-right: root.page-margin;
+            Text { text: ArticleModel.account + " · " + Strings.publications; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; vertical-alignment: bottom; overflow: elide; horizontal-stretch: 1; }
+            Text { text: ArticleModel.clock; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; vertical-alignment: bottom; }
+        }
+    }
+    article-surface := TouchArea {
+        enabled: !ArticleModel.list-open && !ArticleModel.qr-open;
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down { root.start-x = self.mouse-x; root.start-y = self.mouse-y; root.swiped = false; }
+            if event.kind == PointerEventKind.up {
+                if abs(self.mouse-x - root.start-x) >= 64px && abs(self.mouse-x - root.start-x) > abs(self.mouse-y - root.start-y) {
+                    root.swiped = true;
+                    ArticleModel.event("article.turn", self.mouse-x < root.start-x ? "1" : "-1");
+                }
+                if abs(self.mouse-y - root.start-y) >= 64px { root.swiped = true; }
+            }
+        }
+        clicked => { if !root.swiped { ArticleModel.event("article.tap", "" + self.mouse-x / root.width); } }
+    }
+    Rectangle {
+        x: root.page-margin;
+        y: Theme.scribe ? 80px : 54px;
+        width: root.width - root.page-margin * 2;
+        height: root.height - self.y - (Theme.scribe ? 56px : 48px);
+        clip: true;
+        VerticalLayout {
+            spacing: 0px;
+            for block in ArticleModel.blocks: Rectangle {
+                height: block.height * 1px;
+                background: Theme.paper;
+                if block.kind == "title": Text { x: 0px; y: 0px; width: parent.width; height: parent.height; horizontal-alignment: left; vertical-alignment: top; text: block.text; font-family: Theme.serif-font; font-size: Theme.scribe ? 38px : 28px; font-weight: 700; wrap: word-wrap; overflow: elide; }
+                if block.kind == "meta": Rectangle {
+                    x: 0px; y: 0px; width: parent.width; height: parent.height;
+                    HorizontalLayout {
+                        y: 0px; height: parent.height - 16px; spacing: 12px;
+                        Rectangle { width: Theme.scribe ? 42px : 34px; height: Theme.scribe ? 42px : 34px; border-radius: self.width / 2; background: Theme.ink; Text { text: ArticleModel.account-initial; font-family: Theme.serif-font; font-size: Theme.scribe ? 18px : 15px; font-weight: 700; color: Theme.paper; horizontal-alignment: center; vertical-alignment: center; } }
+                        VerticalLayout {
+                            alignment: center; spacing: 4px; horizontal-stretch: 1;
+                            Text { text: ArticleModel.account; font-family: Theme.ui-font; font-size: Theme.scribe ? 18px : 15px; font-weight: 700; }
+                            Text { text: block.text; font-family: Theme.ui-font; font-size: Theme.scribe ? 15px : 14px; color: Theme.secondary; overflow: elide; }
+                        }
+                    }
+                    Rectangle { x: 0px; y: parent.height - 8px; width: parent.width; height: 1px; background: Theme.line; }
+                }
+                if block.kind == "line" || block.kind == "paragraph" || block.kind == "heading": Text {
+                    x: 0px; y: 0px; width: parent.width; height: block.content-height > 0 ? block.content-height * 1px : parent.height;
+                    horizontal-alignment: left; vertical-alignment: center;
+                    text: block.text;
+                    font-family: ArticleModel.font-family;
+                    font-size: ArticleModel.font-size * (block.kind == "heading" ? 1.1px : 1px);
+                    font-weight: block.kind == "heading" ? 700 : ArticleModel.weight;
+                    letter-spacing: block.letter-spacing * 1px;
+                    wrap: no-wrap;
+                    overflow: clip;
+                }
+                if block.kind == "quote": Rectangle {
+                    x: 0px; y: 0px; width: parent.width;
+                    height: (block.inset-top + ceil(block.content-height) + block.inset-bottom) * 1px;
+                    background: Theme.fill;
+                    border-top-left-radius: block.inset-top > 0 ? 6px : 0px;
+                    border-top-right-radius: block.inset-top > 0 ? 6px : 0px;
+                    border-bottom-left-radius: block.inset-bottom > 0 ? 6px : 0px;
+                    border-bottom-right-radius: block.inset-bottom > 0 ? 6px : 0px;
+                    Text {
+                        x: block.inset-horizontal * 1px; y: block.inset-top * 1px;
+                        width: parent.width - block.inset-horizontal * 2px; height: block.content-height * 1px;
+                        text: block.text;
+                        font-family: Theme.serif-font;
+                        font-size: ArticleModel.font-size * 0.95px;
+                        font-weight: ArticleModel.weight;
+                        letter-spacing: block.letter-spacing * 1px;
+                        vertical-alignment: center;
+                        wrap: no-wrap;
+                        overflow: clip;
+                    }
+                }
+                if block.kind == "image": Rectangle {
+                    x: 0px; y: 0px;
+                    width: parent.width;
+                    height: block.frame-height * 1px;
+                    border-radius: 6px;
+                    clip: true;
+                    background: image-touch.pressed ? Theme.fill : Theme.paper;
+                    if block.loaded: Image { x: 0px; y: 0px; width: parent.width; height: parent.height; source: block.picture; image-fit: cover; }
+                    if !block.loaded: VerticalLayout {
+                        alignment: center; spacing: 8px;
+                        Rectangle { height: Theme.scribe ? 40px : 34px; Icon { x: (parent.width - self.width) / 2; y: 0px; width: Theme.scribe ? 40px : 34px; height: self.width; kind: "picture"; } }
+                        Text { text: Strings.load-image; font-family: Theme.ui-font; font-size: 17px; font-weight: 700; horizontal-alignment: center; }
+                        Text { text: (block.meta == "" ? "" : block.meta + " · ") + Strings.images-off-hint; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; horizontal-alignment: center; }
+                    }
+                    if !block.loaded: DashedOutline { stroke-color: Theme.ink; stroke: 2px; radius: 6px; }
+                    image-touch := SwipeTouchArea { enabled: !block.loaded; tapped => { ArticleModel.event("article.load-image", block.id); } swiped(value) => { ArticleModel.event("article.turn", "" + value); } }
+                }
+                if block.kind == "image": Text { x: 0px; width: parent.width; y: (block.frame-height + block.caption-gap) * 1px; height: block.caption-height * 1px; text: block.text; font-family: Theme.ui-font; font-size: Theme.scribe ? 15px : 14px; color: Theme.secondary; horizontal-alignment: center; overflow: elide; }
+                if block.kind == "end": ArticleEnding { }
+            }
+            if ArticleModel.blocks.length == 0: VerticalLayout {
+                alignment: center; spacing: 20px;
+                Text { text: ArticleModel.title; font-family: Theme.serif-font; font-size: 28px; font-weight: 700; wrap: word-wrap; horizontal-alignment: center; }
+                Text { text: ArticleModel.status == "" ? Strings.no-content : ArticleModel.status; font-family: Theme.ui-font; font-size: 18px; color: Theme.secondary; wrap: word-wrap; horizontal-alignment: center; }
+                ActionButton { text: Strings.download; primary: true; enabled: ArticleModel.can-download && !ArticleModel.download-busy; clicked => { ArticleModel.event("article.download", ""); } }
+            }
+            Rectangle { vertical-stretch: 1; }
+        }
+    }
+    Rectangle {
+        x: 0px; width: root.width;
+        y: root.height - (Theme.scribe ? 48px : 40px);
+        height: Theme.scribe ? 48px : 40px;
+        HorizontalLayout {
+            padding-left: root.page-margin; padding-right: root.page-margin; spacing: 16px;
+            Text { text: ArticleModel.title; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+            Text { text: ArticleModel.footer; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; vertical-alignment: center; }
+        }
+    }
+    if ArticleModel.menu: ArticleMenu { }
+    if ArticleModel.list-open: ArticleList { }
+    if ArticleModel.qr-open: ArticleQr { }
+}
+

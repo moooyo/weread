@@ -4,6 +4,8 @@ Status: research summary and design proposal. This document does not establish a
 
 ## Scope
 
+Implementation update: the user subsequently supplied and authorized design handoff v0.2. Its accepted numeric tokens are stored in `assets/design-tokens.json`; the implementation uses those grayscale, typography, geometry, touch-target, pagination, and refresh rules. The original research and proposals below remain historical context. See [Implementation status](IMPLEMENTATION_STATUS.md) for the current design coverage and evidence boundaries.
+
 The intended application is an independent Kindle bookstore application using Rust, Slint, and a project-owned Kindle platform layer. The intended device families are Paperwhite PW5, Paperwhite PW6, and Scribe. These are target devices, not a statement of verified application compatibility.
 
 This document records the available references and proposed UI direction. It does not contain application code or authorize assumptions about book-content retrieval capabilities.

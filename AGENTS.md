@@ -7,7 +7,7 @@
 
 ## Current scope
 
-- This is a documentation-only planning repository until the user authorizes application implementation.
+- Application implementation was authorized on 2026-11-03 using the supplied design handoff v0.2. Keep implementation status and outstanding acceptance gates explicit.
 - Preserve the current decisions in README.md and docs/ARCHITECTURE.md.
 - Record proposed choices and unresolved questions separately from accepted decisions and verified facts.
 - Do not infer upstream book-download capabilities from cover-image availability.

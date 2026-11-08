@@ -2,7 +2,7 @@
 
 Recorded: 2026-11-03 (Asia/Shanghai).
 
-This is a plan, not a record of completed implementation or verification. The current repository contains documentation only.
+This document preserves the original implementation plan. Application implementation was subsequently authorized on the same date from the supplied design handoff v0.2. Current completion and verification evidence are recorded separately in [Implementation status](IMPLEMENTATION_STATUS.md); outstanding device and live-account gates below still apply.
 
 ## Phase 1: Resolve feasibility boundaries
 
@@ -57,6 +57,8 @@ Passing cover retrieval alone does not pass content-acquisition feasibility.
 - Document installation, upgrades, removal, recovery, and known limitations.
 
 ## Verification environment
+
+See [Testing feasibility and proposed strategy](TESTING_STRATEGY.md) for desktop Slint coverage, a candidate full-system Kindle firmware emulator, and the remaining physical-device acceptance gates. These are proposed verification arrangements, not completed implementation or compatibility results. Device feasibility should be established early rather than after all application features are complete.
 
 Follow the repository's AGENTS.md. Local tests, builds, validation suites, smoke tests, and runtime probes require explicit authorization in the current task. Otherwise use the designated remote environment, and report a blocked environment rather than silently switching to local verification.
 

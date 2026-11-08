@@ -1,0 +1,51 @@
+{
+  "package": "swash",
+  "version": "0.2.10",
+  "upstream_registry": "https://crates.io/crates/swash/0.2.10",
+  "published_crate_sha256": "6c2499c2d826531388872b2268718aed907a39bd785ab0dcfe57fab26283f92e",
+  "vcs_revision": "7773843df0d63cd468db61a29c152b5e7a99d4ab",
+  "modified_files": [
+    {
+      "path": "src/scale/raster_budget_tests.rs",
+      "bytes": 10778,
+      "sha256": "eb0fb8c2e62d220a412b69056f4b216d38b8a7c782afaad1f95b8e8c129e094a"
+    },
+    {
+      "path": "PATCHES.md",
+      "bytes": 2971,
+      "sha256": "fef9ce8fdf0f65989398c6a6d1a8246abd8b7e1f676fd698f3c50620566ae76e"
+    },
+    {
+      "path": "Cargo.toml",
+      "bytes": 1872,
+      "sha256": "1562e3faa7abb4a11eb71fb9ff65283fb2334a9f033fcf77c57c23cd23a1dacb"
+    },
+    {
+      "path": "src/scale/mod.rs",
+      "sha256": "f1f5afe89d7f66ac517200a4be6d3d0398ddd3b33e1783e15e31895f43203580",
+      "bytes": 39846
+    },
+    {
+      "path": "src/scale/raster_budget.rs",
+      "sha256": "7f666b3903ec006d51956dff1dd5ebdcddaff64826060321254dab10e530aeec",
+      "bytes": 7990
+    },
+    {
+      "path": "src/scale/fill_raster_budget_tests.rs",
+      "sha256": "ad33f1a7961847233b96609ee624e7905ab328f1b269c48a04f0b7ddbfda35e6",
+      "bytes": 32373
+    }
+  ],
+  "source_override": "The already resolved package is reused at this local path without a package-version upgrade",
+  "test_dependency": "Existing locked flate2 1.1.10 is a package dev dependency. Root tiny reachability tests reuse existing locked Swash0.2.10/Skrifa0.44.0 without enabling new default features.",
+  "license": "Original Apache-2.0 OR MIT licensing retained; no project license selected",
+  "verification": "Source-integration checkpoint only. The fixed outline-mask overlay passed limited source review; this source leaf does not certify package tests or compilation. Complete execution is recorded separately for the matching canonical candidate.",
+  "fill_raster_patch": {
+    "source": "R30 fixed-v2",
+    "manifest_sha256": "17445b06957d5c2e6e131db509ad53fa6ffc0d3bae282bec066fc719fe389063",
+    "zeno_version": "0.3.3",
+    "scope": "Current Outline usesfallibleFillRasterBudget, onlyOk publishes allImagefields",
+    "tests": "Nine genuine Swash package tests, not yet executed",
+    "review": "Limitedv2delta0extra doesnot replacecomplete source rounds or remoteexecution"
+  }
+}

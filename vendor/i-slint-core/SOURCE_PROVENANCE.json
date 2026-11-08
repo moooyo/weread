@@ -1,0 +1,41 @@
+{
+  "package": "i-slint-core",
+  "version": "1.17.1",
+  "upstream_registry": "https://crates.io/crates/i-slint-core/1.17.1",
+  "published_crate_sha256": "4e407dc2bd5385dcbdd9c1cf927213d2e4bacda667545abf8839c60f8290f754",
+  "vcs_revision": "cf62c975c311e7036d599ed8ed0b7e6a8386a934",
+  "source_path_in_vcs": "internal/core",
+  "patch": "Borrowed native text-edit admission at existing key/paste/IME/Undo/Redo, numeric Jump and Cut/Delete planned-range boundaries",
+  "modified_files": [
+    {
+      "path": "api.rs",
+      "base_sha256": "e130bac1790aa990b85771c9bcac05c352571498abe6104ac435b96142d66564",
+      "patched_sha256": "a25d7bbdf03032a8044dc693a9239cc21fc336f291775fc325fb51f1b6de48b9",
+      "v1_sha256": "A25D7BBDF03032A8044DC693A9239CC21FC336F291775FC325FB51F1B6DE48B9",
+      "v2_sha256": "A25D7BBDF03032A8044DC693A9239CC21FC336F291775FC325FB51F1B6DE48B9",
+      "patched_bytes": 58141,
+      "r28_sha256": "a25d7bbdf03032a8044dc693a9239cc21fc336f291775fc325fb51f1b6de48b9"
+    },
+    {
+      "path": "window.rs",
+      "base_sha256": "25636fef500c0b07a2f3b69fb1c7165b176cbf3fa89f7d7ada74b5c675d7a8f6",
+      "patched_sha256": "e9fe34bb27b9273913d7fac5699d6da1eb7b13115fbe6fecf669c7f61a037ced",
+      "v1_sha256": "111CAFCA4969B7892B0797E47DF14ED3E66B5F12FD4AF138A2C88B1B632B4BFE",
+      "v2_sha256": "E9FE34BB27B9273913D7FAC5699D6DA1EB7B13115FBE6FECF669C7F61A037CED",
+      "patched_bytes": 128023,
+      "r28_sha256": "e9fe34bb27b9273913d7fac5699d6da1eb7b13115fbe6fecf669c7f61a037ced"
+    },
+    {
+      "path": "items/text.rs",
+      "base_sha256": "8b167a043320896ab40758aac053c33f173f2b3c2f5e1b88a0ba8ee817c605c1",
+      "patched_sha256": "5c1a028df7b5cb215217ce9f63e0a4e08e3c914a23e3ec982b79bcbe40426e7d",
+      "v1_sha256": "36271877BA946A1A376A1C47C74A9B605D56EAC799C4B3A69145D396D6F2210C",
+      "v2_sha256": "FC7C08ABF3E9B94BBA374369E25A491786F1D8F37E092216102ADD4FAD2730FB",
+      "patched_bytes": 102996,
+      "r28_sha256": "1a2bb9f6bb9c1bbc2035ccdec42d6d992ac736a068c0b26b149d314cd8d8d204"
+    }
+  ],
+  "source_override": "The existing resolved package uses this local path; no package/version additions or upgrade",
+  "license": "Original package licensing metadata retained; no project-license choice",
+  "verification": "Source-integration checkpoint only. Limited Core v2/v3 deltas were reviewed; R29 adds planned-range Cut/Delete admission. This source leaf does not certify compilation or execution. Complete verification is recorded separately for its matching canonical candidate."
+}

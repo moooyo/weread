@@ -1,0 +1,33 @@
+{
+  "package": "zeno",
+  "version": "0.3.3",
+  "upstream_registry": "https://crates.io/crates/zeno/0.3.3",
+  "published_crate_sha256": "6df3dc4292935e51816d896edcd52aa30bc297907c26167fec31e2b0c6a32524",
+  "vcs_revision": "698399439f8035736d01de00cbcdc413b3976a18",
+  "patch": "Opt-in fallible FillRasterBudget at actualFill/line/curve/Cell/indices/sweep accesses",
+  "source_override": "The already resolved dependency is reused at this local path with its original manifest/licenses; it is excluded fromworkspacepackage tests to avoid unused upstreambenchmarkdevdependencies",
+  "modified_files": [
+    {
+      "path": "src/lib.rs",
+      "sha256": "3f23a59f0360657ce6c27e95798563a62db9428c9c8e99514d212df35506ab70",
+      "bytes": 12904
+    },
+    {
+      "path": "src/mask.rs",
+      "sha256": "c3fcc2323ac0ffd8299b416c2344013c3512698d001991e2c99bf0b7a12f31d4",
+      "bytes": 21386
+    },
+    {
+      "path": "src/raster.rs",
+      "sha256": "500c16ad06207db7f6594cb6ba82a0ec9cfb3203448cdf17575dfebc7f711b07",
+      "bytes": 41178
+    },
+    {
+      "path": "src/fill_raster_budget.rs",
+      "sha256": "2c8091db9311ce397ead4d8b976f47c2b90db1a34df86ac32b4951543e8cda5f",
+      "bytes": 15142
+    }
+  ],
+  "license": "Original Apache-2.0 OR MIT source/notices retained; no applicationlicense decision",
+  "source_only_review": "V2 limiteddelta0extra, v1exact-cellreallocationissue preservedasfixedhistory; this source record doesnotcertify build or tests"
+}
