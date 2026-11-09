@@ -2227,13 +2227,12 @@ impl App {
                         "toggle",
                         String::new(),
                         preferences.dark_mode,
-                        hardware.application_dark_mode,
-                        if hardware.application_dark_mode {
-                            if self.native_theme_sync_available() {
-                                "native_dark_mode_persist_hint"
-                            } else {
-                                "application_dark_mode_hint"
-                            }
+                        hardware.application_dark_mode
+                            && (!self.platform.is_kindle || self.native_theme_sync_available()),
+                        if hardware.application_dark_mode
+                            && (!self.platform.is_kindle || self.native_theme_sync_available())
+                        {
+                            ""
                         } else {
                             "application_dark_mode_unavailable"
                         },

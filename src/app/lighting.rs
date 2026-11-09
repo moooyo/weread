@@ -3,15 +3,70 @@
 use super::lighting_worker::{
     LightKind, LightRequest, LightResult, LightWorker, WorkerCompletion, join_worker,
 };
+use super::session_restore::{LauncherContext, NativeThemeResult};
 use super::*;
-use crate::platform::PlatformError;
+use crate::platform::{ManagedSleepState, PlatformError};
+use anyhow::{bail, ensure};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 const LIGHT_STOP_DEADLINE: Duration = Duration::from_millis(2250);
+const NATIVE_THEME_SUSPEND_DEADLINE: Duration = Duration::from_secs(7);
+const NATIVE_THEME_REQUEST_DEADLINE: Duration = Duration::from_secs(30);
+const NATIVE_THEME_RESUME_DEADLINE: Duration = Duration::from_secs(5);
+const NATIVE_THEME_COMMIT_DEADLINE: Duration = Duration::from_secs(10);
+
+/// A confirmed Kindle system setting owns appearance across launches. Desktop
+/// renderers continue to restore the application's saved appearance locally.
+pub(super) fn restore_dark_mode(
+    platform: &Platform,
+    store: &Store,
+    prefs: &mut AppPreferences,
+) -> Result<()> {
+    let native_dark = platform
+        .is_kindle
+        .then(|| platform.native_output_inverted())
+        .flatten();
+    if let Some(native_dark) = native_dark {
+        prefs.dark_mode = native_dark;
+    }
+    if platform.capabilities().application_dark_mode {
+        platform.set_dark_mode(prefs.dark_mode)?;
+    }
+    if native_dark.is_some() {
+        if let Err(error) = store.set_setting("preferences", prefs) {
+            crate::diagnostic!("Save startup native dark mode failed: {error:#}");
+        }
+    }
+    Ok(())
+}
 
 struct PendingLight {
     id: u64,
 }
+
+#[derive(Clone, Copy)]
+enum NativeThemePhase {
+    Suspending,
+    AwaitingResult,
+    Resuming {
+        result: NativeThemeResult,
+        mirror_failed: bool,
+    },
+    AwaitingCommit {
+        result: NativeThemeResult,
+        mirror_failed: bool,
+    },
+    Failed,
+}
+
+struct PendingNativeTheme {
+    context: LauncherContext,
+    sequence: u64,
+    target: bool,
+    phase: NativeThemePhase,
+    started: Instant,
+}
+
 struct BatteryRead {
     cancelled: Arc<AtomicBool>,
     reply: mpsc::Receiver<std::result::Result<u8, PlatformError>>,
@@ -88,6 +143,11 @@ pub(super) struct LightingState {
     stopping: bool,
     battery: Option<BatteryRead>,
     status: String,
+    native_theme_sequence: u64,
+    native_theme: Option<PendingNativeTheme>,
+    native_theme_exit_requested: bool,
+    #[cfg(test)]
+    native_theme_test_context: Option<LauncherContext>,
 }
 impl LightingState {
     #[cfg(test)]
@@ -121,6 +181,275 @@ impl LightingState {
 }
 
 impl App {
+    fn native_theme_context(&self) -> Result<Option<LauncherContext>> {
+        #[cfg(test)]
+        if let Some(context) = self.lighting.native_theme_test_context.as_ref() {
+            return Ok(Some(context.clone()));
+        }
+        LauncherContext::from_environment()
+    }
+
+    pub(super) fn native_theme_sync_available(&self) -> bool {
+        self.platform.is_kindle
+            && self.platform.native_output_inverted().is_some()
+            && self.platform.managed_sleep_supported()
+            && self
+                .native_theme_context()
+                .ok()
+                .flatten()
+                .is_some_and(|context| context.native_theme_advertised().unwrap_or(false))
+    }
+
+    /// Preserve a window-close intent until the native transaction has returned
+    /// both input and its complete frame, without reusing old theme preferences.
+    pub fn defer_exit_during_native_theme(&mut self) -> bool {
+        if self.lighting.native_theme.is_some() {
+            self.lighting.native_theme_exit_requested = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(super) fn toggle_dark_mode(&mut self) -> Result<()> {
+        if !self.platform.capabilities().application_dark_mode {
+            self.show_toast("application_dark_mode_unavailable");
+            return Ok(());
+        }
+        if self.platform.is_kindle {
+            let Some(native_dark) = self.platform.native_output_inverted() else {
+                self.show_toast("application_dark_mode_unavailable");
+                return Ok(());
+            };
+            if !self.platform.managed_sleep_supported() {
+                self.show_toast("application_dark_mode_unavailable");
+                return Ok(());
+            }
+            let Some(context) = self.native_theme_context()? else {
+                self.show_toast("application_dark_mode_unavailable");
+                return Ok(());
+            };
+            if !context.native_theme_available()? {
+                self.show_toast("application_dark_mode_unavailable");
+                return Ok(());
+            }
+            return self.begin_native_theme_change(context, !native_dark);
+        }
+
+        let previous = self.prefs.dark_mode;
+        let enabled = !previous;
+        self.platform.set_dark_mode(enabled)?;
+        self.prefs.dark_mode = enabled;
+        if let Err(error) = self.save_preferences() {
+            self.prefs.dark_mode = previous;
+            let _ = self.platform.set_dark_mode(previous);
+            return Err(error);
+        }
+        self.show_toast(if enabled {
+            "dark_mode_on"
+        } else {
+            "dark_mode_off"
+        });
+        Ok(())
+    }
+
+    fn begin_native_theme_change(&mut self, context: LauncherContext, target: bool) -> Result<()> {
+        ensure!(
+            self.lighting.native_theme.is_none()
+                && !self.closing.get()
+                && !self.managed_sleep_blocked,
+            "A native theme change cannot overlap another application handoff"
+        );
+        self.lighting.native_theme_sequence = self
+            .lighting
+            .native_theme_sequence
+            .checked_add(1)
+            .ok_or_else(|| anyhow::anyhow!("The native theme sequence is exhausted"))?;
+        self.lighting.native_theme = Some(PendingNativeTheme {
+            context,
+            sequence: self.lighting.native_theme_sequence,
+            target,
+            phase: NativeThemePhase::Suspending,
+            started: Instant::now(),
+        });
+        let prepared = (|| -> Result<()> {
+            self.prepare_resident_sleep()?;
+            self.platform.set_managed_sleep(true)?;
+            Ok(())
+        })();
+        if prepared.is_err() {
+            self.lighting.native_theme.as_mut().unwrap().phase = NativeThemePhase::Failed;
+            self.show_toast("hardware_unavailable");
+        }
+        prepared
+    }
+
+    /// Poll before the sleep protocol consumes process signals. Theme changes
+    /// reuse its resident renderer handoff without opening a stock settings UI.
+    pub fn poll_native_theme(&mut self) -> Result<bool> {
+        let Some(mut pending) = self.lighting.native_theme.take() else {
+            return Ok(false);
+        };
+        let result = self.poll_native_theme_inner(&mut pending, Instant::now());
+        if !matches!(&result, Ok(false)) {
+            if result.is_err() {
+                pending.phase = NativeThemePhase::Failed;
+            }
+            self.lighting.native_theme = Some(pending);
+        } else if self.lighting.native_theme_exit_requested {
+            self.lighting.native_theme_exit_requested = false;
+            if let Err(error) = self.request_exit() {
+                crate::diagnostic!("Complete the deferred native theme exit failed: {error:#}");
+                self.show_toast("api_error");
+            } else {
+                return Ok(true);
+            }
+        }
+        result
+    }
+
+    fn poll_native_theme_inner(
+        &mut self,
+        pending: &mut PendingNativeTheme,
+        now: Instant,
+    ) -> Result<bool> {
+        ensure!(
+            !matches!(pending.phase, NativeThemePhase::Failed),
+            "The native theme handoff has already failed"
+        );
+        ensure!(
+            !self.closing.get(),
+            "The native theme application is closing"
+        );
+        ensure!(
+            !pending.context.native_theme_interrupted()?,
+            "Native power ownership interrupted the theme handoff"
+        );
+        let state = self.platform.managed_sleep_state()?;
+        match pending.phase {
+            NativeThemePhase::Suspending => {
+                ensure!(
+                    now.saturating_duration_since(pending.started) < NATIVE_THEME_SUSPEND_DEADLINE,
+                    "The renderer did not release native theme input and display in time"
+                );
+                match state {
+                    ManagedSleepState::Running | ManagedSleepState::Suspending => {}
+                    ManagedSleepState::Suspended => {
+                        pending
+                            .context
+                            .request_native_theme(pending.sequence, pending.target)?;
+                        pending.phase = NativeThemePhase::AwaitingResult;
+                        pending.started = now;
+                    }
+                    _ => bail!("The renderer lost ownership while preparing a native theme change"),
+                }
+                Ok(true)
+            }
+            NativeThemePhase::AwaitingResult => {
+                ensure!(
+                    now.saturating_duration_since(pending.started) < NATIVE_THEME_REQUEST_DEADLINE,
+                    "The supervisor did not confirm native theme ownership in time"
+                );
+                ensure!(
+                    state == ManagedSleepState::Suspended,
+                    "The renderer resumed native theme ownership without a supervisor result"
+                );
+                if let Some(result) = pending.context.native_theme_result(pending.sequence)? {
+                    if let Some(observation) = pending
+                        .context
+                        .native_theme_portrait_calibration(pending.sequence)?
+                    {
+                        self.platform.prepare_native_portrait_resume(observation)?;
+                    }
+                    self.lighting.status.clear();
+                    self.synchronize_native_dark_mode(result.inverted)?;
+                    let mirror_failed = self.lighting.status == tr("api_error");
+                    ensure!(
+                        !pending.context.native_theme_interrupted()?,
+                        "Native power ownership changed before theme rendering resumed"
+                    );
+                    self.platform.set_managed_sleep(false)?;
+                    pending.phase = NativeThemePhase::Resuming {
+                        result,
+                        mirror_failed,
+                    };
+                    pending.started = now;
+                }
+                Ok(true)
+            }
+            NativeThemePhase::Resuming {
+                result,
+                mirror_failed,
+            } => {
+                ensure!(
+                    now.saturating_duration_since(pending.started) < NATIVE_THEME_RESUME_DEADLINE,
+                    "The renderer did not restore native theme input and display in time"
+                );
+                match state {
+                    ManagedSleepState::Suspended | ManagedSleepState::Resuming => Ok(true),
+                    ManagedSleepState::Running => {
+                        pending.context.acknowledge_native_theme(pending.sequence)?;
+                        pending.phase = NativeThemePhase::AwaitingCommit {
+                            result,
+                            mirror_failed,
+                        };
+                        pending.started = now;
+                        Ok(true)
+                    }
+                    _ => bail!("The renderer could not restore the confirmed native theme frame"),
+                }
+            }
+            NativeThemePhase::AwaitingCommit {
+                result,
+                mirror_failed,
+            } => {
+                ensure!(
+                    now.saturating_duration_since(pending.started) < NATIVE_THEME_COMMIT_DEADLINE,
+                    "The supervisor did not commit native theme ownership in time"
+                );
+                ensure!(
+                    state == ManagedSleepState::Running,
+                    "The renderer lost native theme ownership before the supervisor committed"
+                );
+                if !pending.context.native_theme_committed(pending.sequence)? {
+                    return Ok(true);
+                }
+                // The server has returned to its running phase before removing
+                // this request. Only then can another tap publish a new one.
+                self.resume_resident_sleep()?;
+                if !result.confirmed {
+                    self.lighting_failed();
+                } else if !mirror_failed {
+                    self.show_toast(if result.inverted {
+                        "dark_mode_on"
+                    } else {
+                        "dark_mode_off"
+                    });
+                }
+                Ok(false)
+            }
+            NativeThemePhase::Failed => unreachable!("A failed theme handoff is rejected above"),
+        }
+    }
+
+    /// The system setting has already committed. Local preferences mirror that
+    /// observation; a storage error cannot undo it through software inversion.
+    pub(super) fn synchronize_native_dark_mode(&mut self, native_dark: bool) -> Result<()> {
+        self.prefs.dark_mode = native_dark;
+        let compensated = self.platform.set_native_output_inverted(native_dark);
+        let rendered = self.platform.set_dark_mode(native_dark);
+        if let Err(error) = self.save_preferences() {
+            crate::diagnostic!("Save confirmed native dark mode failed: {error:#}");
+            self.lighting.status = tr("api_error");
+            self.show_toast("api_error");
+        }
+        compensated?;
+        rendered?;
+        // Stage the current Reader or Settings model while rendering is held,
+        // before the backend can restore its retained frame and touch input.
+        self.render()
+    }
+
     pub(super) fn reader_is_active_page(&self) -> bool {
         matches!(self.route, Route::Reader(..))
     }

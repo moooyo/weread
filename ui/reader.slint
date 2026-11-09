@@ -595,7 +595,7 @@ component ReaderMenu inherits Rectangle {
                     HorizontalLayout { height: 20px; Text { text: Strings.warmth; font-family: Theme.ui-font; font-size: 17px; horizontal-stretch: 1; } Text { text: ReaderModel.warmth-known ? "" + ReaderModel.warmth : "—"; font-family: Theme.ui-font; font-size: 17px; color: Theme.secondary; } }
                     ScaleControl { values: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24]; value: ReaderModel.warmth; enabled: ReaderModel.hardware-warmth && ReaderModel.warmth-known; label: Strings.warmth; small-label: "−"; large-label: "+"; segments: true; chosen(value) => { ReaderModel.event("reader.warmth-select", "" + value); } step(value) => { ReaderModel.event("reader.warmth", "" + value); } }
                 }
-                ToggleRow { text: Strings.night-mode; subtitle: ReaderModel.night-supported ? (ReaderModel.native-theme-sync ? Strings.native-dark-mode-persist-hint : Strings.application-dark-mode-hint) : Strings.application-dark-mode-unavailable; checked: ReaderModel.night; enabled: ReaderModel.night-supported; toggled => { ReaderModel.event("reader.night", "toggle"); } }
+                ToggleRow { text: Strings.night-mode; subtitle: ReaderModel.night-supported ? "" : Strings.application-dark-mode-unavailable; checked: ReaderModel.night; enabled: ReaderModel.night-supported; toggled => { ReaderModel.event("reader.night", "toggle"); } }
             }
 
             if ReaderModel.tool == "type" && ReaderModel.subtool == "": VerticalLayout {
@@ -725,8 +725,22 @@ component ReaderContents inherits Rectangle {
                             HorizontalLayout {
                                 padding-left: Theme.page-margin; padding-right: Theme.page-margin; spacing: 12px;
                                 Text { text: chapter.title; font-family: Theme.ui-font; font-size: 18px; color: chapter.current || row-touch.pressed ? Theme.paper : Theme.ink; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
-                                if chapter.cached: Icon { kind: "download"; width: 20px; height: 20px; inverted: chapter.current || row-touch.pressed; }
-                                Text { text: chapter.meta; font-family: Theme.ui-font; font-size: 14px; color: chapter.current || row-touch.pressed ? Theme.paper : Theme.secondary; vertical-alignment: center; }
+                                Rectangle {
+                                    width: chapter-status.preferred-width + (chapter.cached ? 32px : 0px);
+                                    height: parent.height;
+                                    if chapter.cached: Icon {
+                                        x: 0px; y: (parent.height - self.height) / 2;
+                                        kind: "download"; width: 20px; height: 20px;
+                                        inverted: chapter.current || row-touch.pressed;
+                                    }
+                                    chapter-status := Text {
+                                        x: chapter.cached ? 32px : 0px; y: 0px;
+                                        width: parent.width - self.x; height: parent.height;
+                                        text: chapter.meta; font-family: Theme.ui-font; font-size: 14px;
+                                        color: chapter.current || row-touch.pressed ? Theme.paper : Theme.secondary;
+                                        vertical-alignment: center;
+                                    }
+                                }
                             }
                             Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
                             row-touch := SwipeTouchArea { tapped => { ReaderModel.event("reader.open-chapter", chapter.id); } swiped(value) => { ReaderModel.event("reader.toc-page", "" + value); } }

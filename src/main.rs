@@ -379,8 +379,11 @@ fn run(arguments: Arguments) -> Result<()> {
     } else {
         data_dir.clone()
     };
-    let startup_dark_mode = weread::preferences::startup_dark_mode_hint(&startup_data_dir)
-        .unwrap_or_else(|| platform.native_output_inverted().unwrap_or(false));
+    let startup_dark_mode = platform
+        .native_output_inverted()
+        .filter(|_| platform.is_kindle)
+        .or_else(|| weread::preferences::startup_dark_mode_hint(&startup_data_dir))
+        .unwrap_or(false);
     let mut startup = platform::StartupScreen::show(&platform, startup_dark_mode)
         .context("Show the native startup screen")?;
     startup.set_stage(platform::StartupStage::Fonts);
@@ -485,11 +488,14 @@ fn run(arguments: Arguments) -> Result<()> {
     let close_quitting = quitting.clone();
     let close_application = application.clone();
     ui.window().on_close_requested(move || {
-        match close_application.borrow_mut().request_exit() {
-            Ok(()) => close_quitting.set(true),
-            Err(error) => close_failures
-                .borrow_mut()
-                .push(format!("Close the application failed: {error:#}")),
+        let mut application = close_application.borrow_mut();
+        if !application.defer_exit_during_native_theme() {
+            match application.request_exit() {
+                Ok(()) => close_quitting.set(true),
+                Err(error) => close_failures
+                    .borrow_mut()
+                    .push(format!("Close the application failed: {error:#}")),
+            }
         }
         // Keep the window alive until its final capture and persistent writes finish.
         slint::CloseRequestResponse::KeepWindowShown
@@ -519,6 +525,17 @@ fn run(arguments: Arguments) -> Result<()> {
                 return;
             }
             if native {
+                match timer_application.borrow_mut().poll_native_theme() {
+                    Ok(true) => return,
+                    Ok(false) => {}
+                    Err(error) => {
+                        timer_failures
+                            .borrow_mut()
+                            .push(format!("Native theme handoff failed: {error:#}"));
+                        request_quit(&timer_quitting, &timer_failures);
+                        return;
+                    }
+                }
                 match timer_application.borrow_mut().poll_managed_sleep(
                     SUSPEND_REQUESTED.swap(false, Ordering::AcqRel),
                     RESUME_REQUESTED.swap(false, Ordering::AcqRel),

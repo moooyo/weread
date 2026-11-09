@@ -1,6 +1,10 @@
 # Native theme continuity and login exit
 
-Status: implemented and verified on the user-identified Scribe 2022 / firmware
+Status: the resident system-theme transaction described below is implemented
+and has passing current remote verification; its new physical verification is
+pending. [Native reading corrections](NATIVE_FIX_ACCEPTANCE.md) binds those
+results to the current source and artifact. Historical explicit-exit
+theme continuity was verified on the user-identified Scribe 2022 / firmware
 5.19.5 with executable `2fd3d6ab2d64` and launcher `799d5bba5eb9`. Native exit
 synchronization, the next startup, Reader wake, and login close passed the
 scoped physical checks. See [Verification](VERIFICATION.md) and
@@ -14,10 +18,24 @@ application-local grayscale inversion. Its saved dark preference remained true
 after exit, while the native system remained in `Y8`; it did not erase the
 application preference. The new behavior extends that earlier boundary.
 
-A successful, explicit application exit may synchronize the selected mode to
-the native interface after application input and rendering have ended. Sleep,
-USB, external termination, crashes, demo mode, unsupported firmware, and an
-unknown native mode do not authorize a system theme write.
+The user subsequently requested that the night-mode control change the Kindle
+system setting immediately and remove the local-only informational hint. On a
+supported Kindle, including an explicitly supervised demo or offline session,
+the control now requests a protected resident transaction. Application input
+and rendering pause, the owning launcher briefly continues its captured window
+manager, sets and reads back the system mode, pauses the same manager again,
+and resumes the retained application only after a complete frame and input
+acknowledgment. Ordinary night-mode changes preserve the application process,
+Reader position, and user rotation. Desktop appearance remains local.
+
+Known system state is authoritative at startup, wake, and a successful change.
+A rejected or unknown system transaction does not silently become a local-only
+toggle. After a system change commits, preference-mirror failure is reported
+without reverting the system or the displayed state. New application exits do
+not publish a stale preference as a second system transaction. Sleep, USB,
+external termination, unsupported firmware, and unknown modes do not independently
+authorize a theme write. The earlier explicit-exit behavior remains a historical
+artifact-specific result rather than proof of the new transaction.
 
 The login screen provides an always-available close icon. Closing cancels and
 fences login work, then uses the ordinary application-exit path. It preserves
@@ -41,9 +59,9 @@ establish support for other device/firmware combinations.
 
 The property producer runs in `awesome`, which the supervisor pauses while
 WeRead owns the panel. Therefore the application does not issue theme IPC
-during normal rendering. The supervisor samples the actual mode before taking
-native control and attempts an authorized exit update only after continuing
-the window manager it paused. Setter/readback and available persistent-config
+while that producer is paused. The supervisor samples the actual mode before
+taking native control and handles a protected live theme request only after
+the application has suspended its rendering and input. Setter/readback and available persistent-config
 checks use bounded private helper process groups. Failure must still return
 native input and display ownership.
 
@@ -62,8 +80,9 @@ compensates for the actual native mode.
 | Light | Off (`Y8`) | Off |
 
 This applies to startup feedback, the initial panel fill, and subsequent RGB
-output. With no saved application preference, first use inherits the known
-native mode. An explicit saved application preference remains authoritative.
+output. On an identified Kindle with a confirmed native observation, the system
+mode overrides a stale saved application preference. With unknown system state,
+the current appearance is retained; desktop saved preferences remain local.
 
 Startup mode records bind the private supervisor generation and nonce; wake
 records also bind the current sleep cycle. Wake updates compensation before
@@ -81,6 +100,11 @@ checks, same-cycle wake ordering, ordinary-exit intent, IPC acceptance and
 readback, helper cleanup, failure recovery, and login close interaction.
 Successful mock tests do not establish native panel appearance or persistence
 across a real device restart.
+
+The current resident transaction, TOC alignment correction, and default SSH
+display environment have their own remote results and pending physical gates. Earlier
+`2fd3/799d` and resource-review `381a` observations must not be retagged as
+acceptance of these later changes.
 
 The normal-entry physical run verified native dark appearance after exit, the
 next startup without double inversion, Reader screen-saver sleep/wake with the

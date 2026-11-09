@@ -6,6 +6,8 @@ set -eu
 umask 077
 
 WEREAD_HOME=${WEREAD_HOME:-/mnt/us/weread}
+DISPLAY=${DISPLAY:-:0.0}
+export DISPLAY
 APP_DIR=$WEREAD_HOME/app
 DATA_DIR=$WEREAD_HOME/data
 PROFILE_FILE=$DATA_DIR/device-profile
@@ -159,8 +161,13 @@ NATIVE_DARK_EXIT_ALLOWED=0
 NATIVE_THEME_COMMAND_PID=''
 NATIVE_THEME_COMMAND_BIRTH=''
 NATIVE_THEME_COMMAND_SEQUENCE=0
+NATIVE_THEME_REQUEST_SEQUENCE=0
+NATIVE_THEME_REQUEST_TARGET=''
+NATIVE_THEME_IN_PROGRESS=0
+NATIVE_THEME_STAGE=idle
 NATIVE_THEME_TIMEOUT_TICKS=30
 NATIVE_COMMAND_EXIT_STATUS=''
+NATIVE_COMMAND_FAILURE=''
 NATIVE_QUERY_OUTPUT_LIMIT=4096
 NATIVE_WINDOW_OUTPUT_LIMIT=65536
 NATIVE_COMMAND_FILE_BLOCKS=256
@@ -488,6 +495,7 @@ stop_native_theme_command() {
 
 owned_native_command() {
     NATIVE_COMMAND_EXIT_STATUS=''
+    NATIVE_COMMAND_FAILURE=preparation
     native_output_limit=$1
     shift
     case "$native_output_limit" in *[!0-9]*|'') return 1 ;; esac
@@ -554,6 +562,7 @@ owned_native_command() {
     native_theme_checks=$NATIVE_THEME_TIMEOUT_TICKS
     native_theme_fast_checks=10
     native_theme_status=1
+    NATIVE_COMMAND_FAILURE=unconfirmed
     native_theme_released=0
     while [ "$native_theme_checks" -gt 0 ]; do
         if [ -z "$NATIVE_THEME_COMMAND_BIRTH" ] &&
@@ -571,9 +580,18 @@ owned_native_command() {
                 native_theme_released=1
             fi
             if [ -r "$LOCK_DIR/native-theme-done" ]; then
-                case "$(cat "$LOCK_DIR/native-theme-done" 2>/dev/null || :)" in
-                    0) native_theme_status=0; NATIVE_COMMAND_EXIT_STATUS=0 ;;
-                    1) NATIVE_COMMAND_EXIT_STATUS=1 ;;
+                native_completed_status=$(cat "$LOCK_DIR/native-theme-done" 2>/dev/null || :)
+                case "$native_completed_status" in
+                    0) native_theme_status=0; NATIVE_COMMAND_EXIT_STATUS=0; NATIVE_COMMAND_FAILURE='' ;;
+                    *[!0-9]*|'') NATIVE_COMMAND_FAILURE=invalid-completion ;;
+                    *)
+                        if [ "$native_completed_status" -le 255 ]; then
+                            NATIVE_COMMAND_EXIT_STATUS=$native_completed_status
+                            NATIVE_COMMAND_FAILURE=command-exit
+                        else
+                            NATIVE_COMMAND_FAILURE=invalid-completion
+                        fi
+                        ;;
                 esac
                 break
             fi
@@ -594,27 +612,37 @@ owned_native_command() {
     if ! stop_native_theme_command; then
         native_theme_status=1
         NATIVE_COMMAND_EXIT_STATUS=''
+        NATIVE_COMMAND_FAILURE=helper-cleanup
         if [ "$CLEANUP_RUNNING" -eq 1 ]; then note_cleanup_failure 'native theme command helper'; fi
     fi
     if [ -n "$NATIVE_COMMAND_EXIT_STATUS" ]; then
         if ! native_output_size=$(wc -c 2>/dev/null <"$LOCK_DIR/native-theme-output"); then
             native_theme_status=1
             NATIVE_COMMAND_EXIT_STATUS=''
+            NATIVE_COMMAND_FAILURE=output-read
         else
             native_output_size=${native_output_size#"${native_output_size%%[![:space:]]*}"}
             native_output_size=${native_output_size%"${native_output_size##*[![:space:]]}"}
             case "$native_output_size" in
-                *[!0-9]*|'') native_theme_status=1; NATIVE_COMMAND_EXIT_STATUS='' ;;
+                *[!0-9]*|'') native_theme_status=1; NATIVE_COMMAND_EXIT_STATUS=''; NATIVE_COMMAND_FAILURE=output-size ;;
                 *)
                     if [ "$native_output_size" -gt "$native_output_limit" ]; then
                         native_theme_status=1
                         NATIVE_COMMAND_EXIT_STATUS=''
+                        NATIVE_COMMAND_FAILURE=output-limit
                     fi
                     ;;
             esac
         fi
     fi
     return "$native_theme_status"
+}
+
+log_native_command_failure() {
+    # Callers supply a fixed step name; paths, tokens and native output remain
+    # private. A missing completion is distinct from a proven command exit.
+    launcher_log 'weread: Native step failed step=%s exit=%s reason=%s.\n' \
+        "$1" "${NATIVE_COMMAND_EXIT_STATUS:-unconfirmed}" "${NATIVE_COMMAND_FAILURE:-unknown}"
 }
 
 native_theme_command() {
@@ -781,6 +809,8 @@ publish_native_portrait_calibration() {
     case "$NATIVE_PORTRAIT_CALIBRATION" in U:[0-3]|D:[0-3]|FIXED:[0-3]) ;; *) return 0 ;; esac
     if [ "$1" = managed-native-portrait-calibration ]; then
         printf '%s:%s:%s:%s\n' "$APP_GENERATION" "$LAUNCH_TOKEN" "$MANAGED_SLEEP_CYCLE" "$NATIVE_PORTRAIT_CALIBRATION" >"$LOCK_DIR/$1.pending" || return 1
+    elif [ "$1" = native-theme-portrait-calibration ]; then
+        printf '%s:%s:%s:%s\n' "$APP_GENERATION" "$LAUNCH_TOKEN" "$NATIVE_THEME_REQUEST_SEQUENCE" "$NATIVE_PORTRAIT_CALIBRATION" >"$LOCK_DIR/$1.pending" || return 1
     else
         printf '%s:%s:%s\n' "$APP_GENERATION" "$LAUNCH_TOKEN" "$NATIVE_PORTRAIT_CALIBRATION" >"$LOCK_DIR/$1.pending" || return 1
     fi
@@ -871,10 +901,21 @@ release_display() {
     for wm_identity in $restore_wm_identities; do
         wm_pid=${wm_identity%%:*}
         wm_birth=${wm_identity#*:}
-        if [ "$(process_birth "$wm_pid" 2>/dev/null || :)" = "$wm_birth" ] &&
-            kill -CONT "$wm_pid" 2>/dev/null; then
+        if [ "$(process_birth "$wm_pid" 2>/dev/null || :)" != "$wm_birth" ]; then
+            launcher_log '%s\n' 'weread: Native step failed step=window-manager-identity; the captured identity is no longer current.'
+            native_theme_wm_failed=1
+            display_release_status=1
+            case " $PAUSED_WM_IDENTITIES " in
+                *" $wm_identity "*) remaining_wm_identities="$remaining_wm_identities $wm_identity" ;;
+            esac
+            if [ "$wm_identity" = "$WM_STOP_PENDING_IDENTITY" ]; then
+                remaining_pending_wm_identity=$wm_identity
+            fi
+        elif kill -CONT "$wm_pid" 2>/dev/null; then
             native_theme_wm_resumed=1
         else
+            wm_resume_exit=$?
+            launcher_log 'weread: Native step failed step=window-manager-continue exit=%s.\n' "$wm_resume_exit"
             native_theme_wm_failed=1
             display_release_status=1
             case " $PAUSED_WM_IDENTITIES " in
@@ -894,11 +935,15 @@ release_display() {
             STATUSBAR_STOPPED=0
             STATUSBAR_RESTORE_REQUIRED=0
         else
+            log_native_command_failure statusbar-start
             display_release_status=1
         fi
     fi
     if command -v xrefresh >/dev/null 2>&1; then
-        owned_native_command "$NATIVE_QUERY_OUTPUT_LIMIT" xrefresh || display_release_status=1
+        if ! owned_native_command "$NATIVE_QUERY_OUTPUT_LIMIT" xrefresh; then
+            log_native_command_failure native-redraw
+            display_release_status=1
+        fi
     fi
     if [ "$display_release_status" -eq 0 ]; then DISPLAY_OWNED=0; fi
     return "$display_release_status"
@@ -980,6 +1025,245 @@ take_display() {
     done
     DISPLAY_OWNED=1
     return 0
+}
+
+native_theme_power_epoch_is_current() {
+    owned_child_is_running "$EVENT_SOURCE_PID" "$EVENT_SOURCE_BIRTH" "$$" &&
+        owned_child_is_running "$EVENT_SOURCE_CHILD_PID" "$EVENT_SOURCE_CHILD_BIRTH" "$EVENT_SOURCE_PID" || return 1
+    [ -f "$LOCK_DIR/native-theme-power-epoch" ] && [ ! -L "$LOCK_DIR/native-theme-power-epoch" ] || return 1
+    IFS=: read -r theme_epoch_token theme_epoch_count theme_epoch_extra <"$LOCK_DIR/native-theme-power-epoch" || return 1
+    [ "$theme_epoch_token" = "$LAUNCH_TOKEN" ] && [ -z "$theme_epoch_extra" ] &&
+        [ "$theme_epoch_count" = "$SLEEP_GENERATION" ]
+}
+
+latch_native_theme_interrupt() {
+    printf '%s:%s\n' "$APP_GENERATION" "$LAUNCH_TOKEN" >"$LOCK_DIR/native-theme-interrupt.pending" &&
+        mv -f "$LOCK_DIR/native-theme-interrupt.pending" "$LOCK_DIR/native-theme-interrupt"
+}
+
+clear_native_theme_power_interrupt() {
+    # The observer counts both SS and USB before relaying them. Main counts SS
+    # only after consuming them. A queued/new event cannot become a wake base.
+    if ! native_theme_power_epoch_is_current; then
+        latch_native_theme_interrupt || :
+        return 1
+    fi
+    if ! query_native_property com.lab126.powerd state; then
+        log_native_command_failure wake-power-state
+        return 1
+    fi
+    [ "$NATIVE_PROPERTY_VALUE" = active ] && native_theme_power_epoch_is_current || return 1
+    rm -f "$LOCK_DIR/native-theme-interrupt" "$LOCK_DIR/native-theme-interrupt.pending" || return 1
+    if ! native_theme_power_epoch_is_current; then
+        latch_native_theme_interrupt || :
+        return 1
+    fi
+}
+
+publish_native_theme_available() {
+    rm -f "$LOCK_DIR/native-theme-available" "$LOCK_DIR/native-theme-available.pending" || return 1
+    [ "$NATIVE_THEME_CAPTURE_STATUS" = known ] && [ "$DISPLAY_OWNED" -eq 1 ] &&
+        [ -n "$PAUSED_WM_IDENTITIES" ] && [ -z "$WM_STOP_PENDING_IDENTITY" ] &&
+        native_theme_supported && command -v lipc-set-prop >/dev/null 2>&1 &&
+        command -v get-dynconf-value >/dev/null 2>&1 || return 0
+    printf '%s:%s\n' "$APP_GENERATION" "$LAUNCH_TOKEN" >"$LOCK_DIR/native-theme-available.pending" &&
+        mv -f "$LOCK_DIR/native-theme-available.pending" "$LOCK_DIR/native-theme-available"
+}
+
+native_theme_sequence_is_new() {
+    case "$1" in *[!0-9]*|''|0*) return 1 ;; esac
+    [ "${#1}" -le 20 ] || return 1
+    # Prefix comparisons with a letter so awk never rounds a u64 as a number.
+    awk -v candidate="$1" -v previous="$NATIVE_THEME_REQUEST_SEQUENCE" '
+        BEGIN {
+            maximum = "18446744073709551615"
+            valid = length(candidate) < 20 || "x" candidate <= "x" maximum
+            newer = length(candidate) > length(previous) ||
+                (length(candidate) == length(previous) && "x" candidate > "x" previous)
+            exit !(valid && newer)
+        }
+    '
+}
+
+read_native_theme_request() {
+    [ -f "$LOCK_DIR/native-theme-request" ] && [ ! -L "$LOCK_DIR/native-theme-request" ] || return 1
+    theme_request_bytes=$(wc -c <"$LOCK_DIR/native-theme-request" 2>/dev/null) || return 1
+    theme_request_bytes=${theme_request_bytes#"${theme_request_bytes%%[![:space:]]*}"}
+    theme_request_bytes=${theme_request_bytes%"${theme_request_bytes##*[![:space:]]}"}
+    case "$theme_request_bytes" in *[!0-9]*|'') return 1 ;; esac
+    [ "$theme_request_bytes" -gt 0 ] && [ "$theme_request_bytes" -le 128 ] || return 1
+    IFS=: read -r theme_request_generation theme_request_token theme_request_sequence theme_request_target theme_request_extra <"$LOCK_DIR/native-theme-request" || return 1
+    [ "$theme_request_generation:$theme_request_token" = "$APP_GENERATION:$LAUNCH_TOKEN" ] &&
+        [ -z "$theme_request_extra" ] || return 1
+    case "$theme_request_target" in Y8|Y8INV) ;; *) return 1 ;; esac
+}
+
+native_theme_request_is_current() {
+    [ "$NATIVE_THEME_IN_PROGRESS" -eq 1 ] && [ "$APP_PHASE" = theme ] &&
+        managed_application_is_current && marker_matches_application native-theme-available &&
+        ! marker_matches_application ordinary-exit && native_theme_power_epoch_is_current &&
+        ! marker_matches_application native-theme-interrupt || return 1
+    read_native_theme_request || return 1
+    [ "$theme_request_sequence:$theme_request_target" = "$NATIVE_THEME_REQUEST_SEQUENCE:$NATIVE_THEME_REQUEST_TARGET" ]
+}
+
+native_theme_transaction_power_is_active() {
+    native_theme_request_is_current || return 1
+    if ! query_native_property com.lab126.powerd state; then
+        log_native_command_failure theme-power-state
+        return 1
+    fi
+    [ "$NATIVE_PROPERTY_VALUE" = active ] && native_theme_request_is_current
+}
+
+continue_theme_window_managers() {
+    [ -n "$PAUSED_WM_IDENTITIES" ] && [ -z "$WM_STOP_PENDING_IDENTITY" ] || return 1
+    for theme_wm_identity in $PAUSED_WM_IDENTITIES; do
+        theme_wm_pid=${theme_wm_identity%%:*}
+        theme_wm_birth=${theme_wm_identity#*:}
+        [ "$(process_birth "$theme_wm_pid" 2>/dev/null || :)" = "$theme_wm_birth" ] || return 1
+        case "$(sed -n 's/^State:[[:space:]]*//p' "/proc/$theme_wm_pid/status" 2>/dev/null || :)" in T*|t*) ;; *) return 1 ;; esac
+        kill -CONT "$theme_wm_pid" 2>/dev/null || return 1
+    done
+    # Retain every original restore obligation while the App is frozen.
+    DISPLAY_OWNED=0
+}
+
+pause_theme_window_managers() {
+    for theme_wm_identity in $PAUSED_WM_IDENTITIES; do
+        theme_wm_pid=${theme_wm_identity%%:*}
+        theme_wm_birth=${theme_wm_identity#*:}
+        [ "$(process_birth "$theme_wm_pid" 2>/dev/null || :)" = "$theme_wm_birth" ] || return 1
+        WM_STOP_PENDING_IDENTITY=$theme_wm_identity
+        kill -STOP "$theme_wm_pid" 2>/dev/null || return 1
+        theme_wm_checks=$(managed_wait_budget 1)
+        theme_wm_stopped=0
+        while [ "$theme_wm_checks" -gt 0 ]; do
+            [ "$(process_birth "$theme_wm_pid" 2>/dev/null || :)" = "$theme_wm_birth" ] || return 1
+            case "$(sed -n 's/^State:[[:space:]]*//p' "/proc/$theme_wm_pid/status" 2>/dev/null || :)" in
+                T*|t*) theme_wm_stopped=1; break ;;
+            esac
+            managed_wait_tick || return 1
+            theme_wm_checks=$((theme_wm_checks - 1))
+        done
+        [ "$theme_wm_stopped" -eq 1 ] || return 1
+        WM_STOP_PENDING_IDENTITY=''
+    done
+    DISPLAY_OWNED=1
+}
+
+perform_native_theme_request() {
+    NATIVE_THEME_STAGE=power-before-freeze
+    native_theme_transaction_power_is_active || return 1
+    NATIVE_THEME_STAGE=application-freeze
+    signal_managed_application STOP || return 1
+    theme_app_checks=$(managed_wait_budget 1)
+    theme_app_stopped=0
+    while [ "$theme_app_checks" -gt 0 ]; do
+        native_theme_request_is_current || return 1
+        case "$(sed -n 's/^State:[[:space:]]*//p' "/proc/$APP_CHILD_PID/status" 2>/dev/null || :)" in
+            T*|t*) theme_app_stopped=1; break ;;
+        esac
+        managed_wait_tick || return 1
+        theme_app_checks=$((theme_app_checks - 1))
+    done
+    [ "$theme_app_stopped" -eq 1 ] || return 1
+    NATIVE_THEME_STAGE=window-manager-continue
+    continue_theme_window_managers || return 1
+    NATIVE_THEME_STAGE=power-before-set
+    native_theme_transaction_power_is_active || return 1
+    NATIVE_THEME_STAGE=system-set
+    if ! native_theme_command lipc-set-prop -s com.lab126.winmgr epdcMode "$NATIVE_THEME_REQUEST_TARGET"; then
+        log_native_command_failure theme-set
+        [ "$NATIVE_COMMAND_FAILURE" = command-exit ] || return 1
+    fi
+    # A failed setter can still have changed the property. Only current native
+    # readback determines the mode which the suspended renderer may compensate.
+    NATIVE_THEME_STAGE=power-before-readback
+    native_theme_transaction_power_is_active || return 1
+    NATIVE_THEME_STAGE=system-readback
+    if ! native_theme_command lipc-get-prop -s com.lab126.winmgr epdcMode; then
+        log_native_command_failure theme-readback
+        return 1
+    fi
+    theme_confirmed_mode=$(cat "$LOCK_DIR/native-theme-output") || return 1
+    case "$theme_confirmed_mode" in Y8|Y8INV) ;; *) return 1 ;; esac
+    theme_result_status=error
+    NATIVE_THEME_STAGE=power-before-persistence
+    native_theme_transaction_power_is_active || return 1
+    NATIVE_THEME_STAGE=system-persistence
+    if native_theme_command get-dynconf-value winmgr.colorinverse.pref; then
+        theme_confirmed_preference=$(cat "$LOCK_DIR/native-theme-output") || return 1
+        if [ "$theme_confirmed_mode" = "$NATIVE_THEME_REQUEST_TARGET" ] &&
+            [ "$theme_confirmed_preference" = "$theme_confirmed_mode" ]; then
+            theme_result_status=ok
+        fi
+    else
+        log_native_command_failure theme-persistence
+        [ "$NATIVE_COMMAND_FAILURE" = command-exit ] || return 1
+    fi
+    NATIVE_THEME_STAGE=portrait-calibration
+    capture_native_portrait_calibration || return 1
+    NATIVE_THEME_STAGE=power-before-display
+    native_theme_transaction_power_is_active || return 1
+    NATIVE_THEME_STAGE=window-manager-pause
+    pause_theme_window_managers || return 1
+    NATIVE_THEME_STAGE=power-before-result
+    native_theme_transaction_power_is_active || return 1
+    NATIVE_EPDC_MODE=$theme_confirmed_mode
+    NATIVE_THEME_CAPTURE_STATUS=known
+    NATIVE_THEME_STAGE=result-publication
+    publish_native_epdc_mode native-epdc-mode || return 1
+    publish_native_portrait_calibration native-theme-portrait-calibration || return 1
+    printf '%s:%s:%s:%s:%s\n' "$APP_GENERATION" "$LAUNCH_TOKEN" "$NATIVE_THEME_REQUEST_SEQUENCE" "$theme_result_status" "$theme_confirmed_mode" >"$LOCK_DIR/native-theme-result.pending" &&
+        mv -f "$LOCK_DIR/native-theme-result.pending" "$LOCK_DIR/native-theme-result" || return 1
+    NATIVE_THEME_STAGE=power-before-continue
+    native_theme_transaction_power_is_active && [ "$DISPLAY_OWNED" -eq 1 ] || return 1
+    NATIVE_THEME_STAGE=application-continue
+    signal_managed_application CONT || return 1
+    theme_ready_checks=$(managed_wait_budget 10)
+    theme_ready_value="$APP_GENERATION:$LAUNCH_TOKEN:$NATIVE_THEME_REQUEST_SEQUENCE"
+    NATIVE_THEME_STAGE=renderer-acknowledgment
+    while [ "$theme_ready_checks" -gt 0 ]; do
+        native_theme_request_is_current || return 1
+        if [ -f "$LOCK_DIR/native-theme-ready" ] && [ ! -L "$LOCK_DIR/native-theme-ready" ] &&
+            IFS= read -r theme_ready_record <"$LOCK_DIR/native-theme-ready" &&
+            [ "$theme_ready_record" = "$theme_ready_value" ]; then
+            case "$(sed -n 's/^State:[[:space:]]*//p' "/proc/$APP_CHILD_PID/status" 2>/dev/null || :)" in T*|t*|Z*|X*|'') return 1 ;; esac
+            NATIVE_THEME_STAGE=power-after-renderer
+            native_theme_transaction_power_is_active || return 1
+            APP_PHASE=running
+            NATIVE_THEME_IN_PROGRESS=0
+            NATIVE_THEME_STAGE=commit-publication
+            # Removing this exact request commits the server side. The client
+            # retains its UI gate until that commit, so a second tap cannot
+            # replace the request while its predecessor is still being checked.
+            rm -f "$LOCK_DIR/native-theme-request" "$LOCK_DIR/native-theme-request.pending" || return 1
+            NATIVE_THEME_STAGE=idle
+            launcher_log 'weread: Native theme handoff confirmed result=%s mode=%s.\n' "$theme_result_status" "$theme_confirmed_mode"
+            return 0
+        fi
+        managed_wait_tick || return 1
+        theme_ready_checks=$((theme_ready_checks - 1))
+    done
+    launcher_log '%s\n' 'weread: Native theme renderer acknowledgment timed out.'
+    return 1
+}
+
+begin_native_theme_request() {
+    [ "$APP_PHASE" = running ] && [ "$NATIVE_THEME_IN_PROGRESS" -eq 0 ] || return 0
+    marker_matches_application native-theme-available && marker_matches_application managed-sleep-available || return 0
+    read_native_theme_request || return 0
+    [ "$theme_request_generation:$theme_request_sequence" = "$1:$2" ] &&
+        native_theme_sequence_is_new "$theme_request_sequence" || return 0
+    managed_application_is_current || return 1
+    NATIVE_THEME_REQUEST_SEQUENCE=$theme_request_sequence
+    NATIVE_THEME_REQUEST_TARGET=$theme_request_target
+    NATIVE_THEME_IN_PROGRESS=1
+    NATIVE_THEME_STAGE=request-preparation
+    APP_PHASE=theme
+    rm -f "$LOCK_DIR/native-theme-result" "$LOCK_DIR/native-theme-result.pending" "$LOCK_DIR/native-theme-ready" "$LOCK_DIR/native-theme-ready.pending" "$LOCK_DIR/native-theme-portrait-calibration" "$LOCK_DIR/native-theme-portrait-calibration.pending" || return 1
+    perform_native_theme_request
 }
 
 run_application() {
@@ -1074,9 +1358,15 @@ start_application() {
     MANAGED_FROZEN=0
     MANAGED_SLEEP_CYCLE=0
     NATIVE_DARK_EXIT_ALLOWED=0
+    NATIVE_THEME_REQUEST_SEQUENCE=0
+    NATIVE_THEME_REQUEST_TARGET=''
+    NATIVE_THEME_IN_PROGRESS=0
+    NATIVE_THEME_STAGE=idle
     rm -f "$LOCK_DIR/application-pid" "$LOCK_DIR/application-birth" "$LOCK_DIR/application-owned" "$LOCK_DIR/sleep-request" "$LOCK_DIR/resume-ready" "$LOCK_DIR/ordinary-exit" "$LOCK_DIR/state-open" "$LOCK_DIR/state-open.pending" "$LOCK_DIR/native-wifi-request" "$LOCK_DIR/native-quick-request" "$LOCK_DIR/native-return" "$LOCK_DIR/native-wifi-available" "$LOCK_DIR/native-quick-available" "$LOCK_DIR/managed-sleep-available" "$LOCK_DIR/managed-sleep-available.pending" "$LOCK_DIR/managed-sleep-request" "$LOCK_DIR/managed-sleep-request.pending" "$LOCK_DIR/managed-sleep-ready" "$LOCK_DIR/managed-sleep-ready.pending" "$LOCK_DIR/managed-wake-request" "$LOCK_DIR/managed-wake-request.pending" "$LOCK_DIR/managed-wake-ready" "$LOCK_DIR/managed-wake-ready.pending" "$LOCK_DIR/native-epdc-mode" "$LOCK_DIR/native-epdc-mode.pending" "$LOCK_DIR/native-portrait-calibration" "$LOCK_DIR/native-portrait-calibration.pending" "$LOCK_DIR/managed-native-epdc-mode" "$LOCK_DIR/managed-native-epdc-mode.pending" "$LOCK_DIR/managed-native-portrait-calibration" "$LOCK_DIR/managed-native-portrait-calibration.pending" "$LOCK_DIR/native-dark-target" "$LOCK_DIR/native-dark-target.pending"
     printf '%s:%s\n' "$APP_GENERATION" "$LAUNCH_TOKEN" >"$LOCK_DIR/generation"
     publish_native_epdc_mode native-epdc-mode
+    rm -f "$LOCK_DIR/native-theme-request" "$LOCK_DIR/native-theme-request.pending" "$LOCK_DIR/native-theme-result" "$LOCK_DIR/native-theme-result.pending" "$LOCK_DIR/native-theme-ready" "$LOCK_DIR/native-theme-ready.pending" "$LOCK_DIR/native-theme-interrupt" "$LOCK_DIR/native-theme-interrupt.pending" "$LOCK_DIR/native-theme-portrait-calibration" "$LOCK_DIR/native-theme-portrait-calibration.pending"
+    publish_native_theme_available || fail 'Native theme capability publication failed.'
     if ! publish_native_portrait_calibration native-portrait-calibration; then
         launcher_log '%s\n' 'weread: Native portrait record publication failed; keeping fixed orientation.'
     fi
@@ -1179,12 +1469,33 @@ power_subscriber() {
             # already captured by Main and does not change when this shell execs.
             process_matches "$subscriber_wrapper" "$subscriber_wrapper_birth" "$subscriber_owner" &&
                 process_matches "$subscriber_pid" "$subscriber_birth" "$subscriber_wrapper" || exit 1
+            # The output FIFO was opened before this function started. Publish
+            # that proof without changing the PID that will exec liblipc.
+            printf '%s\n' "$subscriber_permission" >"$LOCK_DIR/observer-stream-ready.pending" &&
+                mv -f "$LOCK_DIR/observer-stream-ready.pending" "$LOCK_DIR/observer-stream-ready" || exit 1
             exec lipc-wait-event -m -s 0 com.lab126.powerd goingToScreenSaver,outOfScreenSaver,exitingScreenSaver,usbConfigured
         fi
         [ "$subscriber_checks" -gt 0 ] || exit 1
         managed_wait_tick >/dev/null 2>&1 || exit 1
         subscriber_checks=$((subscriber_checks - 1))
     done
+}
+
+publish_native_theme_power_interrupt() {
+    case "$1" in goingToScreenSaver*|usbConfigured*) ;; *) return 0 ;; esac
+    observer_power_epoch=$((observer_power_epoch + 1))
+    printf '%s:%s\n' "$LAUNCH_TOKEN" "$observer_power_epoch" >"$LOCK_DIR/native-theme-power-epoch.pending" &&
+        mv -f "$LOCK_DIR/native-theme-power-epoch.pending" "$LOCK_DIR/native-theme-power-epoch" || return 1
+    # This observer predates the first App generation. Read the current private
+    # generation instead of publishing its inherited startup value.
+    [ -f "$LOCK_DIR/generation" ] && [ ! -L "$LOCK_DIR/generation" ] || return 0
+    if ! IFS=: read -r interrupt_generation interrupt_token interrupt_extra <"$LOCK_DIR/generation"; then
+        return 1
+    fi
+    case "$interrupt_generation" in *[!0-9]*|''|0) return 0 ;; esac
+    [ "$interrupt_token" = "$LAUNCH_TOKEN" ] && [ -z "$interrupt_extra" ] || return 0
+    printf '%s:%s\n' "$interrupt_generation" "$interrupt_token" >"$LOCK_DIR/native-theme-interrupt.pending" &&
+        mv -f "$LOCK_DIR/native-theme-interrupt.pending" "$LOCK_DIR/native-theme-interrupt"
 }
 
 observe_power() {
@@ -1195,6 +1506,10 @@ observe_power() {
     observer_child_birth=''
     observer_stopping=0
     observer_interrupted=0
+    observer_read_open=0
+    observer_anchor_open=0
+    observer_relay_running=0
+    observer_power_epoch=0
     observer_owner=$1
     observer_owner_birth=$2
     finish_power_observer() {
@@ -1204,6 +1519,8 @@ observe_power() {
         if ! cleanup_wrapper_child "$observer_child" "$observer_child_birth" "$WRAPPER_PID"; then
             observer_exit_status=1
         fi
+        if [ "$observer_read_open" -eq 1 ]; then exec 4<&-; fi
+        if [ "$observer_anchor_open" -eq 1 ]; then exec 5>&-; fi
         if [ "$observer_stopping" -eq 0 ]; then
             printf '_weread_observer_exit %s\n' "$observer_exit_status" >&3 || :
         fi
@@ -1218,15 +1535,27 @@ observe_power() {
             signal_owned_process "$observer_child" "$observer_child_birth" "$WRAPPER_PID" INT || :
             signal_owned_process "$observer_child" "$observer_child_birth" "$WRAPPER_PID" CONT || :
         fi
+        # The relay has already captured its original child and committed the
+        # subscription proof. Enter bounded cleanup even if read is restarted
+        # after the signal or the subscriber ignores both INT and TERM.
+        if [ "$observer_relay_running" -eq 1 ]; then exit 0; fi
     }
     trap stop_observer_child HUP INT TERM
     capture_wrapper_identity || exit 1
     [ "$observer_stopping" -eq 0 ] || exit 0
+    printf '%s:0\n' "$LAUNCH_TOKEN" >"$LOCK_DIR/native-theme-power-epoch.pending" &&
+        mv -f "$LOCK_DIR/native-theme-power-epoch.pending" "$LOCK_DIR/native-theme-power-epoch" || exit 1
+    # The temporary write anchor prevents an open from blocking if the child
+    # cannot redirect its output. It is closed after that exact child's proof.
+    exec 5<>"$LOCK_DIR/observer-events"
+    observer_anchor_open=1
+    exec 4<"$LOCK_DIR/observer-events"
+    observer_read_open=1
     # These are actual powerd events used by the reviewed KOReader input code.
     # OutOfSS requests native screen-saver dismissal; ExitingSS completes it.
     # The child closes the duplicate FIFO descriptor and cannot exec liblipc
     # until Main has captured its original birth and live wrapper ancestry.
-    power_subscriber "$observer_owner" "$observer_owner_birth" "$WRAPPER_PID" "$WRAPPER_BIRTH" >&3 2>/dev/null 3>&- &
+    power_subscriber "$observer_owner" "$observer_owner_birth" "$WRAPPER_PID" "$WRAPPER_BIRTH" >"$LOCK_DIR/observer-events" 2>/dev/null 3>&- 4<&- 5>&- &
     observer_child=$!
     if capture_wrapper_child_birth "$observer_child" 2>/dev/null; then
         observer_child_birth=$WRAPPER_CHILD_BIRTH
@@ -1248,7 +1577,38 @@ observe_power() {
         signal_owned_process "$observer_child" "$observer_child_birth" "$WRAPPER_PID" INT || :
         signal_owned_process "$observer_child" "$observer_child_birth" "$WRAPPER_PID" CONT || :
     fi
+    observer_stream_checks=$(managed_wait_budget 5)
+    observer_stream_permission="$LAUNCH_TOKEN:$observer_owner:$observer_owner_birth:$WRAPPER_PID:$WRAPPER_BIRTH:$observer_child:$observer_child_birth"
+    observer_stream_ready=0
+    while [ "$observer_stream_checks" -gt 0 ] && [ "$observer_stopping" -eq 0 ]; do
+        process_matches "$observer_child" "$observer_child_birth" "$WRAPPER_PID" || exit 1
+        if [ -f "$LOCK_DIR/observer-stream-ready" ] && [ ! -L "$LOCK_DIR/observer-stream-ready" ] &&
+            IFS= read -r observer_stream_record <"$LOCK_DIR/observer-stream-ready" &&
+            [ "$observer_stream_record" = "$observer_stream_permission" ]; then
+            observer_stream_ready=1
+            break
+        fi
+        managed_wait_tick || exit 1
+        observer_stream_checks=$((observer_stream_checks - 1))
+    done
+    [ "$observer_stopping" -eq 0 ] || exit 0
+    [ "$observer_stream_ready" -eq 1 ] || exit 1
+    exec 5>&-
+    observer_anchor_open=0
+    # Keep liblipc's original identity while the owning wrapper relays events.
+    # Interruption reaches a blocking theme handoff before its queued FIFO hint.
+    observer_relay_running=1
+    while IFS= read -r observer_power_event <&4; do
+        [ "$observer_stopping" -eq 0 ] || break
+        [ "$(process_birth "$observer_owner" 2>/dev/null || :)" = "$observer_owner_birth" ] || exit 1
+        publish_native_theme_power_interrupt "$observer_power_event" || exit 1
+        printf '%s\n' "$observer_power_event" >&3 || exit 1
+    done
+    exec 4<&-
+    observer_read_open=0
+    observer_relay_running=0
     while :; do
+        [ "$observer_stopping" -eq 0 ] || exit 0
         observer_interrupted=0
         if wait "$observer_child"; then
             observer_status=0
@@ -1314,7 +1674,20 @@ start_power_observer() {
                         process_matches "$EVENT_SOURCE_CHILD_PID" "$EVENT_SOURCE_CHILD_BIRTH" "$EVENT_SOURCE_PID" &&
                         printf '%s:%s:%s:%s:%s:%s:%s\n' "$LAUNCH_TOKEN" "$$" "$POWER_OWNER_BIRTH" "$EVENT_SOURCE_PID" "$EVENT_SOURCE_BIRTH" "$EVENT_SOURCE_CHILD_PID" "$EVENT_SOURCE_CHILD_BIRTH" >"$LOCK_DIR/observer-go.pending" &&
                         mv -f "$LOCK_DIR/observer-go.pending" "$LOCK_DIR/observer-go"; then
-                        power_start_status=0
+                        power_stream_checks=$(managed_wait_budget 5)
+                        power_stream_permission="$LAUNCH_TOKEN:$$:$POWER_OWNER_BIRTH:$EVENT_SOURCE_PID:$EVENT_SOURCE_BIRTH:$EVENT_SOURCE_CHILD_PID:$EVENT_SOURCE_CHILD_BIRTH"
+                        while [ "$power_stream_checks" -gt 0 ] && [ "$LAUNCH_STARTUP_SIGNAL" -eq 0 ]; do
+                            process_matches "$EVENT_SOURCE_PID" "$EVENT_SOURCE_BIRTH" "$$" &&
+                                process_matches "$EVENT_SOURCE_CHILD_PID" "$EVENT_SOURCE_CHILD_BIRTH" "$EVENT_SOURCE_PID" || break
+                            if [ -f "$LOCK_DIR/observer-stream-ready" ] && [ ! -L "$LOCK_DIR/observer-stream-ready" ] &&
+                                IFS= read -r power_stream_record <"$LOCK_DIR/observer-stream-ready" &&
+                                [ "$power_stream_record" = "$power_stream_permission" ]; then
+                                power_start_status=0
+                                break
+                            fi
+                            managed_wait_tick || break
+                            power_stream_checks=$((power_stream_checks - 1))
+                        done
                     fi
                     break
                 fi
@@ -1369,6 +1742,15 @@ stop_observer() {
             observer_stop_checks=$((observer_stop_checks - 1))
         done
         cleanup_power_observer_child || observer_stop_status=1
+        # Main can signal a proven grandchild but cannot wait/reap it. Give its
+        # original wrapper a bounded opportunity to reap before retiring that
+        # wrapper; otherwise a killed child can be stranded under PID 1.
+        observer_reap_checks=$(managed_wait_budget 2)
+        while owned_child_is_running "$EVENT_SOURCE_PID" "$EVENT_SOURCE_BIRTH" "$$" &&
+            [ "$observer_reap_checks" -gt 0 ]; do
+            managed_wait_tick || observer_stop_status=1
+            observer_reap_checks=$((observer_reap_checks - 1))
+        done
         if owned_child_is_running "$EVENT_SOURCE_PID" "$EVENT_SOURCE_BIRTH" "$$"; then
             signal_owned_process "$EVENT_SOURCE_PID" "$EVENT_SOURCE_BIRTH" "$$" KILL || observer_stop_status=1
         fi
@@ -1405,7 +1787,7 @@ stop_observer() {
             launcher_log '%s\n' 'weread: Power observer cleanup could not confirm the original identity exited; blocking wait was refused.'
         fi
     fi
-    rm -f "$LOCK_DIR/observer-pid" "$LOCK_DIR/observer-owned" "$LOCK_DIR/observer-owned.pending" "$LOCK_DIR/observer-go" "$LOCK_DIR/observer-go.pending" || observer_stop_status=1
+    rm -f "$LOCK_DIR/observer-pid" "$LOCK_DIR/observer-owned" "$LOCK_DIR/observer-owned.pending" "$LOCK_DIR/observer-go" "$LOCK_DIR/observer-go.pending" "$LOCK_DIR/observer-stream-ready" "$LOCK_DIR/observer-stream-ready.pending" "$LOCK_DIR/observer-events" || observer_stop_status=1
     return "$observer_stop_status"
 }
 
@@ -1719,6 +2101,7 @@ resume_managed_application() {
     managed_application_is_current || return 1
     marker_matches_application ordinary-exit && return 1
     take_display || return 1
+    clear_native_theme_power_interrupt || fail 'Resident wake was superseded by a power event or an unconfirmed active state.'
     publish_native_epdc_mode managed-native-epdc-mode
     if ! publish_native_portrait_calibration managed-native-portrait-calibration; then
         launcher_log '%s\n' 'weread: Native wake portrait record publication failed; keeping the previous calibration.'
@@ -1737,6 +2120,9 @@ resume_managed_application() {
             case "$(sed -n 's/^State:[[:space:]]*//p' "/proc/$APP_CHILD_PID/status" 2>/dev/null || :)" in
                 T*|t*|'') return 1 ;;
             esac
+            if marker_matches_application sleep-request; then
+                rm -f "$LOCK_DIR/sleep-request" || return 1
+            fi
             APP_PHASE=running
             return 0
         fi
@@ -2129,6 +2515,7 @@ cleanup() {
     fi
     if ! rm -f "$LOCK_DIR/native-theme-go" "$LOCK_DIR/native-theme-go.pending" "$LOCK_DIR/native-portrait-step" "$LOCK_DIR/native-portrait-step.pending"; then note_cleanup_failure 'native theme permission records'; fi
     if ! rm -f "$LOCK_DIR/wake-probe-child" "$LOCK_DIR/wake-probe-child.pending"; then note_cleanup_failure 'wake probe records'; fi
+    if ! rm -f "$LOCK_DIR/native-theme-available" "$LOCK_DIR/native-theme-available.pending" "$LOCK_DIR/native-theme-request" "$LOCK_DIR/native-theme-request.pending" "$LOCK_DIR/native-theme-result" "$LOCK_DIR/native-theme-result.pending" "$LOCK_DIR/native-theme-ready" "$LOCK_DIR/native-theme-ready.pending" "$LOCK_DIR/native-theme-interrupt" "$LOCK_DIR/native-theme-interrupt.pending" "$LOCK_DIR/native-theme-power-epoch" "$LOCK_DIR/native-theme-power-epoch.pending" "$LOCK_DIR/native-theme-portrait-calibration" "$LOCK_DIR/native-theme-portrait-calibration.pending"; then note_cleanup_failure 'native theme handshake records'; fi
     if rmdir "$LOCK_DIR" 2>/dev/null; then
         LOCK_OWNED=0
     else
@@ -2198,6 +2585,7 @@ LAUNCH_TOKEN=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
 [ "${#LAUNCH_TOKEN}" -eq 32 ] || fail 'The launcher context token could not be generated.'
 printf '%s\n' "$LAUNCH_TOKEN" >"$LOCK_DIR/nonce"
 mkfifo "$LOCK_DIR/power-events"
+mkfifo "$LOCK_DIR/observer-events"
 # Keep one descriptor open across cycles. Wake events remain queued even while
 # the supervisor waits for a successful, persistent application shutdown.
 exec 3<>"$LOCK_DIR/power-events"
@@ -2252,6 +2640,15 @@ while IFS= read -r power_event <&3; do
             set -- $power_event
             if [ "$#" -eq 4 ] && [ "$2" = "$APP_GENERATION" ]; then
                 capture_application_identity "$3" "$4" || :
+            fi
+            ;;
+        '_weread_native_theme_request '*)
+            set -- $power_event
+            if [ "$#" -eq 3 ] && [ "$2" = "$APP_GENERATION" ]; then
+                if ! begin_native_theme_request "$2" "$3"; then
+                    launcher_log 'weread: Native theme handoff failed stage=%s; restoring native ownership.\n' "$NATIVE_THEME_STAGE"
+                    fail 'Native theme handoff could not complete safely.'
+                fi
             fi
             ;;
         '_weread_app_exit '*)

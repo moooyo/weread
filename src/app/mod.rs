@@ -498,19 +498,11 @@ impl App {
             .transpose()?;
         let (sender, events) = mpsc::channel();
         let jobs = Jobs::new(runtime.handle().clone(), sender, client)?;
-        let saved_preferences = store.setting::<AppPreferences>("preferences")?;
-        let mut prefs = saved_preferences
-            .clone()
+        let mut prefs = store
+            .setting::<AppPreferences>("preferences")?
             .unwrap_or_else(|| AppPreferences::for_device(options.profile.is_scribe()));
-        if saved_preferences.is_none() {
-            if let Some(native_inverted) = platform.native_output_inverted() {
-                prefs.dark_mode = native_inverted;
-            }
-        }
         prefs.normalize_for_device(options.profile.is_scribe());
-        if platform.capabilities().application_dark_mode {
-            platform.set_dark_mode(prefs.dark_mode)?;
-        }
+        lighting::restore_dark_mode(&platform, &store, &mut prefs)?;
         let pending = if let Some(owner) = content_owner.as_deref() {
             store.pending_tasks_for_owner(owner)
         } else {
@@ -1008,6 +1000,9 @@ impl App {
 
     /// Save state and request an explicit user exit through one lifecycle path.
     pub fn request_exit(&mut self) -> Result<()> {
+        if self.defer_exit_during_native_theme() {
+            return Ok(());
+        }
         if let Err(error) = self.shutdown().and_then(|_| self.mark_explicit_exit()) {
             self.resume_reader_after_failed_exit();
             return Err(error);
@@ -1053,31 +1048,6 @@ impl App {
         self.show_message(tr(key));
     }
 
-    pub(super) fn native_theme_sync_available(&self) -> bool {
-        !self.demo && self.platform.is_kindle && self.platform.native_output_inverted().is_some()
-    }
-
-    pub(super) fn toggle_dark_mode(&mut self) -> Result<()> {
-        if !self.platform.capabilities().application_dark_mode {
-            self.show_toast("application_dark_mode_unavailable");
-            return Ok(());
-        }
-        let previous = self.prefs.dark_mode;
-        let enabled = !previous;
-        self.platform.set_dark_mode(enabled)?;
-        self.prefs.dark_mode = enabled;
-        if let Err(error) = self.save_preferences() {
-            self.prefs.dark_mode = previous;
-            let _ = self.platform.set_dark_mode(previous);
-            return Err(error);
-        }
-        self.show_toast(if enabled {
-            "dark_mode_on"
-        } else {
-            "dark_mode_off"
-        });
-        Ok(())
-    }
     fn show_message(&mut self, message: String) {
         if let Some(ui) = self.ui.upgrade() {
             ui.global::<ShellModel>().set_toast(message.into());

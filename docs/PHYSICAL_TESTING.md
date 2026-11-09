@@ -11,6 +11,16 @@ Development is continuing. The observations in this document do not complete acc
 
 No device address, credential, serial number, private note text, or account content is part of this record. Offline demonstration results do not establish live-account authentication, content entitlements, or upstream writes.
 
+## Current native reading corrections
+
+The 2026-11-09 isolated resource-review run confirmed active portrait rotation
+and inverted page-turn input on the identified device. Its subsequent sleep
+attempt exposed a display-release failure caused by the missing SSH `DISPLAY`
+environment. The TOC alignment, immediate system-theme transaction, and default
+display correction have their own current remote and physical gates in
+[Native reading corrections](NATIVE_FIX_ACCEPTANCE.md). Those later changes do
+not inherit acceptance from earlier daily-trial or resource-review artifacts.
+
 ## Live resource authentication and image aliases
 
 ### Performance-build physical continuation

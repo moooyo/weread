@@ -57,11 +57,19 @@ The [Kindle development bundle instructions](packaging/kindle/README.md) describ
 - Build our own application, with its own executable, interface, data directory, launcher, and KPM package identity.
 - Target Paperwhite 5 / 11th generation, Paperwhite 6 / 12th generation, and Kindle Scribe. The initial physical test target is the first-generation Scribe released in 2022 on firmware 5.19.5; the supported model/firmware matrix remains open.
 - Support Chinese text and search input, book browsing, cover display, search, details, and local caching.
-- Retain Reader brightness and software night mode, startup feedback, continuous selection, and managed sleep recovery in product scope.
+- Retain Reader brightness, system night-mode control on a supported Kindle, startup feedback, continuous selection, and managed sleep recovery in product scope. Desktop night mode remains local.
 - Keep content acquisition dependent on inspected source contracts and configured credentials. The current implementation downloads validated chapter text and provides its own paginated reader; it does not infer a downloadable EPUB or PDF from a cover URL.
 - Use WeChat Read as the confirmed source of cover images. Cover availability is a user-provided requirement, not evidence that the upstream exposes downloadable book files.
 
 [Native theme continuity](docs/NATIVE_THEME.md) records the correction for retaining dark native UI after explicit exit, compensating the next startup and wake, and closing every login state. Executable `2fd3d6ab2d64` and launcher `799d5bba5eb9` passed these scoped physical checks on the identified Scribe 2022 / firmware 5.19.5. The 440 core and 86 launcher tests cover additional controlled states; they do not establish other device support or a full-device-reboot result.
+
+The subsequent night-mode requirement uses a resident system-setting transaction
+and treats confirmed native state as authoritative at startup and wake. Its new
+physical acceptance remains separate from the earlier explicit-exit result.
+[Rotation alignment](docs/ROTATION_ALIGNMENT.md) compares the accepted automatic
+0/180-degree display and touch paths with pinned KOReader sources.
+[Current native corrections](docs/NATIVE_FIX_ACCEPTANCE.md) records the TOC,
+system-theme, and display-release verification separately from earlier builds.
 
 The [resource lifetime review](docs/RESOURCE_LEAK_REVIEW.md) records cancellation,
 fault, input-admission, and ownership corrections with same-process Linux

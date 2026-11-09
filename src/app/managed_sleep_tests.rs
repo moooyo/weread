@@ -61,7 +61,7 @@ impl ManagedSleepHost for Host {
     fn native_base(&self) -> Option<bool> {
         self.native_base.get()
     }
-    fn set_native_base(&self, inverted: bool) -> Result<()> {
+    fn set_native_base(&mut self, inverted: bool) -> Result<()> {
         self.events.borrow_mut().push("native_base");
         ensure!(
             !self.native_base_fails,
@@ -736,20 +736,11 @@ fn native_mode_records_require_the_exact_owner_fields_and_reject_an_ordinary_exi
 }
 
 #[test]
-fn explicit_exit_publishes_only_the_desired_target_when_native_state_is_known() -> Result<()> {
-    for (demo, native_base, desired, expected) in [
-        (true, Some(false), true, None),
-        (true, Some(true), true, None),
-        (true, Some(true), false, None),
-        (false, None, true, None),
-        (false, Some(true), true, Some(true)),
-        (false, Some(true), false, Some(false)),
-    ] {
+fn explicit_exit_records_retain_legacy_targets_without_manufacturing_a_new_target() -> Result<()> {
+    for target in [None, Some(false), Some(true)] {
         let fixture = Fixture::new()?;
-        let target =
-            super::super::session_restore::explicit_native_dark_target(demo, native_base, desired);
         fixture.context().mark_explicit_exit(target)?;
-        assert_eq!(fixture.context().native_dark_target()?, expected);
+        assert_eq!(fixture.context().native_dark_target()?, target);
         assert!(fixture.context().matches("ordinary-exit")?);
     }
     let fixture = Fixture::new()?;

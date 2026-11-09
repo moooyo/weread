@@ -651,7 +651,7 @@ fn run_native_dark_default_exit_scenario(saved_dark: Option<bool>) -> Result<()>
     let profile = DeviceProfile::Scribe;
     let platform = Arc::new(Platform::with_control(
         profile,
-        false,
+        true,
         Arc::new(TestDeviceControl),
     ));
     let display = Arc::new(RecordingThemeSink {
@@ -660,7 +660,7 @@ fn run_native_dark_default_exit_scenario(saved_dark: Option<bool>) -> Result<()>
     });
     platform.set_render_sink(display.clone())?;
     let directory = tempfile::tempdir()?;
-    let expected_dark = saved_dark.unwrap_or(true);
+    let expected_dark = true;
     let mut expected_preferences = AppPreferences::for_device(true);
     expected_preferences.dark_mode = expected_dark;
     if saved_dark.is_some() {
@@ -668,8 +668,14 @@ fn run_native_dark_default_exit_scenario(saved_dark: Option<bool>) -> Result<()>
         expected_preferences.pull_on_open = false;
     }
     let database = Store::open(&directory.path().join("library.sqlite"))?;
-    if saved_dark.is_some() {
-        database.set_setting("preferences", &expected_preferences)?;
+    if let Some(saved_dark) = saved_dark {
+        let mut saved_preferences = expected_preferences.clone();
+        saved_preferences.dark_mode = saved_dark;
+        database.set_setting("preferences", &saved_preferences)?;
+        assert_eq!(
+            database.setting::<AppPreferences>("preferences")?,
+            Some(saved_preferences)
+        );
     } else {
         assert!(database.setting::<AppPreferences>("preferences")?.is_none());
     }
@@ -749,9 +755,10 @@ fn run_native_dark_default_exit_scenario(saved_dark: Option<bool>) -> Result<()>
 }
 
 #[test]
-fn first_login_close_inherits_native_dark_while_saved_light_survives_settings_exit() -> Result<()> {
+fn first_login_and_settings_exit_follow_native_dark_without_erasing_other_preferences() -> Result<()>
+{
     run_isolated_closing_scenarios(
-        "app::closing_tests::first_login_close_inherits_native_dark_while_saved_light_survives_settings_exit",
+        "app::closing_tests::first_login_and_settings_exit_follow_native_dark_without_erasing_other_preferences",
         &[
             ("first-use", || run_native_dark_default_exit_scenario(None)),
             ("saved-light", || {

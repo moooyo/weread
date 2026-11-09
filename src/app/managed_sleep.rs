@@ -56,7 +56,7 @@ trait ManagedSleepHost {
     fn native_base(&self) -> Option<bool> {
         None
     }
-    fn set_native_base(&self, _: bool) -> Result<()> {
+    fn set_native_base(&mut self, _: bool) -> Result<()> {
         bail!("The resident renderer cannot compensate a native output mode")
     }
     fn prepare_native_portrait_resume(
@@ -90,8 +90,8 @@ impl ManagedSleepHost for App {
         self.platform.native_output_inverted()
     }
 
-    fn set_native_base(&self, inverted: bool) -> Result<()> {
-        Ok(self.platform.set_native_output_inverted(inverted)?)
+    fn set_native_base(&mut self, inverted: bool) -> Result<()> {
+        self.synchronize_native_dark_mode(inverted)
     }
     fn prepare_native_portrait_resume(
         &self,
@@ -258,8 +258,8 @@ impl ManagedSleep {
                         "The native output mode is unavailable for the current wake cycle"
                     );
                     if let Some(inverted) = native_base {
-                        // Compensate before allowing a full framebuffer restore.
-                        // The setter preserves the user's desired dark preference.
+                        // Synchronize the confirmed system mode while display
+                        // and input remain suspended, before the full restore.
                         host.set_native_base(inverted)?;
                     }
                     if let Some(observation) = context.managed_native_portrait_calibration(cycle)? {

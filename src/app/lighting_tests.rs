@@ -193,6 +193,12 @@ impl DeviceControl for Device {
 struct Display {
     dark: AtomicBool,
     fail: AtomicBool,
+    native: Mutex<Option<bool>>,
+    software_inverse: AtomicBool,
+    managed: AtomicBool,
+    sleep: Mutex<Option<ManagedSleepState>>,
+    restored_frames: Mutex<Vec<(bool, Option<bool>, bool)>>,
+    portrait_resumes: Mutex<Vec<crate::platform::NativePortraitCalibration>>,
 }
 
 impl RenderSink for Display {
@@ -201,6 +207,73 @@ impl RenderSink for Display {
             return Err(PlatformError::Operation("fixture render failure".into()));
         }
         self.dark.store(enabled, Ordering::Release);
+        self.software_inverse.store(
+            enabled ^ self.native.lock().unwrap().unwrap_or(false),
+            Ordering::Release,
+        );
+        Ok(())
+    }
+
+    fn native_output_inverted(&self) -> Option<bool> {
+        *self.native.lock().unwrap()
+    }
+
+    fn set_native_output_inverted(&self, enabled: bool) -> std::result::Result<(), PlatformError> {
+        if self.fail.load(Ordering::Acquire) {
+            return Err(PlatformError::Operation(
+                "fixture native compensation failure".into(),
+            ));
+        }
+        *self.native.lock().unwrap() = Some(enabled);
+        self.software_inverse.store(
+            self.dark.load(Ordering::Acquire) ^ enabled,
+            Ordering::Release,
+        );
+        Ok(())
+    }
+
+    fn managed_sleep_supported(&self) -> bool {
+        self.managed.load(Ordering::Acquire)
+    }
+
+    fn set_managed_sleep(&self, sleeping: bool) -> std::result::Result<(), PlatformError> {
+        if !self.managed_sleep_supported() {
+            return Err(PlatformError::Unsupported("managed_sleep"));
+        }
+        if sleeping {
+            *self.sleep.lock().unwrap() = Some(ManagedSleepState::Suspending);
+        } else {
+            self.restored_frames.lock().unwrap().push((
+                self.dark.load(Ordering::Acquire),
+                *self.native.lock().unwrap(),
+                self.software_inverse.load(Ordering::Acquire),
+            ));
+            *self.sleep.lock().unwrap() = Some(ManagedSleepState::Resuming);
+        }
+        Ok(())
+    }
+
+    fn managed_sleep_state(&self) -> std::result::Result<ManagedSleepState, PlatformError> {
+        if !self.managed_sleep_supported() {
+            return Err(PlatformError::Unsupported("managed_sleep"));
+        }
+        Ok(self
+            .sleep
+            .lock()
+            .unwrap()
+            .unwrap_or(ManagedSleepState::Running))
+    }
+
+    fn prepare_native_portrait_resume(
+        &self,
+        observation: crate::platform::NativePortraitCalibration,
+    ) -> std::result::Result<(), PlatformError> {
+        if self.managed_sleep_state()? != ManagedSleepState::Suspended {
+            return Err(PlatformError::Operation(
+                "The fixture portrait observation arrived after input resumed".into(),
+            ));
+        }
+        self.portrait_resumes.lock().unwrap().push(observation);
         Ok(())
     }
 }
@@ -221,6 +294,17 @@ fn attach_with_kind(
     display: Option<Arc<Display>>,
     is_kindle: bool,
 ) -> Result<(AppWindow, Rc<RefCell<App>>)> {
+    attach_with_mode(directory, runtime, device, display, is_kindle, false)
+}
+
+fn attach_with_mode(
+    directory: &std::path::Path,
+    runtime: &tokio::runtime::Runtime,
+    device: Arc<Device>,
+    display: Option<Arc<Display>>,
+    is_kindle: bool,
+    demo: bool,
+) -> Result<(AppWindow, Rc<RefCell<App>>)> {
     let ui = AppWindow::new()?;
     let platform = Arc::new(Platform::with_control(
         DeviceProfile::Paperwhite6,
@@ -236,7 +320,7 @@ fn attach_with_kind(
         AppOptions {
             data_dir: directory.to_path_buf(),
             profile: DeviceProfile::Paperwhite6,
-            demo: false,
+            demo,
             offline: true,
             initial_screen: "library".into(),
             fonts: vec![FontRecord {
@@ -628,6 +712,403 @@ fn reader_dark_mode_persists_across_app_reopen_and_rolls_back_failures() -> Resu
     run(
         "app::lighting::tests::reader_dark_mode_persists_across_app_reopen_and_rolls_back_failures",
         persist_dark,
+    )
+}
+
+#[test]
+fn known_kindle_system_theme_replaces_stale_saved_appearance_while_desktop_remains_local()
+-> Result<()> {
+    for is_kindle in [false, true] {
+        for native_dark in [false, true] {
+            let directory = tempfile::tempdir()?;
+            let store = Store::open(directory.path().join("library.sqlite"))?;
+            let saved = AppPreferences {
+                dark_mode: !native_dark,
+                view_mode: "list".into(),
+                ..Default::default()
+            };
+            store.set_setting("preferences", &saved)?;
+            let display = Arc::new(Display {
+                native: Mutex::new(Some(native_dark)),
+                ..Default::default()
+            });
+            let platform = Platform::with_control(
+                DeviceProfile::Paperwhite6,
+                is_kindle,
+                Arc::new(Device::new(false, false)),
+            );
+            platform.set_render_sink(display.clone())?;
+            let mut restored = saved.clone();
+            restore_dark_mode(&platform, &store, &mut restored)?;
+            let expected = if is_kindle {
+                native_dark
+            } else {
+                saved.dark_mode
+            };
+            assert_eq!(restored.dark_mode, expected);
+            assert_eq!(display.dark.load(Ordering::Acquire), expected);
+            assert_eq!(platform.native_output_inverted(), Some(native_dark));
+            assert_eq!(restored.view_mode, saved.view_mode);
+            assert_eq!(
+                store.setting::<AppPreferences>("preferences")?.unwrap(),
+                restored
+            );
+            if is_kindle {
+                assert!(!display.software_inverse.load(Ordering::Acquire));
+            }
+        }
+    }
+    let directory = tempfile::tempdir()?;
+    let store = Store::open(directory.path().join("library.sqlite"))?;
+    let saved = AppPreferences::default();
+    store.set_setting("preferences", &saved)?;
+    let database = rusqlite::Connection::open(directory.path().join("library.sqlite"))?;
+    database.execute_batch("CREATE TRIGGER reject_startup_mirror BEFORE INSERT ON settings WHEN NEW.key = 'preferences' BEGIN SELECT RAISE(FAIL, 'fixture persistence failure'); END;")?;
+    let display = Arc::new(Display {
+        native: Mutex::new(Some(true)),
+        ..Default::default()
+    });
+    let platform = Platform::with_control(
+        DeviceProfile::Paperwhite6,
+        true,
+        Arc::new(Device::new(false, false)),
+    );
+    platform.set_render_sink(display.clone())?;
+    let mut restored = saved.clone();
+    restore_dark_mode(&platform, &store, &mut restored)?;
+    assert!(restored.dark_mode);
+    assert!(display.dark.load(Ordering::Acquire));
+    assert!(!display.software_inverse.load(Ordering::Acquire));
+    assert_eq!(
+        store.setting::<AppPreferences>("preferences")?.unwrap(),
+        saved
+    );
+    Ok(())
+}
+
+fn confirmed_native_theme_with_failed_preference_mirror() -> Result<()> {
+    slint::platform::set_platform(Box::new(TestUi(Arc::new(UiLoop::default()))))?;
+    let directory = tempfile::tempdir()?;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    let device = Arc::new(Device::new(false, false));
+    let display = Arc::new(Display {
+        native: Mutex::new(Some(false)),
+        ..Default::default()
+    });
+    let (ui, application) = attach_with_kind(
+        directory.path(),
+        &runtime,
+        device.clone(),
+        Some(display.clone()),
+        true,
+    )?;
+    {
+        let mut app = application.borrow_mut();
+        settle(&mut app);
+        seed_reader(&mut app)?;
+        app.save_preferences()?;
+        assert!(!app.prefs.dark_mode);
+        let database = rusqlite::Connection::open(directory.path().join("library.sqlite"))?;
+        database.execute_batch("CREATE TRIGGER reject_native_mirror BEFORE INSERT ON settings WHEN NEW.key = 'preferences' BEGIN SELECT RAISE(FAIL, 'fixture persistence failure'); END;")?;
+
+        // This callback carries the launcher's already-confirmed system result.
+        // Storage rejection cannot authorize another native transaction.
+        app.synchronize_native_dark_mode(true)?;
+        app.render()?;
+        assert!(app.prefs.dark_mode);
+        assert!(ui.global::<ReaderModel>().get_night());
+        assert_eq!(app.platform.native_output_inverted(), Some(true));
+        assert!(display.dark.load(Ordering::Acquire));
+        assert!(!display.software_inverse.load(Ordering::Acquire));
+        assert!(device.inversions.lock().unwrap().is_empty());
+        assert_eq!(app.lighting.status, tr("api_error"));
+        assert!(
+            !app.store
+                .setting::<AppPreferences>("preferences")?
+                .unwrap()
+                .dark_mode
+        );
+
+        database.execute_batch("DROP TRIGGER reject_native_mirror;")?;
+        let mut stale = app.store.setting::<AppPreferences>("preferences")?.unwrap();
+        restore_dark_mode(&app.platform, &app.store, &mut stale)?;
+        assert!(stale.dark_mode);
+        assert!(
+            app.store
+                .setting::<AppPreferences>("preferences")?
+                .unwrap()
+                .dark_mode
+        );
+        assert!(!display.software_inverse.load(Ordering::Acquire));
+        app.shutdown()?;
+    }
+    drop(application);
+    drop(ui);
+    runtime.shutdown_timeout(Duration::from_secs(1));
+    Ok(())
+}
+
+#[test]
+fn confirmed_native_theme_observations_keep_output_in_sync_when_preference_mirroring_fails()
+-> Result<()> {
+    run(
+        "app::lighting::tests::confirmed_native_theme_observations_keep_output_in_sync_when_preference_mirroring_fails",
+        confirmed_native_theme_with_failed_preference_mirror,
+    )
+}
+
+#[cfg(target_os = "linux")]
+fn write_theme_record(directory: &std::path::Path, name: &str, value: &str) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let path = directory.join(name);
+    std::fs::write(&path, value)?;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn theme_context_fixture(directory: &std::path::Path) -> Result<(LauncherContext, std::fs::File)> {
+    use std::os::unix::{ffi::OsStrExt, fs::OpenOptionsExt, fs::PermissionsExt};
+    std::fs::create_dir(directory)?;
+    std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o700))?;
+    let context = LauncherContext::managed_test_context(directory.to_path_buf())?;
+    context.write("native-theme-available")?;
+    let pipe_path = directory.join("power-events");
+    let pipe_name = std::ffi::CString::new(pipe_path.as_os_str().as_bytes())?;
+    // SAFETY: pipe_name is a live NUL-terminated private fixture path.
+    anyhow::ensure!(unsafe { libc::mkfifo(pipe_name.as_ptr(), 0o600) } == 0);
+    let pipe = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .custom_flags(libc::O_NONBLOCK | libc::O_CLOEXEC)
+        .open(pipe_path)?;
+    Ok((context, pipe))
+}
+
+#[cfg(target_os = "linux")]
+fn native_theme_demo_handoff() -> Result<()> {
+    use std::io::Read;
+    const OWNER: &str = "7:0123456789abcdef0123456789abcdef";
+    let loop_state = Arc::new(UiLoop::default());
+    slint::platform::set_platform(Box::new(TestUi(loop_state.clone())))?;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    for (confirmed, reject_mirror, requests, deferred_exit) in [
+        (true, false, 2_u64, false),
+        (false, false, 1, false),
+        (true, true, 1, false),
+        (true, false, 1, true),
+    ] {
+        let directory = tempfile::tempdir()?;
+        let launcher_directory = directory.path().join("launcher");
+        let (context, mut notifications) = theme_context_fixture(&launcher_directory)?;
+        let device = Arc::new(Device::new(false, false));
+        let display = Arc::new(Display {
+            native: Mutex::new(Some(false)),
+            managed: AtomicBool::new(true),
+            sleep: Mutex::new(Some(ManagedSleepState::Running)),
+            ..Default::default()
+        });
+        let (ui, application) = attach_with_mode(
+            directory.path(),
+            &runtime,
+            device.clone(),
+            Some(display.clone()),
+            true,
+            true,
+        )?;
+        {
+            let mut app = application.borrow_mut();
+            settle(&mut app);
+            app.navigate(Route::Reader("demo-0".into(), 0), true)?;
+            app.render()?;
+            app.lighting.native_theme_test_context = Some(context.clone());
+            assert!(app.demo && app.force_offline && !app.jobs.configured());
+            assert!(app.native_theme_sync_available());
+            let route = app.route.clone();
+            let anchor = app.reader.paginator.as_ref().unwrap().current_page().start;
+            for sequence in 1..=requests {
+                let previous = app.prefs.dark_mode;
+                let target = !previous;
+                let request_path = launcher_directory.join("native-theme-request");
+                assert!(!request_path.exists());
+                app.toggle_dark_mode()?;
+                assert!(app.managed_sleep_blocked);
+                assert_eq!(app.prefs.dark_mode, previous);
+                assert_eq!(ui.global::<ReaderModel>().get_night(), previous);
+                assert!(!request_path.exists());
+                assert!(app.poll_native_theme()?);
+                assert!(!request_path.exists());
+                *display.sleep.lock().unwrap() = Some(ManagedSleepState::Suspended);
+                assert!(app.poll_native_theme()?);
+                assert_eq!(
+                    std::fs::read_to_string(&request_path)?,
+                    format!(
+                        "{OWNER}:{sequence}:{}\n",
+                        if target { "Y8INV" } else { "Y8" }
+                    )
+                );
+                let mut bytes = [0; 128];
+                let count = notifications.read(&mut bytes)?;
+                assert_eq!(
+                    std::str::from_utf8(&bytes[..count])?,
+                    format!("_weread_native_theme_request 7 {sequence}\n")
+                );
+                assert_eq!(app.prefs.dark_mode, previous);
+                app.dispatch("reader", "night", "toggle")?;
+                assert_eq!(app.lighting.native_theme_sequence, sequence);
+                if deferred_exit {
+                    app.request_exit()?;
+                    assert!(!app.closing.get());
+                    assert!(app.lighting.native_theme_exit_requested);
+                    assert_eq!(loop_state.quit_attempts.load(Ordering::Acquire), 0);
+                }
+
+                let database = rusqlite::Connection::open(
+                    directory.path().join("demo").join("library.sqlite"),
+                )?;
+                if reject_mirror {
+                    database.execute_batch("CREATE TRIGGER reject_native_mirror BEFORE INSERT ON settings WHEN NEW.key = 'preferences' BEGIN SELECT RAISE(FAIL, 'fixture persistence failure'); END;")?;
+                }
+                if sequence == 1 {
+                    for stale in [
+                        format!("{OWNER}:99:ok:Y8INV\n"),
+                        "7:ffffffffffffffffffffffffffffffff:1:ok:Y8INV\n".into(),
+                        format!("{OWNER}:1:ok:UNKNOWN\n"),
+                    ] {
+                        write_theme_record(&launcher_directory, "native-theme-result", &stale)?;
+                        assert!(app.poll_native_theme()?);
+                        assert_eq!(app.prefs.dark_mode, previous);
+                        assert_eq!(display.managed_sleep_state()?, ManagedSleepState::Suspended);
+                    }
+                }
+                let actual = if confirmed { target } else { previous };
+                write_theme_record(
+                    &launcher_directory,
+                    "native-theme-result",
+                    &format!(
+                        "{OWNER}:{sequence}:{}:{}\n",
+                        if confirmed { "ok" } else { "error" },
+                        if actual { "Y8INV" } else { "Y8" }
+                    ),
+                )?;
+                let portraits_before = display.portrait_resumes.lock().unwrap().len();
+                write_theme_record(
+                    &launcher_directory,
+                    "native-theme-portrait-calibration",
+                    &format!(
+                        "{OWNER}:{sequence}:{}\n",
+                        if sequence == 1 { "D:1" } else { "FIXED:1" }
+                    ),
+                )?;
+                assert!(app.poll_native_theme()?);
+                let portraits = display.portrait_resumes.lock().unwrap();
+                if sequence == 1 {
+                    assert_eq!(portraits.len(), portraits_before + 1);
+                    assert_eq!(
+                        portraits.last(),
+                        Some(&crate::platform::NativePortraitCalibration {
+                            direction: crate::platform::NativePortraitDirection::Down,
+                            framebuffer_rotation: 1,
+                        })
+                    );
+                } else {
+                    assert_eq!(portraits.len(), portraits_before);
+                }
+                drop(portraits);
+                assert_eq!(app.prefs.dark_mode, actual);
+                assert_eq!(ui.global::<ReaderModel>().get_night(), actual);
+                assert_eq!(app.platform.native_output_inverted(), Some(actual));
+                assert_eq!(
+                    *display.restored_frames.lock().unwrap().last().unwrap(),
+                    (actual, Some(actual), false)
+                );
+                assert!(!launcher_directory.join("native-theme-ready").exists());
+                assert!(app.managed_sleep_blocked);
+                *display.sleep.lock().unwrap() = Some(ManagedSleepState::Running);
+                assert!(app.poll_native_theme()?);
+                assert!(app.managed_sleep_blocked);
+                assert!(app.lighting.native_theme.is_some());
+                assert!(!app.closing.get());
+                let active_request = std::fs::read_to_string(&request_path)?;
+                // A rapid second tap cannot overwrite the first transaction
+                // while the server is confirming its own running state.
+                app.dispatch("reader", "night", "toggle")?;
+                assert_eq!(app.lighting.native_theme_sequence, sequence);
+                assert_eq!(std::fs::read_to_string(&request_path)?, active_request);
+                assert!(!context.native_theme_committed(sequence)?);
+                assert!(app.poll_native_theme()?);
+                if deferred_exit {
+                    assert_eq!(loop_state.quit_attempts.load(Ordering::Acquire), 0);
+                }
+                assert_eq!(
+                    std::fs::read_to_string(launcher_directory.join("native-theme-ready"))?,
+                    format!("{OWNER}:{sequence}\n")
+                );
+                // This unlink models the owning server's implicit commit.
+                std::fs::remove_file(&request_path)?;
+                assert!(context.native_theme_committed(sequence)?);
+                assert_eq!(app.poll_native_theme()?, deferred_exit);
+                assert!(!app.managed_sleep_blocked);
+                assert!(app.lighting.native_theme.is_none());
+                assert_eq!(app.closing.get(), deferred_exit);
+                if deferred_exit {
+                    assert_eq!(loop_state.quit_attempts.load(Ordering::Acquire), 1);
+                    assert!(!launcher_directory.join("native-dark-target").exists());
+                }
+                assert_eq!(
+                    std::fs::read_to_string(launcher_directory.join("native-theme-ready"))?,
+                    format!("{OWNER}:{sequence}\n")
+                );
+                let persisted = app.store.setting::<AppPreferences>("preferences")?.unwrap();
+                assert_eq!(
+                    persisted.dark_mode,
+                    if reject_mirror { previous } else { actual }
+                );
+                if reject_mirror {
+                    assert_eq!(
+                        ui.global::<ShellModel>().get_toast().as_str(),
+                        tr("api_error")
+                    );
+                    database.execute_batch("DROP TRIGGER reject_native_mirror;")?;
+                    let mut reloaded = persisted;
+                    restore_dark_mode(&app.platform, &app.store, &mut reloaded)?;
+                    assert_eq!(reloaded.dark_mode, actual);
+                } else if !confirmed {
+                    assert_eq!(
+                        ui.global::<ShellModel>().get_toast().as_str(),
+                        tr("hardware_unavailable")
+                    );
+                }
+                assert_eq!(app.route, route);
+                assert_eq!(
+                    app.reader.paginator.as_ref().unwrap().current_page().start,
+                    anchor
+                );
+                assert!(device.inversions.lock().unwrap().is_empty());
+                if !deferred_exit {
+                    settle(&mut app);
+                }
+            }
+            app.shutdown()?;
+        }
+        drop(application);
+        drop(ui);
+    }
+    runtime.shutdown_timeout(Duration::from_secs(1));
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn demo_native_theme_toggles_wait_for_protected_results_and_restore_the_same_reader() -> Result<()>
+{
+    run(
+        "app::lighting::tests::demo_native_theme_toggles_wait_for_protected_results_and_restore_the_same_reader",
+        native_theme_demo_handoff,
     )
 }
 

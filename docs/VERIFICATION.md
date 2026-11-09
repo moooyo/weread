@@ -8,6 +8,18 @@ The subsequent [Library-entry correction](PHYSICAL_TESTING.md#fresh-launches-ent
 
 The later [normal-mode private trial deployment](PHYSICAL_TESTING.md#normal-mode-private-trial-deployment) replaced the supervised demo with the retained release ELF and standard document launcher. Installed hashes, normal arguments without a deadline, state initialization, the visible catalog entry, and the user's login-screen observation were recorded. Off-device backup verification preceded removal of the old test installation. This adds deployment and first-screen evidence, not authenticated-service or new physical sleep-cycle acceptance.
 
+## Current native reading corrections
+
+[Native reading corrections](NATIVE_FIX_ACCEPTANCE.md) records the requested
+TOC status alignment, immediate resident system-theme transaction, and the
+observed missing-display sleep failure. Its 1,484-library/52-Main execution and
+ARM build have an exact runtime-source reuse proof; the corrected 30-case
+launcher target and all 183 corrected launcher cases passed. The gated package
+passed its exact 35-member, CRC, mode, and ELF/launcher identity checks. Physical
+acceptance remains pending after a connection attempt failed before reaching
+the device. Earlier failed launcher output and its package remain failed
+evidence, with no reassignment of historical artifact results.
+
 ## Finite resource closeout and active orientation
 
 The user ended new full-domain discovery rounds. The original two consecutive
