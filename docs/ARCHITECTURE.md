@@ -90,15 +90,17 @@ The user's subsequent night-mode requirement changes the reviewed native system 
 
 The R3 physical trial exposed native Library during the native compositor's
 theme and wake work, although the process, reading anchor, and system setting
-were retained. The next visual-handoff candidate adds a project-owned native
+were retained. The visual-handoff implementation adds a project-owned native
 frame guard within the Kindle platform boundary. It retains an exact reading
 frame in a separately owned native window above application content and below
 the native screensaver. This is not a replacement for the SYSTEM transaction,
 fresh wake observations, full-frame/input acknowledgment, or restoration gates.
 The main application remains static musl; the small separate helper uses the
 existing device X11/glibc runtime, with no firmware libraries redistributed.
-Its actual firmware-window acceptance and physical presentation remain explicit
-gates in [Native reading corrections](NATIVE_FIX_ACCEPTANCE.md).
+The isolated v10 trial passed scoped visual, sleep, and UI-exit checks on Scribe
+2022 / firmware 5.19.5. Its approximately five-second response remains open;
+other devices and the formal private trial retain their separate gates in
+[Native reading corrections](NATIVE_FIX_ACCEPTANCE.md).
 
 Report settlement validates the measured run's account, book, and start time
 before trusting its durable allocation cursor, including a zero-demand return.
@@ -236,6 +238,12 @@ Automatic brightness was explicitly removed from the product, design-fidelity,
 and acceptance scope. Manual brightness and device-supported warmth remain
 accepted controls. Do not treat ambient-light automation as unfinished work or
 an acceptance blocker.
+
+System night-mode changes retain the Kindle's native day/night illumination
+presets. The accepted policy adds no application-owned pair of light profiles
+and no snapshot/restore of light values; manual controls retain their existing
+validated setter range. [Native reading corrections](NATIVE_FIX_ACCEPTANCE.md)
+separates the driver observations from this product decision.
 
 Implementation is still being iterated and has not completed acceptance. The accepted architecture above remains in force. Source behavior, remote checks, firmware-emulator observations, and physical-device observations are separate evidence classes; none establishes a released support matrix.
 

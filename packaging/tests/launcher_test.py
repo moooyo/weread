@@ -6866,6 +6866,7 @@ class LauncherLifecycleTests(unittest.TestCase):
 class LauncherIdentityRecordTests(unittest.TestCase):
     RECORD_HELPERS = ("read_single_record", "single_record_matches")
     IDENTITY_HELPERS = ("read_single_record", "read_process_identity", "process_birth", "process_parent", "process_matches")
+    COMMAND_MATCHERS = (("application_command_matches", "weread"), ("frame_guard_command_matches", "weread-frame-guard"))
 
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix="weread-launcher-helper-test-")
@@ -7028,6 +7029,157 @@ class LauncherIdentityRecordTests(unittest.TestCase):
         output, error = helper.communicate(timeout=5)
         self.assertEqual(helper.returncode, 0, error)
         self.assertEqual(output, "original-identity-expired\n")
+
+    def native_command_targets(self):
+        directory = self.root / "native-app"
+        directory.mkdir()
+        source = shutil.which("sleep")
+        self.assertIsNotNone(source, "The native identity fixture requires an ELF sleep executable.")
+        with open(source, "rb") as executable:
+            self.assertEqual(executable.read(4), b"\x7fELF")
+        for _matcher, name in self.COMMAND_MATCHERS:
+            shutil.copy2(source, directory / name)
+        self.assertFalse(os.path.samefile(directory / "weread", directory / "weread-frame-guard"))
+        return directory
+
+    def command_tool_witness(self, delegate):
+        directory = self.root / "command-tools"
+        directory.mkdir()
+        trace = directory / "calls"
+        for name in ("tr", "grep"):
+            original = shutil.which(name)
+            self.assertIsNotNone(original, "The legacy command witness requires " + name + ".")
+            body = "#!/bin/sh\nprintf '%s\\n' " + shlex.quote(name) + " >>" + shlex.quote(str(trace)) + "\n"
+            body += "exec " + shlex.quote(original) + ' "$@"\n' if delegate else "exit 97\n"
+            path = directory / name
+            path.write_text(body)
+            path.chmod(0o755)
+        return directory, trace
+
+    def start_command_subject(self, executable, *arguments, argv0="native-identity-witness", block_input=False):
+        child = subprocess.Popen([argv0, *arguments], executable=str(executable),
+                                 stdin=subprocess.PIPE if block_input else subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        self.addCleanup(self.retire_subject, child)
+        if child.stdin is not None:
+            self.addCleanup(child.stdin.close)
+        self.assertIsNone(child.poll(), "The real command identity subject must remain alive.")
+        fields = Path(f"/proc/{child.pid}/stat").read_text().rsplit(")", 1)[1].split()
+        self.assertEqual(int(fields[1]), os.getpid())
+        return child, fields[19]
+
+    def command_check(self, matcher, directory, tools, child, birth):
+        return self.run_helper((*self.IDENTITY_HELPERS, matcher), r'''
+            APP_DIR=$1
+            PATH=$2
+            process_matches "$3" "$4" "$5" || exit 80
+            "$6" "$3"
+        ''', directory, tools, child.pid, birth, os.getpid(), matcher)
+
+    def test_native_command_inode_matches_without_cmdline_tools(self):
+        directory = self.native_command_targets()
+        tools, trace = self.command_tool_witness(delegate=False)
+        for matcher, name in self.COMMAND_MATCHERS:
+            with self.subTest(command=matcher):
+                target = directory / name
+                child, birth = self.start_command_subject(target, "30")
+                self.assertTrue(os.path.samefile(target, f"/proc/{child.pid}/exe"))
+                self.assertNotIn(os.fsencode(target), Path(f"/proc/{child.pid}/cmdline").read_bytes().split(b"\0"))
+                result = self.command_check(matcher, directory, tools, child, birth)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertFalse(trace.exists(), "An admitted native ELF must not invoke legacy command tools.")
+
+    def test_native_command_hardlink_alias_matches_without_cmdline_tools(self):
+        directory = self.native_command_targets()
+        tools, trace = self.command_tool_witness(delegate=False)
+        for matcher, name in self.COMMAND_MATCHERS:
+            with self.subTest(command=matcher):
+                target = directory / name
+                alias = self.root / (name + "-hardlink")
+                os.link(target, alias)
+                child, birth = self.start_command_subject(alias, "30", argv0=str(alias))
+                self.assertTrue(os.path.samefile(target, f"/proc/{child.pid}/exe"))
+                self.assertNotIn(os.fsencode(target), Path(f"/proc/{child.pid}/cmdline").read_bytes().split(b"\0"))
+                result = self.command_check(matcher, directory, tools, child, birth)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertFalse(trace.exists(), "The same executable inode reached through a hardlink must use native admission.")
+
+    def test_native_command_other_elf_uses_the_real_legacy_fallback(self):
+        directory = self.native_command_targets()
+        tools, trace = self.command_tool_witness(delegate=True)
+        foreign = self.root / "foreign-cat"
+        shutil.copy2(shutil.which("cat"), foreign)
+        with foreign.open("rb") as executable:
+            self.assertEqual(executable.read(4), b"\x7fELF")
+        for matcher, name in self.COMMAND_MATCHERS:
+            with self.subTest(command=matcher):
+                trace.unlink(missing_ok=True)
+                child, birth = self.start_command_subject(foreign, block_input=True)
+                self.assertFalse(os.path.samefile(directory / name, f"/proc/{child.pid}/exe"))
+                result = self.command_check(matcher, directory, tools, child, birth)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertCountEqual(trace.read_text().splitlines(), ["tr", "grep"])
+
+    def test_native_command_shebang_preserves_the_real_legacy_fallback(self):
+        directory = self.root / "script-app"
+        directory.mkdir()
+        tools, trace = self.command_tool_witness(delegate=True)
+        for matcher, name in self.COMMAND_MATCHERS:
+            with self.subTest(command=matcher):
+                trace.unlink(missing_ok=True)
+                target = directory / name
+                ready = self.root / (name + "-shebang-ready")
+                target.write_text('#!/bin/sh\n: >' + shlex.quote(str(ready)) + '\nIFS= read -r fixture_hold\n')
+                target.chmod(0o755)
+                child, birth = self.start_command_subject(target, block_input=True)
+                self.wait_for_helper_path(ready, child)
+                self.assertTrue(os.path.samefile("/bin/sh", f"/proc/{child.pid}/exe"))
+                self.assertFalse(os.path.samefile(target, f"/proc/{child.pid}/exe"))
+                self.assertIn(os.fsencode(target), Path(f"/proc/{child.pid}/cmdline").read_bytes().split(b"\0"))
+                result = self.command_check(matcher, directory, tools, child, birth)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertCountEqual(trace.read_text().splitlines(), ["tr", "grep"])
+
+    def test_native_command_inode_is_rechecked_after_atomic_path_replacement(self):
+        directory = self.native_command_targets()
+        tools, trace = self.command_tool_witness(delegate=True)
+        for matcher, name in self.COMMAND_MATCHERS:
+            with self.subTest(command=matcher):
+                trace.unlink(missing_ok=True)
+                target = directory / name
+                child, birth = self.start_command_subject(target, "30")
+                window = self.root / (name + "-inode-window")
+                release = self.root / (name + "-inode-release")
+                script = self.helper_script((*self.IDENTITY_HELPERS, matcher), r'''
+                    APP_DIR=$1
+                    PATH=$2
+                    process_matches "$3" "$4" "$5" && "$6" "$3" || exit 80
+                    : >"$7"
+                    checks=300
+                    while [ ! -f "$8" ]; do
+                        [ "$checks" -gt 0 ] || exit 81
+                        /bin/sleep 0.01
+                        checks=$((checks - 1))
+                    done
+                    process_matches "$3" "$4" "$5" || exit 82
+                    if "$6" "$3"; then exit 83; fi
+                    printf '%s\n' replaced-inode-used-legacy-fallback
+                ''')
+                helper = subprocess.Popen(["sh", str(script), str(directory), str(tools), str(child.pid), birth,
+                                           str(os.getpid()), matcher, str(window), str(release)],
+                                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                self.addCleanup(self.retire_subject, helper)
+                self.wait_for_helper_path(window, helper)
+                self.assertFalse(trace.exists())
+                replacement = self.root / (name + "-replacement")
+                shutil.copy2(shutil.which("cat"), replacement)
+                replacement.replace(target)
+                self.assertFalse(os.path.samefile(target, f"/proc/{child.pid}/exe"))
+                release.touch()
+                output, error = helper.communicate(timeout=5)
+                self.assertEqual(helper.returncode, 0, error)
+                self.assertEqual(output, "replaced-inode-used-legacy-fallback\n")
+                self.assertCountEqual(trace.read_text().splitlines(), ["tr", "grep"])
 
 
 if __name__ == "__main__":

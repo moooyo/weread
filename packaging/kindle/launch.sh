@@ -254,6 +254,8 @@ process_matches() {
 }
 
 application_command_matches() {
+    # Native ELF identity is independent of the process's argv spelling.
+    if [ "$APP_DIR/weread" -ef "/proc/$1/exe" ] 2>/dev/null; then return 0; fi
     [ -r "/proc/$1/cmdline" ] &&
         tr '\000' '\n' <"/proc/$1/cmdline" |
         grep -F -x -- "$APP_DIR/weread" >/dev/null
@@ -479,6 +481,7 @@ cleanup_wrapper_child() {
 }
 
 frame_guard_command_matches() {
+    if [ "$APP_DIR/weread-frame-guard" -ef "/proc/$1/exe" ] 2>/dev/null; then return 0; fi
     [ -r "/proc/$1/cmdline" ] &&
         tr '\000' '\n' <"/proc/$1/cmdline" |
         grep -F -x -- "$APP_DIR/weread-frame-guard" >/dev/null

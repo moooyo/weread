@@ -65,8 +65,11 @@ The [Kindle development bundle instructions](packaging/kindle/README.md) describ
 [Native theme continuity](docs/NATIVE_THEME.md) records the correction for retaining dark native UI after explicit exit, compensating the next startup and wake, and closing every login state. Executable `2fd3d6ab2d64` and launcher `799d5bba5eb9` passed these scoped physical checks on the identified Scribe 2022 / firmware 5.19.5. The 440 core and 86 launcher tests cover additional controlled states; they do not establish other device support or a full-device-reboot result.
 
 The subsequent night-mode requirement uses a resident system-setting transaction
-and treats confirmed native state as authoritative at startup and wake. Its new
-physical acceptance remains separate from the earlier explicit-exit result.
+and treats confirmed native state as authoritative at startup and wake. The
+isolated v10 trial passed scoped visual, sleep, and UI-exit checks on Scribe
+2022 / firmware 5.19.5; its approximately five-second response remains open.
+System mode changes retain the Kindle's native day/night illumination presets.
+The earlier normal-mode private trial has not been replaced by these tests.
 [Rotation alignment](docs/ROTATION_ALIGNMENT.md) compares the accepted automatic
 0/180-degree display and touch paths with pinned KOReader sources.
 [Current native corrections](docs/NATIVE_FIX_ACCEPTANCE.md) records the TOC,

@@ -1,6 +1,7 @@
 # Native reading corrections and acceptance
 
 Recorded: 2026-11-09 (Asia/Shanghai).
+Updated with the v10 continuation: 2026-11-10 (Asia/Shanghai).
 
 This record covers the requested TOC status alignment, immediate system night
 mode, the observed display-release failure during sleep, and the bounded
@@ -165,8 +166,44 @@ The archive is retained as
 `test-env:/root/weread-native-frame-v9-src/weread-kindle-0.2.0-native-frame-v9-dev.zip`.
 Its frozen manifest is
 `test-env:/root/weread-native-frame-v9-src/frozen/v9-verification-manifest.json`.
-The v9 physical speed and visual gates remain **OPEN**. The v8/R9 physical
-result below is not inherited as v9 acceptance.
+The v9 software result did not establish physical speed or presentation. Its
+later R10 manual window below still showed an approximately five-second delay;
+the v8/R9 result is not inherited as v9 acceptance.
+
+## Native frame-guard v10 software candidate
+
+The v10 production change adds a three-line native-ELF admission path using a
+shell built-in same-inode comparison for the current executable. The existing
+argument-vector fallback remains available. All fresh process identity,
+power, acknowledgment, and `wc` checks remain unchanged. No Rust or C source
+changed: the `8010a217` main ELF, `a235b41c` native helper, and 30 native/pixel/
+watch results remain reused evidence, without another build or runtime suite.
+
+The initial complete launcher run executed 206 cases: 205 passed and one new
+shebang fixture failed because `/proc` command-line data was momentarily empty
+before it reached the matcher. Only that fixture was corrected to publish
+readiness and wait for its original PID to become ready; all five existing
+assertions were retained. The other 205 methods and code outside the changed
+fixture retained identical AST and source bytes. The initial `97f`-prefix
+test source and failing receipt remain retained evidence.
+
+All nine identity cases passed in isolation after the fixture correction.
+The earlier nine identity and four native-group targeted cases also passed.
+All four packaging-contract cases and the exact 36-member archive, CRC,
+0755/0644 mode, and expected digest checks passed. The final software gate
+combines the unchanged 205 successes with the corrected fixture checks; it is
+not reported as one complete 206-case passing execution.
+
+| Artifact | SHA-256 |
+| --- | --- |
+| v10 development ZIP | `e31dca0ebd3643521ac2b273fcc75a54bf9c51d1a46f5e6d0340347802695a7c` |
+| Production launcher | `15aab68c25a6d9b31c2a1020f62001ab4e86827e4dcfd2926bbaf17ef6f3c9e9` |
+| Final launcher test source | `7c9a9714e07ddc54258edb4ad89cbd1957e609dc22684dd5d5f1921426bb2433` |
+
+The frozen manifest is
+`test-env:/root/weread-native-frame-v10-src/frozen/v10-verification-manifest.json`.
+The isolated v10 manual acceptance below closes its scoped visual, sleep, and
+exit gates. It does not establish a speed improvement or a formal-trial update.
 
 ## Physical observations and remaining gates
 
@@ -372,3 +409,106 @@ firmware 5.19.5, and accepted automatic 0/180-degree path. It does not close
 the remaining theme-change delay, establish other device support, or accept
 v9 presentation or speed. USB remains deferred. The earlier `2fd3/799d`
 normal-mode private trial has not been replaced by these isolated runs.
+
+## R10 v9 manual observations
+
+The first R10 manual window used v9. The user still observed approximately
+five seconds per theme change and questioned whether illumination changed.
+No controlled day-mode transition occurred during the separate 300-second
+light trace: it timed out with only a `Y8INV` baseline, native brightness 8,
+warmth 12, and raw light values 666/616. Constant minimum and maximum values
+within that baseline do not show what a theme switch does to illumination.
+Two other uncontrolled `Y8INV` snapshots showed brightness 12 then 8 with
+warmth 12; their difference has no established cause.
+
+The wait-channel investigation collected 450 samples, including 39 state-D
+samples and 38 syscall observations, but syscall numbers were 0 or unknown
+and wait channels were unknown. It supplies no valid `ioctl` or `fsync`
+attribution. This manual window ended with an owned TERM and launcher exit
+143, followed by complete cleanup and native `Y8INV` restoration. It is not a
+voluntary UI-exit result.
+
+## R11 automatic v10 observations under the R10 lease
+
+R11 shared the still-held R10 lease. It used the final `15aab68c` production
+source with private demo/offline arguments, scripted actions, a 90-second
+application timer, and a 180-second operator guard. Its source was provisional
+when this run was prepared; the combined software gate above was completed
+afterward. Two valid system-theme commits retained the same application.
+Observed transaction-duration intervals were 5,890-6,100 ms for sequence 1 and
+5,890-6,130 ms for sequence 2, without a demonstrated speed improvement.
+
+Read-only driver observations identified `fp9966-bl0` and `fp9966-bl1` and
+confirmed that their actual values changed with system mode:
+
+| Observed mode or phase | Channel 0 actual value | Channel 1 actual value |
+| --- | --- | --- |
+| Initial night baseline | 666 | 616 |
+| During the day transition | Reached 0, then increased | Reached 0 |
+| Stable day observation | 1,213 | 1,163 |
+| Restored night observation | 666 | 616 |
+
+The driver records showed `bl_power=0`. The channel numbers are not assigned
+warm/cool meanings. Endpoint power-daemon reads both reported brightness 8
+and warmth 12; there was no day-endpoint LIPC read, so day brightness is not
+claimed to be 12. The observer completed its five-second post-second-commit
+light-value observation window; the recorded values were also stable between
+the two transitions.
+
+The stock-power coordinator refused with `insufficient-private-timer-window`
+and sent no power request. This run therefore supplies no sleep/wake result.
+The application timer exited zero, all original observers and controllers
+ended, and native `Y8INV`, locks, and owned windows were restored or cleared.
+The overall operator completion returned 1 because the controller gate was
+invalid; that failed operator gate remains recorded despite successful cleanup.
+
+## Accepted native illumination policy
+
+After reviewing the observed behavior, the user chose to retain the Kindle's
+native day/night illumination presets. The application does not own two
+illumination profiles or snapshot and restore light values around mode changes.
+Automatic brightness remains outside product and acceptance scope. Manual
+brightness and device-supported warmth remain available controls.
+
+Source review found no light setter in the normal night-mode transaction;
+light setters remain attached to manual UI controls. The existing native
+validated 0-24 light-setter range is retained. Read-only observations preserve
+the original unsigned values without clamping them.
+
+## R10 v10 manual reopen and scoped acceptance
+
+The user requested another launch, and the private v10 demo variant identified
+by digest prefix `d31fd` was activated. The initial private activation script
+used the shorthand active-application identity `KPPMainApp` and was safely
+refused. The operator corrected that script to the actual
+`com.lab126.KPPMainApp` identity. Product source and data were unchanged, and
+the failed attempt remains in the receipts.
+
+In `r10-manual-restart`, the user confirmed both night-mode directions and a
+manual five-second sleep/wake without native Library or a startup page. Dark
+appearance, reading position, and page turns remained correct. Generation 1
+retained application PID 9585 and helper PID 9532 with their original births.
+Theme sequence 1 completed `ok:Y8` and sequence 2 completed `ok:Y8INV`, each
+with the matching renderer acknowledgment and no remaining request. Guard
+sequence reached 6, and all four managed sleep/wake records matched cycle 1.
+
+The user then voluntarily exited through the UI and confirmed normal dark
+native presentation and touch. Launcher exit was zero without TERM. All
+original process-family identities had ended, both display locks were absent,
+and the actual guard XID no longer existed. The original window manager was
+running in state S, the status bar was running as PID 12360,
+`com.lab126.KPPMainApp` was foreground, native mode was `Y8INV`, and power
+state was active.
+
+The R10 private receipts include
+`evidence/private/r10-v10-manual-after-user-wake.stdout`,
+`evidence/private/r10-v10-manual-finished.stdout`, and
+`evidence/private/r10-v10-manual-guard-gone.stdout`.
+The R10 lease remains held at this record's cutoff; no lease release or
+replacement of the earlier `2fd3/799d` formal private trial is recorded here.
+
+The v10 visual, sleep, and UI-exit gates are closed only for this Scribe 2022
+and firmware 5.19.5. The separate inverted-holding observations remain v8/R9
+evidence. The approximately five-second response remains a known **OPEN**
+issue, without a claimed optimization. Overall product acceptance, USB,
+other models, and other firmware combinations are unchanged.
