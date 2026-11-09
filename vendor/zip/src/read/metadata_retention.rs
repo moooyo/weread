@@ -86,19 +86,27 @@ pub(crate) struct ExtraReservation {
 
 impl MetadataRetentionBudget {
     pub(crate) fn new(limits: MetadataRetentionLimits) -> Self {
-        Self { limits: limits.tightened(), usage: MetadataRetentionUsage::default() }
+        Self {
+            limits: limits.tightened(),
+            usage: MetadataRetentionUsage::default(),
+        }
     }
 
-    pub(crate) fn usage(&self) -> MetadataRetentionUsage { self.usage }
+    pub(crate) fn usage(&self) -> MetadataRetentionUsage {
+        self.usage
+    }
 
     fn reject<T>(&mut self) -> ZipResult<T> {
         self.usage.denied = true;
-        Err(ZipError::UnsupportedArchive(ZipError::METADATA_LIMIT_EXCEEDED))
+        Err(ZipError::UnsupportedArchive(
+            ZipError::METADATA_LIMIT_EXCEEDED,
+        ))
     }
 
     fn active(&mut self) -> ZipResult<()> {
         if self.usage.denied {
-            self.usage.operations_after_denial = self.usage.operations_after_denial.saturating_add(1);
+            self.usage.operations_after_denial =
+                self.usage.operations_after_denial.saturating_add(1);
             return self.reject();
         }
         Ok(())
@@ -123,8 +131,11 @@ impl MetadataRetentionBudget {
         let next = self.add(self.usage.metadata_bytes, retained)?;
         let peak = self.add(next, temporary_overlap)?;
         self.usage.peak_metadata_bytes = self.usage.peak_metadata_bytes.max(peak);
-        self.usage.maximum_old_buffer_bytes = self.usage.maximum_old_buffer_bytes.max(temporary_overlap);
-        if peak > self.limits.metadata_bytes { return self.reject(); }
+        self.usage.maximum_old_buffer_bytes =
+            self.usage.maximum_old_buffer_bytes.max(temporary_overlap);
+        if peak > self.limits.metadata_bytes {
+            return self.reject();
+        }
         self.usage.metadata_bytes = next;
         Ok(())
     }
@@ -171,7 +182,9 @@ impl MetadataRetentionBudget {
         self.charge(requested, 0)
     }
 
-    pub(crate) fn bytes(&mut self, bytes: usize) -> ZipResult<()> { self.charge(bytes, 0) }
+    pub(crate) fn bytes(&mut self, bytes: usize) -> ZipResult<()> {
+        self.charge(bytes, 0)
+    }
 
     pub(crate) fn unicode(&mut self, length: u16, name: bool) -> ZipResult<()> {
         // Only the declared payload can become the replacement raw name,
@@ -186,12 +199,16 @@ impl MetadataRetentionBudget {
         self.active()?;
         self.usage.extra_preflights = self.add(self.usage.extra_preflights, 1)?;
         let records = self.add(self.usage.extra_records, 1)?;
-        if records > self.limits.extra_records { return self.reject(); }
+        if records > self.limits.extra_records {
+            return self.reject();
+        }
         let needed = self.add(fields.len(), 1)?;
         let old_capacity = fields.capacity();
         let new_capacity = if needed > old_capacity {
             Some(self.multiply(old_capacity, 2)?.max(4).max(needed))
-        } else { None };
+        } else {
+            None
+        };
         let delta = match new_capacity {
             Some(capacity) => match capacity.checked_sub(old_capacity) {
                 Some(delta) => delta,
@@ -202,17 +219,26 @@ impl MetadataRetentionBudget {
         let growth = self.multiply(delta, size_of::<ExtraField>())?;
         let old_overlap = if new_capacity.is_some() {
             self.multiply(old_capacity, size_of::<ExtraField>())?
-        } else { 0 };
+        } else {
+            0
+        };
         // Charge the logical record once, new requested capacity once, and the
         // old vector's temporary overlap before constructing the enum or making
         // any reservation. A failed parse does not refund this admission.
         let retained = self.add(size_of::<ExtraField>(), growth)?;
         self.charge(retained, old_overlap)?;
         self.usage.extra_records = records;
-        Ok(ExtraReservation { new_capacity, capacity_delta: delta })
+        Ok(ExtraReservation {
+            new_capacity,
+            capacity_delta: delta,
+        })
     }
 
-    pub(crate) fn reserve(&mut self, fields: &mut Vec<ExtraField>, reservation: ExtraReservation) -> ZipResult<()> {
+    pub(crate) fn reserve(
+        &mut self,
+        fields: &mut Vec<ExtraField>,
+        reservation: ExtraReservation,
+    ) -> ZipResult<()> {
         self.active()?;
         if let Some(capacity) = reservation.new_capacity {
             let additional = capacity.checked_sub(fields.len()).ok_or_else(|| {
@@ -220,8 +246,12 @@ impl MetadataRetentionBudget {
                 ZipError::UnsupportedArchive(ZipError::METADATA_LIMIT_EXCEEDED)
             })?;
             self.usage.vector_reservations = self.add(self.usage.vector_reservations, 1)?;
-            self.usage.vector_requested_slots = self.add(self.usage.vector_requested_slots, capacity)?;
-            self.usage.vector_capacity_delta_slots = self.add(self.usage.vector_capacity_delta_slots, reservation.capacity_delta)?;
+            self.usage.vector_requested_slots =
+                self.add(self.usage.vector_requested_slots, capacity)?;
+            self.usage.vector_capacity_delta_slots = self.add(
+                self.usage.vector_capacity_delta_slots,
+                reservation.capacity_delta,
+            )?;
             fields.try_reserve_exact(additional).map_err(|_| {
                 self.usage.denied = true;
                 ZipError::UnsupportedArchive(ZipError::METADATA_LIMIT_EXCEEDED)

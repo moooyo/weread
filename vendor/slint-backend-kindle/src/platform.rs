@@ -354,7 +354,8 @@ impl Platform for KindlePlatform {
                     file_descriptors.len() as libc::nfds_t,
                     timeout_ms,
                 )
-            } < 0 {
+            } < 0
+            {
                 let error = io::Error::last_os_error();
                 if error.raw_os_error() == Some(libc::EINTR) {
                     continue;
@@ -411,7 +412,11 @@ impl Platform for KindlePlatform {
                 presentation_barrier = true;
             }
             if portrait.ensure_active(&self.native_orientation, &frame_buffer)? {
-                begin_presentation_transition(&mut touch_input, &mut input_generation, &self.window)?;
+                begin_presentation_transition(
+                    &mut touch_input,
+                    &mut input_generation,
+                    &self.window,
+                )?;
                 presentation_barrier = true;
             }
             if polled_portrait_generation == portrait.generation {
@@ -433,7 +438,11 @@ impl Platform for KindlePlatform {
             let rotation_changed = app_rotation != applied_rotation;
             if rotation_changed {
                 applied_rotation = app_rotation;
-                begin_presentation_transition(&mut touch_input, &mut input_generation, &self.window)?;
+                begin_presentation_transition(
+                    &mut touch_input,
+                    &mut input_generation,
+                    &self.window,
+                )?;
                 presentation_barrier = true;
             }
             if polled_input_generation == input_generation
@@ -452,7 +461,9 @@ impl Platform for KindlePlatform {
             {
                 let drain = match touch_input.as_mut() {
                     Some(input) => input.continue_presentation_transition().map_err(|error| {
-                        PlatformError::Other(format!("failed to synchronize cancelled input: {error}"))
+                        PlatformError::Other(format!(
+                            "failed to synchronize cancelled input: {error}"
+                        ))
                     })?,
                     None => TransitionDrain::Ready,
                 };
@@ -471,8 +482,14 @@ impl Platform for KindlePlatform {
             {
                 last_interaction = Instant::now();
                 if let Some(input) = touch_input.as_mut() {
-                    input.poll(&self.window, (applied_rotation + portrait.controller.touch_offset()) % 360)
-                        .map_err(|error| PlatformError::Other(format!("failed to read touch input: {error}")))?;
+                    input
+                        .poll(
+                            &self.window,
+                            (applied_rotation + portrait.controller.touch_offset()) % 360,
+                        )
+                        .map_err(|error| {
+                            PlatformError::Other(format!("failed to read touch input: {error}"))
+                        })?;
                 }
             }
             // An input callback can request sleep synchronously.
@@ -493,11 +510,16 @@ impl Platform for KindlePlatform {
             }
             let output_mode = self.output_mode();
             let mode_changed = output_mode != gray_renderer.mode();
-            let force_full = restore_full_frame || presentation_barrier
+            let force_full = restore_full_frame
+                || presentation_barrier
                 || (post_frame_input.waiting && mode_changed);
             let render_rotation = (applied_rotation + portrait.controller.render_offset()) % 360;
             if force_full {
-                self.window.set_size(portrait_window_size(panel_width, panel_height, render_rotation));
+                self.window.set_size(portrait_window_size(
+                    panel_width,
+                    panel_height,
+                    render_rotation,
+                ));
             }
             if mode_changed || force_full {
                 self.window.request_redraw();
@@ -544,12 +566,16 @@ impl Platform for KindlePlatform {
             );
             if force_full {
                 frame_buffer.refresh_full_checked().map_err(|error| {
-                    PlatformError::Other(format!("failed to restore the presentation frame: {error}"))
+                    PlatformError::Other(format!(
+                        "failed to restore the presentation frame: {error}"
+                    ))
                 })?;
                 frame_buffer.wait_for_update_complete();
                 let drain = match touch_input.as_mut() {
                     Some(input) => input.finish_presentation_transition().map_err(|error| {
-                        PlatformError::Other(format!("failed to drain the previous presentation input: {error}"))
+                        PlatformError::Other(format!(
+                            "failed to drain the previous presentation input: {error}"
+                        ))
                     })?,
                     None => TransitionDrain::Ready,
                 };
@@ -587,7 +613,12 @@ impl PostFrameInputGate {
         self.resume_pending = false;
     }
 
-    fn finish_frame(&mut self, drain: TransitionDrain, resuming: bool, control: &ManagedSleepControl) {
+    fn finish_frame(
+        &mut self,
+        drain: TransitionDrain,
+        resuming: bool,
+        control: &ManagedSleepControl,
+    ) {
         self.resume_pending |= resuming;
         self.retry(drain, control);
     }
@@ -637,9 +668,10 @@ impl PortraitRuntime {
 
     fn input_gated(&self) -> bool {
         self.snapshot_pending
-            || self.observer.as_ref().is_some_and(|observer| {
-                observer.has_backlog() || !observer.is_synchronized()
-            })
+            || self
+                .observer
+                .as_ref()
+                .is_some_and(|observer| observer.has_backlog() || !observer.is_synchronized())
     }
 
     fn ensure_active(
@@ -654,7 +686,9 @@ impl PortraitRuntime {
         if request.sequence != self.seen_request {
             self.seen_request = request.sequence;
             match framebuffer.portrait_rotation().and_then(|rotation| {
-                self.controller.apply_request(request, rotation).map_err(io::Error::other)
+                self.controller
+                    .apply_request(request, rotation)
+                    .map_err(io::Error::other)
             }) {
                 Ok(applied) => {
                     changed |= applied;
@@ -708,7 +742,9 @@ impl PortraitRuntime {
         if self.snapshot_pending {
             return self.refresh_snapshot(framebuffer);
         }
-        let Some(observer) = self.observer.as_mut() else { return Ok(false) };
+        let Some(observer) = self.observer.as_mut() else {
+            return Ok(false);
+        };
         let pose = match observer.poll() {
             Ok(pose) => pose,
             Err(error) => {
@@ -768,7 +804,9 @@ fn begin_presentation_transition(
 ) -> Result<(), PlatformError> {
     if let Some(input) = input.as_mut() {
         let _ = input.cancel_and_drain(window).map_err(|error| {
-            PlatformError::Other(format!("failed to cancel the previous presentation input: {error}"))
+            PlatformError::Other(format!(
+                "failed to cancel the previous presentation input: {error}"
+            ))
         })?;
     }
     *generation = generation.wrapping_add(1);
@@ -1107,29 +1145,78 @@ mod active_orientation_runtime_tests {
     #[test]
     fn optional_observation_failure_keeps_the_installed_runtime_mapping() {
         let mut runtime = PortraitRuntime::new(180);
-        runtime.controller.apply_request(OrientationRequest {
-            sequence: 1,
-            calibration: Some(PortraitCalibration {
-                holding: NativePortraitOrientation::Up,
-                scanout: NativePortraitOrientation::Up,
-                raw_rotation: 3,
-            }),
-        }, 3).unwrap();
-        assert!(runtime.observe_pose_with(Some(NativePortrait::Down), || Ok(1)).unwrap());
-        let installed = (runtime.controller.render_offset(), runtime.controller.touch_offset());
+        runtime
+            .controller
+            .apply_request(
+                OrientationRequest {
+                    sequence: 1,
+                    calibration: Some(PortraitCalibration {
+                        holding: NativePortraitOrientation::Up,
+                        scanout: NativePortraitOrientation::Up,
+                        raw_rotation: 3,
+                    }),
+                },
+                3,
+            )
+            .unwrap();
+        assert!(
+            runtime
+                .observe_pose_with(Some(NativePortrait::Down), || Ok(1))
+                .unwrap()
+        );
+        let installed = (
+            runtime.controller.render_offset(),
+            runtime.controller.touch_offset(),
+        );
         assert_eq!(installed, (0, 180));
-        assert_eq!(runtime.observe_pose_with(Some(NativePortrait::Up), || {
-            Err(io::Error::other("Synthetic optional GETVAR failure"))
-        }).unwrap(), false);
-        assert_eq!((runtime.controller.render_offset(), runtime.controller.touch_offset()), installed);
+        assert_eq!(
+            runtime
+                .observe_pose_with(Some(NativePortrait::Up), || {
+                    Err(io::Error::other("Synthetic optional GETVAR failure"))
+                })
+                .unwrap(),
+            false
+        );
+        assert_eq!(
+            (
+                runtime.controller.render_offset(),
+                runtime.controller.touch_offset()
+            ),
+            installed
+        );
         assert!(runtime.attempted);
-        assert_eq!(runtime.observe_pose_with(Some(NativePortrait::Up), || Ok(0)).unwrap(), false);
-        assert_eq!((runtime.controller.render_offset(), runtime.controller.touch_offset()), installed);
+        assert_eq!(
+            runtime
+                .observe_pose_with(Some(NativePortrait::Up), || Ok(0))
+                .unwrap(),
+            false
+        );
+        assert_eq!(
+            (
+                runtime.controller.render_offset(),
+                runtime.controller.touch_offset()
+            ),
+            installed
+        );
         runtime.pause();
         assert!(!runtime.attempted);
-        assert!(runtime.observe_pose_with(Some(NativePortrait::Up), || Ok(3)).unwrap());
-        assert_eq!((runtime.controller.render_offset(), runtime.controller.touch_offset()), (0, 0));
-        assert!(!runtime.observe_pose_with(None, || panic!("No report must not query scanout")).unwrap());
+        assert!(
+            runtime
+                .observe_pose_with(Some(NativePortrait::Up), || Ok(3))
+                .unwrap()
+        );
+        assert_eq!(
+            (
+                runtime.controller.render_offset(),
+                runtime.controller.touch_offset()
+            ),
+            (0, 0)
+        );
+        assert!(
+            !runtime
+                .observe_pose_with(None, || panic!("No report must not query scanout"))
+                .unwrap()
+        );
     }
 }
 
@@ -1156,7 +1243,11 @@ mod orientation_tests {
 
     fn observe_identity(pid: u32) -> Option<ProcessIdentity> {
         let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-        let fields = stat.rsplit_once(')')?.1.split_whitespace().collect::<Vec<_>>();
+        let fields = stat
+            .rsplit_once(')')?
+            .1
+            .split_whitespace()
+            .collect::<Vec<_>>();
         Some(ProcessIdentity {
             pid: stat.split_once(' ')?.0.parse().ok()?,
             parent: fields.get(1)?.parse().ok()?,
@@ -1230,14 +1321,20 @@ mod orientation_tests {
                     fixture.identity = Some(identity);
                     return fixture;
                 }
-                assert!(Instant::now() < deadline, "Observe the live orientation anchor");
+                assert!(
+                    Instant::now() < deadline,
+                    "Observe the live orientation anchor"
+                );
                 thread::sleep(Duration::from_millis(2));
             }
         }
 
         fn command(&self, script: &str) -> Command {
             let identity = self.identity.expect("The orientation anchor was captured");
-            assert!(is_original_live_anchor(identity), "The orientation anchor expired");
+            assert!(
+                is_original_live_anchor(identity),
+                "The orientation anchor expired"
+            );
             let mut command = Command::new("/bin/sh");
             command.args(["-c", script]).process_group(identity.group);
             command
@@ -1330,7 +1427,8 @@ mod orientation_tests {
     #[test]
     fn inherited_stdout_cannot_hold_the_orientation_query_open() {
         let group = FixtureGroup::new();
-        let mut child = group.command("sleep 5 & printf D")
+        let mut child = group
+            .command("sleep 5 & printf D")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -1348,7 +1446,10 @@ mod orientation_tests {
         assert_eq!(helper.parent, std::process::id());
         assert_eq!(helper.group, expected_group);
         assert_eq!(result, None);
-        assert!(shell_exited, "The finite descendant retained stdout after shell exit");
+        assert!(
+            shell_exited,
+            "The finite descendant retained stdout after shell exit"
+        );
         assert!(pipe_released, "The parent reply pipe was released");
         assert!(observe_identity(helper.pid).is_none_or(|current| current.birth != helper.birth));
         assert!(started.elapsed() < Duration::from_secs(1));
@@ -1385,7 +1486,9 @@ mod orientation_tests {
         // A scheduler pause can already have exhausted this direct child's TTL.
         // Child still owns the original process; reap it before any assertion.
         let _ = expired.kill();
-        expired.wait().expect("Reap the owned direct expiry fixture");
+        expired
+            .wait()
+            .expect("Reap the owned direct expiry fixture");
         let expired_identity = expired_identity.expect("Capture the direct expiry fixture");
         assert!(originally_live);
         assert!(!is_original_live_anchor(expired_identity));

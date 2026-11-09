@@ -938,7 +938,10 @@ impl<'a> Render<'a> {
                         // raster pass succeeds. Only this bounded new target is
                         // allocated; the caller's old data is neither copied nor priced.
                         let mut target = Vec::new();
-                        if budget.resize(&mut target, layout.bytes, &mut reservation).is_err() {
+                        if budget
+                            .resize(&mut target, layout.bytes, &mut reservation)
+                            .is_err()
+                        {
                             return false;
                         }
                         // Reuse this exact inspected Mask; refusal never renders

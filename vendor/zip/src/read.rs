@@ -32,11 +32,11 @@ mod config;
 mod metadata_retention;
 
 pub use config::*;
+use metadata_retention::MetadataRetentionBudget;
 pub use metadata_retention::{
     MetadataRetentionLimits, MetadataRetentionUsage, DEFAULT_EXTRA_FIELD_RECORD_LIMIT,
     DEFAULT_METADATA_RETENTION_LIMIT,
 };
-use metadata_retention::MetadataRetentionBudget;
 
 /// Default cumulative read allowance for bounded metadata initialization.
 pub const DEFAULT_METADATA_READ_LIMIT: u64 = 128 * 1024 * 1024;
@@ -545,8 +545,9 @@ impl<'a> TryFrom<&'a CentralDirectoryEndInfo> for CentralDirectoryInfo {
                     }
                     (
                         eocd64.central_directory_offset,
-                        usize::try_from(eocd64.number_of_files)
-                            .map_err(|_| ZipError::UnsupportedArchive(ZipError::METADATA_LIMIT_EXCEEDED))?,
+                        usize::try_from(eocd64.number_of_files).map_err(|_| {
+                            ZipError::UnsupportedArchive(ZipError::METADATA_LIMIT_EXCEEDED)
+                        })?,
                         eocd64.disk_number,
                         eocd64.disk_with_central_directory,
                     )
@@ -741,17 +742,28 @@ impl<R: Read + Seek> ZipArchive<R> {
             }
 
             // Turn EOCD into internal representation.
-            let comment_bytes = cde.eocd.data.zip_file_comment.len()
-                .checked_add(cde.eocd64.as_ref().map_or(0, |record| record.data.extensible_data_sector.len()))
-                .ok_or(ZipError::UnsupportedArchive(ZipError::METADATA_LIMIT_EXCEEDED))?;
+            let comment_bytes = cde
+                .eocd
+                .data
+                .zip_file_comment
+                .len()
+                .checked_add(
+                    cde.eocd64
+                        .as_ref()
+                        .map_or(0, |record| record.data.extensible_data_sector.len()),
+                )
+                .ok_or(ZipError::UnsupportedArchive(
+                    ZipError::METADATA_LIMIT_EXCEEDED,
+                ))?;
             retention.bytes(comment_bytes)?;
             let raw_files = match &cde.eocd64 {
                 Some(record) => record.data.number_of_files,
                 None => u64::from(cde.eocd.data.number_of_files_on_this_disk),
             };
             retention.directory_count(raw_files)?;
-            let shared = match CentralDirectoryInfo::try_from(&cde)
-                .and_then(|info| Self::read_central_header(info, config, reader, max_files, retention)) {
+            let shared = match CentralDirectoryInfo::try_from(&cde).and_then(|info| {
+                Self::read_central_header(info, config, reader, max_files, retention)
+            }) {
                 Ok(shared) => shared,
                 Err(ZipError::UnsupportedArchive(ZipError::METADATA_LIMIT_EXCEEDED)) => {
                     // Retention admission is operation-wide and terminal. A
@@ -906,8 +918,14 @@ impl<R: Read + Seek> ZipArchive<R> {
         max_metadata_candidates: usize,
     ) -> ZipResult<ZipArchive<R>> {
         let mut usage = MetadataRetentionUsage::default();
-        Self::new_with_retention_limits(reader, max_files, max_metadata_read_bytes,
-            max_metadata_candidates, MetadataRetentionLimits::default(), &mut usage)
+        Self::new_with_retention_limits(
+            reader,
+            max_files,
+            max_metadata_read_bytes,
+            max_metadata_candidates,
+            MetadataRetentionLimits::default(),
+            &mut usage,
+        )
     }
 
     /// Initialize with the existing read/count/candidate limits and a separate
@@ -958,7 +976,8 @@ impl<R: Read + Seek> ZipArchive<R> {
     /// This uses the central directory record of the ZIP file, and ignores local file headers.
     pub fn with_config(config: Config, mut reader: R) -> ZipResult<ZipArchive<R>> {
         let mut retention = MetadataRetentionBudget::new(MetadataRetentionLimits::default());
-        let shared = Self::get_metadata_with_file_limit(config, &mut reader, None, None, &mut retention)?;
+        let shared =
+            Self::get_metadata_with_file_limit(config, &mut reader, None, None, &mut retention)?;
 
         Ok(ZipArchive {
             reader,
@@ -975,9 +994,13 @@ impl<R: Read + Seek> ZipArchive<R> {
         usage: &mut MetadataRetentionUsage,
     ) -> ZipResult<ZipArchive<R>> {
         let mut retention = MetadataRetentionBudget::new(limits);
-        let shared = Self::get_metadata_with_file_limit(config, &mut reader, None, None, &mut retention);
+        let shared =
+            Self::get_metadata_with_file_limit(config, &mut reader, None, None, &mut retention);
         *usage = retention.usage();
-        Ok(ZipArchive { reader, shared: shared?.into() })
+        Ok(ZipArchive {
+            reader,
+            shared: shared?.into(),
+        })
     }
 
     /// Extract a Zip archive into a directory, overwriting files if they
@@ -1507,8 +1530,13 @@ fn central_header_to_zip_file_inner<R: Read>(
     block: ZipCentralEntryBlock,
 ) -> ZipResult<ZipFileData> {
     let mut retention = MetadataRetentionBudget::new(MetadataRetentionLimits::default());
-    central_header_to_zip_file_inner_with_retention(reader, archive_offset,
-        central_header_start, block, &mut retention)
+    central_header_to_zip_file_inner_with_retention(
+        reader,
+        archive_offset,
+        central_header_start,
+        block,
+        &mut retention,
+    )
 }
 
 fn central_header_to_zip_file_inner_with_retention<R: Read>(
@@ -1546,7 +1574,8 @@ fn central_header_to_zip_file_inner_with_retention<R: Read>(
     retention.file_fields(file_name_length, extra_field_length, file_comment_length)?;
     let file_name_raw = read_variable_length_byte_field(reader, usize::from(file_name_length))?;
     let extra_field = read_variable_length_byte_field(reader, usize::from(extra_field_length))?;
-    let file_comment_raw = read_variable_length_byte_field(reader, usize::from(file_comment_length))?;
+    let file_comment_raw =
+        read_variable_length_byte_field(reader, usize::from(file_comment_length))?;
     let file_name: Box<str> = match is_utf8 {
         true => String::from_utf8_lossy(&file_name_raw).into(),
         false => file_name_raw.clone().from_cp437(),
@@ -1612,8 +1641,10 @@ pub(crate) fn parse_extra_field(file: &mut ZipFileData) -> ZipResult<Option<Arc<
     parse_extra_field_with_retention(file, &mut retention)
 }
 
-fn parse_extra_field_with_retention(file: &mut ZipFileData,
-    retention: &mut MetadataRetentionBudget) -> ZipResult<Option<Arc<Vec<u8>>>> {
+fn parse_extra_field_with_retention(
+    file: &mut ZipFileData,
+    retention: &mut MetadataRetentionBudget,
+) -> ZipResult<Option<Arc<Vec<u8>>>> {
     let Some(ref extra_field) = file.extra_field else {
         return Ok(None);
     };
@@ -1626,8 +1657,13 @@ fn parse_extra_field_with_retention(file: &mut ZipFileData,
     let mut position = reader.position() as usize;
     while (position) < len {
         let old_position = position;
-        let remove = parse_single_extra_field_with_retention(file, &mut reader,
-            position as u64, false, retention)?;
+        let remove = parse_single_extra_field_with_retention(
+            file,
+            &mut reader,
+            position as u64,
+            false,
+            retention,
+        )?;
         position = reader.position() as usize;
         if remove {
             let remaining = len - (position - old_position);
@@ -1643,8 +1679,7 @@ fn parse_extra_field_with_retention(file: &mut ZipFileData,
     match last_removed_range {
         Some(removed) => {
             retention.bytes(len - (removed.end - removed.start))?;
-            let mut processed_extra_field =
-                Vec::with_capacity(len - (removed.end - removed.start));
+            let mut processed_extra_field = Vec::with_capacity(len - (removed.end - removed.start));
             processed_extra_field.extend_from_slice(&extra_field[..removed.start]);
             processed_extra_field.extend_from_slice(&extra_field[removed.end..]);
             Ok(Some(Arc::new(processed_extra_field)))
@@ -1660,8 +1695,13 @@ pub(crate) fn parse_single_extra_field<R: Read>(
     disallow_zip64: bool,
 ) -> ZipResult<bool> {
     let mut retention = MetadataRetentionBudget::new(MetadataRetentionLimits::default());
-    parse_single_extra_field_with_retention(file, reader, bytes_already_read,
-        disallow_zip64, &mut retention)
+    parse_single_extra_field_with_retention(
+        file,
+        reader,
+        bytes_already_read,
+        disallow_zip64,
+        &mut retention,
+    )
 }
 
 fn parse_single_extra_field_with_retention<R: Read>(
@@ -1702,7 +1742,9 @@ fn parse_single_extra_field_with_retention<R: Read>(
         0x000a => {
             // NTFS extra field
             if len != 32 {
-                return Err(ZipError::UnsupportedArchive("NTFS extra field has an unsupported length"));
+                return Err(ZipError::UnsupportedArchive(
+                    "NTFS extra field has an unsupported length",
+                ));
             }
             let reservation = retention.extra(&file.extra_fields)?;
             retention.reserve(&mut file.extra_fields, reservation)?;
@@ -1747,7 +1789,9 @@ fn parse_single_extra_field_with_retention<R: Read>(
             // Preserve the earlier zero-length error before record admission,
             // flag reads, enum construction, or a vector reservation.
             if len == 0 {
-                return Err(ZipError::UnsupportedArchive("flags and len don't match in extended timestamp field"));
+                return Err(ZipError::UnsupportedArchive(
+                    "flags and len don't match in extended timestamp field",
+                ));
             }
             let reservation = retention.extra(&file.extra_fields)?;
             retention.reserve(&mut file.extra_fields, reservation)?;

@@ -104,9 +104,7 @@ fn read_ioctl(number: u8, bytes: usize) -> libc::c_ulong {
 fn query_contact_snapshot(fd: libc::c_int) -> std::io::Result<ContactSnapshot> {
     let mut axes = [0u8; 8];
     // SAFETY: The initialized bitmap has the length encoded in EVIOCGBIT.
-    let result = unsafe {
-        libc::ioctl(fd, read_ioctl(0x23, axes.len()) as _, axes.as_mut_ptr())
-    };
+    let result = unsafe { libc::ioctl(fd, read_ioctl(0x23, axes.len()) as _, axes.as_mut_ptr()) };
     if result < 0 {
         return Err(std::io::Error::last_os_error());
     }
@@ -146,7 +144,10 @@ fn query_contact_snapshot(fd: libc::c_int) -> std::io::Result<ContactSnapshot> {
         let y = query_slot_values(fd, TOUCH_POSITION_Y, count)?;
         let mut coordinates = [SlotCoordinates::EMPTY; MAX_TOUCH_SLOTS];
         for slot in 0..count {
-            coordinates[slot] = SlotCoordinates { x: Some(x[slot]), y: Some(y[slot]) };
+            coordinates[slot] = SlotCoordinates {
+                x: Some(x[slot]),
+                y: Some(y[slot]),
+            };
         }
         if tracking_ids.iter().any(|id| *id < -1) {
             return Err(std::io::Error::new(
@@ -166,8 +167,13 @@ fn query_contact_snapshot(fd: libc::c_int) -> std::io::Result<ContactSnapshot> {
     let mut key_bits = [0u8; 64];
     // SAFETY: The initialized bitmap covers BTN_TOUCH and matches the ioctl size.
     if unsafe {
-        libc::ioctl(fd, read_ioctl(0x21, key_bits.len()) as _, key_bits.as_mut_ptr())
-    } < 0 {
+        libc::ioctl(
+            fd,
+            read_ioctl(0x21, key_bits.len()) as _,
+            key_bits.as_mut_ptr(),
+        )
+    } < 0
+    {
         return Err(std::io::Error::last_os_error());
     }
     let touch_bit = |bits: &[u8]| bits[BTN_TOUCH as usize / 8] & (1 << (BTN_TOUCH % 8)) != 0;
@@ -187,7 +193,11 @@ fn query_contact_snapshot(fd: libc::c_int) -> std::io::Result<ContactSnapshot> {
     } else {
         SINGLE_TOUCH_POSITION_X
     };
-    let y_axis = if has_axis(TOUCH_POSITION_Y) { TOUCH_POSITION_Y } else { 0x01 };
+    let y_axis = if has_axis(TOUCH_POSITION_Y) {
+        TOUCH_POSITION_Y
+    } else {
+        0x01
+    };
     if !has_axis(x_axis) || !has_axis(y_axis) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::Unsupported,
@@ -619,7 +629,8 @@ impl TouchInput {
         let slot = checked_slot(self.active_slot)? as usize;
         // Keep current raw axes before an ordinary cancellation too: a new
         // tracking ID does not force evdev to repeat unchanged coordinates.
-        let coordinates = self.loss_coordinates
+        let coordinates = self
+            .loss_coordinates
             .get_or_insert([SlotCoordinates::EMPTY; MAX_TOUCH_SLOTS]);
         match axis {
             TOUCH_POSITION_X => coordinates[slot].x = Some(value),
@@ -630,8 +641,12 @@ impl TouchInput {
     }
 
     fn restore_fresh_coordinates(&mut self) {
-        let Some(slot) = self.tracked_slot else { return };
-        let Some(coordinates) = self.loss_coordinates.as_ref() else { return };
+        let Some(slot) = self.tracked_slot else {
+            return;
+        };
+        let Some(coordinates) = self.loss_coordinates.as_ref() else {
+            return;
+        };
         self.x = 0.0;
         self.y = 0.0;
         if let Some((x, y)) = coordinates[slot as usize].complete() {
@@ -698,9 +713,12 @@ impl TouchInput {
         if self.tracked_slot.is_none() || self.cancelled_contact_is_held() {
             return;
         }
-        if self.loss_coordinates.as_ref().and_then(|coordinates| {
-            coordinates[self.tracked_slot.unwrap() as usize].complete()
-        }).is_none() {
+        if self
+            .loss_coordinates
+            .as_ref()
+            .and_then(|coordinates| coordinates[self.tracked_slot.unwrap() as usize].complete())
+            .is_none()
+        {
             return;
         }
         let position = self.logical_position(window);
@@ -741,7 +759,10 @@ fn checked_slot(value: i32) -> std::io::Result<i32> {
     if (0..MAX_TOUCH_SLOTS as i32).contains(&value) {
         Ok(value)
     } else {
-        Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid touch slot"))
+        Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "invalid touch slot",
+        ))
     }
 }
 
@@ -749,7 +770,10 @@ fn checked_tracking_id(value: i32) -> std::io::Result<i32> {
     if value >= -1 {
         Ok(value)
     } else {
-        Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid touch tracking ID"))
+        Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "invalid touch tracking ID",
+        ))
     }
 }
 
@@ -838,9 +862,10 @@ mod tests {
         use std::os::fd::FromRawFd;
         let mut descriptors = [-1; 2];
         // SAFETY: The initialized two-element array owns both returned descriptors.
-        assert_eq!(unsafe {
-            libc::pipe2(descriptors.as_mut_ptr(), libc::O_NONBLOCK | libc::O_CLOEXEC)
-        }, 0);
+        assert_eq!(
+            unsafe { libc::pipe2(descriptors.as_mut_ptr(), libc::O_NONBLOCK | libc::O_CLOEXEC) },
+            0
+        );
         // SAFETY: pipe2 just created the writer, which has exactly one owner.
         let writer = unsafe { std::os::fd::OwnedFd::from_raw_fd(descriptors[1]) };
         let input = TouchInput {
@@ -877,20 +902,26 @@ mod tests {
             value,
         };
         // SAFETY: The initialized native packet stays live for this pipe write.
-        assert_eq!(unsafe {
-            libc::write(
-                writer.as_raw_fd(),
-                (&event as *const super::TouchInputEvent).cast(),
-                std::mem::size_of_val(&event),
-            )
-        }, std::mem::size_of_val(&event) as isize);
+        assert_eq!(
+            unsafe {
+                libc::write(
+                    writer.as_raw_fd(),
+                    (&event as *const super::TouchInputEvent).cast(),
+                    std::mem::size_of_val(&event),
+                )
+            },
+            std::mem::size_of_val(&event) as isize
+        );
     }
 
     fn fresh_contacts(slot: usize, id: i32, x: i32, y: i32) -> super::ContactSnapshot {
         let mut tracking_ids = [-1; super::MAX_TOUCH_SLOTS];
         tracking_ids[slot] = id;
         let mut coordinates = [super::SlotCoordinates::EMPTY; super::MAX_TOUCH_SLOTS];
-        coordinates[slot] = super::SlotCoordinates { x: Some(x), y: Some(y) };
+        coordinates[slot] = super::SlotCoordinates {
+            x: Some(x),
+            y: Some(y),
+        };
         super::ContactSnapshot {
             active_slot: slot as i32,
             tracking_ids,
@@ -906,36 +937,62 @@ mod tests {
         input.current_tracking[0] = 7;
         input.block_current_contacts();
         write_packet(&writer, super::EVENT_SYNC, super::SYNC_DROPPED, 0);
-        write_packet(&writer, super::EVENT_ABSOLUTE_AXIS, super::TOUCH_TRACKING_ID, 9);
-        write_packet(&writer, super::EVENT_ABSOLUTE_AXIS, super::TOUCH_POSITION_X, 99);
-        assert_eq!(input.drain_cancelled_events_with(|_| {
-            panic!("A snapshot must wait for SYN_REPORT")
-        }).unwrap(), super::TransitionDrain::Waiting);
+        write_packet(
+            &writer,
+            super::EVENT_ABSOLUTE_AXIS,
+            super::TOUCH_TRACKING_ID,
+            9,
+        );
+        write_packet(
+            &writer,
+            super::EVENT_ABSOLUTE_AXIS,
+            super::TOUCH_POSITION_X,
+            99,
+        );
+        assert_eq!(
+            input
+                .drain_cancelled_events_with(|_| { panic!("A snapshot must wait for SYN_REPORT") })
+                .unwrap(),
+            super::TransitionDrain::Waiting
+        );
         assert!(input.draining);
         assert_eq!(input.cancelled_tracking[0], 7);
         assert_eq!(input.x, 0.0);
 
         write_packet(&writer, super::EVENT_SYNC, super::SYNC_REPORT, 0);
         let mut snapshots = 0;
-        assert_eq!(input.drain_cancelled_events_with(|_| {
-            snapshots += 1;
-            if snapshots == 1 {
-                // A second loss queued during the first query cannot release
-                // the presentation gate using the earlier contact snapshot.
-                write_packet(&writer, super::EVENT_SYNC, super::SYNC_DROPPED, 0);
-                write_packet(&writer, super::EVENT_ABSOLUTE_AXIS, super::TOUCH_TRACKING_ID, 11);
-                write_packet(&writer, super::EVENT_SYNC, super::SYNC_REPORT, 0);
-                Ok(fresh_contacts(1, 9, 70, 80))
-            } else {
-                Ok(fresh_contacts(2, 11, 40, 60))
-            }
-        }).unwrap(), super::TransitionDrain::Ready);
+        assert_eq!(
+            input
+                .drain_cancelled_events_with(|_| {
+                    snapshots += 1;
+                    if snapshots == 1 {
+                        // A second loss queued during the first query cannot release
+                        // the presentation gate using the earlier contact snapshot.
+                        write_packet(&writer, super::EVENT_SYNC, super::SYNC_DROPPED, 0);
+                        write_packet(
+                            &writer,
+                            super::EVENT_ABSOLUTE_AXIS,
+                            super::TOUCH_TRACKING_ID,
+                            11,
+                        );
+                        write_packet(&writer, super::EVENT_SYNC, super::SYNC_REPORT, 0);
+                        Ok(fresh_contacts(1, 9, 70, 80))
+                    } else {
+                        Ok(fresh_contacts(2, 11, 40, 60))
+                    }
+                })
+                .unwrap(),
+            super::TransitionDrain::Ready
+        );
         assert_eq!(snapshots, 2);
         assert_eq!(input.active_slot, 2);
         assert_eq!(input.current_tracking[2], 11);
         assert_eq!(input.cancelled_tracking[2], 11);
         assert!(input.cancelled_contact_is_held());
-        assert_eq!(input.loss_coordinates.unwrap()[2].complete(), Some((40, 60)));
+        assert_eq!(
+            input.loss_coordinates.unwrap()[2].complete(),
+            Some((40, 60))
+        );
         assert_eq!(input.tracked_slot, None);
         assert!(!input.pressed);
     }
@@ -945,16 +1002,28 @@ mod tests {
         let (mut input, writer) = touch_pipe();
         write_packet(&writer, super::EVENT_SYNC, super::SYNC_DROPPED, 0);
         write_packet(&writer, super::EVENT_SYNC, super::SYNC_REPORT, 0);
-        for kind in [std::io::ErrorKind::Interrupted, std::io::ErrorKind::WouldBlock] {
-            assert_eq!(input.drain_cancelled_events_with(|_| {
-                Err(std::io::Error::from(kind))
-            }).unwrap(), super::TransitionDrain::Waiting);
+        for kind in [
+            std::io::ErrorKind::Interrupted,
+            std::io::ErrorKind::WouldBlock,
+        ] {
+            assert_eq!(
+                input
+                    .drain_cancelled_events_with(|_| { Err(std::io::Error::from(kind)) })
+                    .unwrap(),
+                super::TransitionDrain::Waiting
+            );
             assert!(input.draining);
-            assert_eq!(input.drain_synchronization, super::DrainSynchronization::SnapshotPending);
+            assert_eq!(
+                input.drain_synchronization,
+                super::DrainSynchronization::SnapshotPending
+            );
         }
-        assert_eq!(input.drain_cancelled_events_with(|_| {
-            Ok(fresh_contacts(0, 8, 75, 65))
-        }).unwrap(), super::TransitionDrain::Ready);
+        assert_eq!(
+            input
+                .drain_cancelled_events_with(|_| { Ok(fresh_contacts(0, 8, 75, 65)) })
+                .unwrap(),
+            super::TransitionDrain::Ready
+        );
         assert!(!input.draining);
         assert_eq!(input.cancelled_tracking[0], 8);
         assert_eq!(input.tracked_slot, None);
@@ -964,16 +1033,28 @@ mod tests {
     fn only_eagain_completes_a_touch_drain_and_eof_or_short_packets_fail() {
         use std::os::fd::AsRawFd;
         let (mut input, writer) = touch_pipe();
-        assert_eq!(input.finish_presentation_transition().unwrap(), super::TransitionDrain::Ready);
+        assert_eq!(
+            input.finish_presentation_transition().unwrap(),
+            super::TransitionDrain::Ready
+        );
         drop(writer);
-        assert_eq!(input.finish_presentation_transition().unwrap_err().kind(), std::io::ErrorKind::UnexpectedEof);
+        assert_eq!(
+            input.finish_presentation_transition().unwrap_err().kind(),
+            std::io::ErrorKind::UnexpectedEof
+        );
         assert!(input.draining);
 
         let (mut input, writer) = touch_pipe();
         let byte = 0u8;
         // SAFETY: This one-byte fixture deliberately creates an incomplete packet.
-        assert_eq!(unsafe { libc::write(writer.as_raw_fd(), (&byte as *const u8).cast(), 1) }, 1);
-        assert_eq!(input.finish_presentation_transition().unwrap_err().kind(), std::io::ErrorKind::InvalidData);
+        assert_eq!(
+            unsafe { libc::write(writer.as_raw_fd(), (&byte as *const u8).cast(), 1) },
+            1
+        );
+        assert_eq!(
+            input.finish_presentation_transition().unwrap_err().kind(),
+            std::io::ErrorKind::InvalidData
+        );
         assert!(input.draining);
     }
 
@@ -982,11 +1063,17 @@ mod tests {
         std::thread::spawn(|| {
             use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
             use slint::platform::{Platform, WindowAdapter};
-            use std::{cell::Cell, os::fd::{AsRawFd, FromRawFd, OwnedFd}, rc::Rc};
+            use std::{
+                cell::Cell,
+                os::fd::{AsRawFd, FromRawFd, OwnedFd},
+                rc::Rc,
+            };
 
             struct TestPlatform(Rc<MinimalSoftwareWindow>);
             impl Platform for TestPlatform {
-                fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
+                fn create_window_adapter(
+                    &self,
+                ) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
                     Ok(self.0.clone())
                 }
             }
@@ -1007,7 +1094,12 @@ mod tests {
             fixture.on_cancelled(move || recorded.set(recorded.get() + 1));
             let mut descriptors = [-1; 2];
             // SAFETY: The two-element output array is initialized and live.
-            assert_eq!(unsafe { libc::pipe2(descriptors.as_mut_ptr(), libc::O_NONBLOCK | libc::O_CLOEXEC) }, 0);
+            assert_eq!(
+                unsafe {
+                    libc::pipe2(descriptors.as_mut_ptr(), libc::O_NONBLOCK | libc::O_CLOEXEC)
+                },
+                0
+            );
             // SAFETY: The writer was just allocated by pipe2 and has one owner.
             let writer = unsafe { OwnedFd::from_raw_fd(descriptors[1]) };
             let mut input = TouchInput {
@@ -1041,14 +1133,24 @@ mod tests {
                 };
                 // SAFETY: The native event is fully initialized and live for
                 // this bounded anonymous-pipe write; no device is involved.
-                assert_eq!(unsafe {
-                    libc::write(writer.as_raw_fd(), (&event as *const super::TouchInputEvent).cast(), std::mem::size_of_val(&event))
-                }, std::mem::size_of_val(&event) as isize);
+                assert_eq!(
+                    unsafe {
+                        libc::write(
+                            writer.as_raw_fd(),
+                            (&event as *const super::TouchInputEvent).cast(),
+                            std::mem::size_of_val(&event),
+                        )
+                    },
+                    std::mem::size_of_val(&event) as isize
+                );
             };
             packet(super::EVENT_ABSOLUTE_AXIS, super::TOUCH_TRACKING_ID, 7);
             packet(super::EVENT_SYNC, super::SYNC_REPORT, 0);
             input.poll(&window, 0).unwrap();
-            assert!(!fixture.get_pressed(), "Unknown initial axes cannot create a press");
+            assert!(
+                !fixture.get_pressed(),
+                "Unknown initial axes cannot create a press"
+            );
             packet(super::EVENT_ABSOLUTE_AXIS, super::TOUCH_TRACKING_ID, 7);
             packet(super::EVENT_ABSOLUTE_AXIS, super::TOUCH_POSITION_X, 25);
             packet(super::EVENT_ABSOLUTE_AXIS, super::TOUCH_POSITION_Y, 25);
@@ -1060,8 +1162,14 @@ mod tests {
             packet(super::EVENT_ABSOLUTE_AXIS, super::TOUCH_POSITION_X, 90);
             packet(super::EVENT_ABSOLUTE_AXIS, super::TOUCH_POSITION_Y, 90);
             packet(super::EVENT_SYNC, super::SYNC_REPORT, 0);
-            assert_eq!(input.cancel_and_drain(&window).unwrap(), super::TransitionDrain::Ready);
-            assert_eq!(input.finish_presentation_transition().unwrap(), super::TransitionDrain::Ready);
+            assert_eq!(
+                input.cancel_and_drain(&window).unwrap(),
+                super::TransitionDrain::Ready
+            );
+            assert_eq!(
+                input.finish_presentation_transition().unwrap(),
+                super::TransitionDrain::Ready
+            );
             input.poll(&window, 180).unwrap();
             assert!(!fixture.get_pressed());
             assert_eq!((clicks.get(), cancels.get()), (0, 1));
@@ -1069,14 +1177,20 @@ mod tests {
             packet(super::EVENT_SYNC, super::SYNC_REPORT, 0);
             input.poll(&window, 180).unwrap();
             assert!(fixture.get_pressed());
-            assert_eq!((fixture.get_pointer_x(), fixture.get_pointer_y()), (10.0, 10.0));
+            assert_eq!(
+                (fixture.get_pointer_x(), fixture.get_pointer_y()),
+                (10.0, 10.0)
+            );
             packet(super::EVENT_ABSOLUTE_AXIS, super::TOUCH_TRACKING_ID, 9);
             packet(super::EVENT_ABSOLUTE_AXIS, super::TOUCH_POSITION_X, 75);
             packet(super::EVENT_ABSOLUTE_AXIS, super::TOUCH_POSITION_Y, 75);
             packet(super::EVENT_SYNC, super::SYNC_REPORT, 0);
             input.poll(&window, 180).unwrap();
             assert!(fixture.get_pressed());
-            assert_eq!((fixture.get_pointer_x(), fixture.get_pointer_y()), (25.0, 25.0));
+            assert_eq!(
+                (fixture.get_pointer_x(), fixture.get_pointer_y()),
+                (25.0, 25.0)
+            );
             packet(super::EVENT_ABSOLUTE_AXIS, super::TOUCH_TRACKING_ID, -1);
             packet(super::EVENT_SYNC, super::SYNC_REPORT, 0);
             input.poll(&window, 180).unwrap();
@@ -1087,25 +1201,36 @@ mod tests {
             input.draining = true;
             packet(super::EVENT_SYNC, super::SYNC_DROPPED, 0);
             packet(super::EVENT_SYNC, super::SYNC_REPORT, 0);
-            assert_eq!(input.drain_cancelled_events_with(|_| {
-                Ok(fresh_contacts(0, 10, 50, 60))
-            }).unwrap(), super::TransitionDrain::Ready);
+            assert_eq!(
+                input
+                    .drain_cancelled_events_with(|_| { Ok(fresh_contacts(0, 10, 50, 60)) })
+                    .unwrap(),
+                super::TransitionDrain::Ready
+            );
             packet(super::EVENT_ABSOLUTE_AXIS, super::TOUCH_TRACKING_ID, 10);
             packet(super::EVENT_SYNC, super::SYNC_REPORT, 0);
             input.poll(&window, 180).unwrap();
-            assert!(!fixture.get_pressed(), "The snapshotted held ID must stay cancelled");
+            assert!(
+                !fixture.get_pressed(),
+                "The snapshotted held ID must stay cancelled"
+            );
             packet(super::EVENT_ABSOLUTE_AXIS, super::TOUCH_TRACKING_ID, 11);
             packet(super::EVENT_SYNC, super::SYNC_REPORT, 0);
             input.poll(&window, 180).unwrap();
             assert!(fixture.get_pressed());
-            assert_eq!((fixture.get_pointer_x(), fixture.get_pointer_y()), (50.0, 40.0));
+            assert_eq!(
+                (fixture.get_pointer_x(), fixture.get_pointer_y()),
+                (50.0, 40.0)
+            );
             assert_eq!(clicks.get(), 1);
             packet(super::EVENT_ABSOLUTE_AXIS, super::TOUCH_TRACKING_ID, -1);
             packet(super::EVENT_SYNC, super::SYNC_REPORT, 0);
             input.poll(&window, 180).unwrap();
             assert_eq!(clicks.get(), 2);
             fixture.hide().unwrap();
-        }).join().unwrap();
+        })
+        .join()
+        .unwrap();
     }
 
     #[test]
@@ -1163,7 +1288,10 @@ mod tests {
                 loss_coordinates: Some({
                     let mut coordinates = [super::SlotCoordinates::EMPTY; super::MAX_TOUCH_SLOTS];
                     // This direct-commit fixture supplies known physical axes.
-                    coordinates[0] = super::SlotCoordinates { x: Some(25), y: Some(25) };
+                    coordinates[0] = super::SlotCoordinates {
+                        x: Some(25),
+                        y: Some(25),
+                    };
                     coordinates
                 }),
             };

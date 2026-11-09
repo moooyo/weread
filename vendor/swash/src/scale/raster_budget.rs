@@ -124,7 +124,11 @@ impl Budget {
     }
 
     pub fn fail(&mut self, kind: RasterLimitKind, requested: u64, limit: u64) -> RasterLimitError {
-        let error = RasterLimitError { kind, requested, limit };
+        let error = RasterLimitError {
+            kind,
+            requested,
+            limit,
+        };
         self.usage.rejected = self.usage.rejected.saturating_add(1);
         if self.error.is_none() {
             self.error = Some(error);
@@ -153,9 +157,9 @@ impl Budget {
                 u64::from(self.limits.dimension),
             ));
         }
-        let pixels = u64::from(width).checked_mul(u64::from(height)).ok_or_else(|| {
-            self.fail(RasterLimitKind::Pixels, u64::MAX, self.limits.pixels)
-        })?;
+        let pixels = u64::from(width)
+            .checked_mul(u64::from(height))
+            .ok_or_else(|| self.fail(RasterLimitKind::Pixels, u64::MAX, self.limits.pixels))?;
         if pixels > self.limits.pixels {
             return Err(self.fail(RasterLimitKind::Pixels, pixels, self.limits.pixels));
         }
@@ -185,26 +189,33 @@ impl Budget {
         if !(1..=4).contains(&channels) {
             return Err(self.fail(RasterLimitKind::Stride, u64::from(channels), 4));
         }
-        let stride = u64::from(width).checked_mul(u64::from(channels)).ok_or_else(|| {
-            self.fail(RasterLimitKind::Stride, u64::MAX, MAX_BUFFER_BYTES as u64)
-        })?;
-        let bytes = stride.checked_mul(u64::from(height)).ok_or_else(|| {
-            self.fail(RasterLimitKind::Bytes, u64::MAX, MAX_BUFFER_BYTES as u64)
-        })?;
-        let stride = usize::try_from(stride).map_err(|_| {
-            self.fail(RasterLimitKind::Stride, u64::MAX, MAX_BUFFER_BYTES as u64)
-        })?;
-        let bytes = usize::try_from(bytes).map_err(|_| {
-            self.fail(RasterLimitKind::Bytes, u64::MAX, MAX_BUFFER_BYTES as u64)
-        })?;
+        let stride = u64::from(width)
+            .checked_mul(u64::from(channels))
+            .ok_or_else(|| self.fail(RasterLimitKind::Stride, u64::MAX, MAX_BUFFER_BYTES as u64))?;
+        let bytes = stride
+            .checked_mul(u64::from(height))
+            .ok_or_else(|| self.fail(RasterLimitKind::Bytes, u64::MAX, MAX_BUFFER_BYTES as u64))?;
+        let stride = usize::try_from(stride)
+            .map_err(|_| self.fail(RasterLimitKind::Stride, u64::MAX, MAX_BUFFER_BYTES as u64))?;
+        let bytes = usize::try_from(bytes)
+            .map_err(|_| self.fail(RasterLimitKind::Bytes, u64::MAX, MAX_BUFFER_BYTES as u64))?;
         self.usage.stride = stride;
         self.bytes(bytes)?;
-        Ok(Layout { width, height, stride, bytes })
+        Ok(Layout {
+            width,
+            height,
+            stride,
+            bytes,
+        })
     }
 
     pub fn prepay(&mut self, bytes: usize) -> Result<Reservation, RasterLimitError> {
         let requested = self.usage.work_bytes.checked_add(bytes).ok_or_else(|| {
-            self.fail(RasterLimitKind::Work, u64::MAX, self.limits.work_bytes as u64)
+            self.fail(
+                RasterLimitKind::Work,
+                u64::MAX,
+                self.limits.work_bytes as u64,
+            )
         })?;
         if requested > self.limits.work_bytes {
             return Err(self.fail(
@@ -226,12 +237,22 @@ impl Budget {
     ) -> Result<(), RasterLimitError> {
         self.bytes(bytes)?;
         reservation.remaining = reservation.remaining.checked_sub(bytes).ok_or_else(|| {
-            self.fail(RasterLimitKind::Work, bytes as u64, reservation.remaining as u64)
+            self.fail(
+                RasterLimitKind::Work,
+                bytes as u64,
+                reservation.remaining as u64,
+            )
         })?;
         if buffer.capacity() < bytes {
-            buffer.try_reserve_exact(bytes.saturating_sub(buffer.len())).map_err(|_| {
-                self.fail(RasterLimitKind::Allocation, bytes as u64, self.limits.buffer_bytes as u64)
-            })?;
+            buffer
+                .try_reserve_exact(bytes.saturating_sub(buffer.len()))
+                .map_err(|_| {
+                    self.fail(
+                        RasterLimitKind::Allocation,
+                        bytes as u64,
+                        self.limits.buffer_bytes as u64,
+                    )
+                })?;
             self.usage.growth_allocations = self.usage.growth_allocations.saturating_add(1);
         }
         self.usage.resize_calls = self.usage.resize_calls.saturating_add(1);

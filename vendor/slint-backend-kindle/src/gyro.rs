@@ -155,9 +155,8 @@ fn read_event(
                     // SAFETY: Every byte of this integer-only repr(C) value has
                     // been initialized. read_unaligned does not require the
                     // byte buffer to have the input_event struct's alignment.
-                    let event = unsafe {
-                        std::ptr::read_unaligned(bytes.as_ptr().cast::<InputEvent>())
-                    };
+                    let event =
+                        unsafe { std::ptr::read_unaligned(bytes.as_ptr().cast::<InputEvent>()) };
                     *filled = 0;
                     return Ok(ReadOutcome::Event(event));
                 }
@@ -202,7 +201,10 @@ fn eligible_events(events: &EventBits, axes: &AbsoluteBits) -> bool {
 }
 
 fn trusted_name(name: &[u8]) -> bool {
-    let end = name.iter().position(|byte| *byte == 0).unwrap_or(name.len());
+    let end = name
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(name.len());
     let name = &name[..end];
     name.eq_ignore_ascii_case(b"bma4xy_feature")
         || name
@@ -585,7 +587,10 @@ mod tests {
         else {
             panic!("A complete native event was expected");
         };
-        assert_eq!((event.kind, event.code, event.value), (EVENT_ABSOLUTE, PRESSURE_AXIS, 16));
+        assert_eq!(
+            (event.kind, event.code, event.value),
+            (EVENT_ABSOLUTE, PRESSURE_AXIS, 16)
+        );
         assert_eq!(filled, 0);
     }
 

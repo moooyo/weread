@@ -31,7 +31,11 @@ fn table(bytes: &[u8], tag: &[u8; 4]) -> (usize, usize, usize) {
         if &bytes[record..record + 4] == tag {
             let offset = u32::from_be_bytes(bytes[record + 8..record + 12].try_into().unwrap());
             let length = u32::from_be_bytes(bytes[record + 12..record + 16].try_into().unwrap());
-            return (usize::try_from(offset).unwrap(), usize::try_from(length).unwrap(), record);
+            return (
+                usize::try_from(offset).unwrap(),
+                usize::try_from(length).unwrap(),
+                record,
+            );
         }
     }
     panic!("The original tiny font is missing a required table");
@@ -97,7 +101,12 @@ struct RenderObservation {
 fn render_font(bytes: &[u8], format: Format, limits: FillRasterLimits) -> RenderObservation {
     let font = FontRef::from_index(bytes, 0).expect("The original four-point font is valid");
     let mut context = ScaleContext::new();
-    let mut scaler = context.builder(font).size(16.0).hint(false).normalized_coords([123i16]).build();
+    let mut scaler = context
+        .builder(font)
+        .size(16.0)
+        .hint(false)
+        .normalized_coords([123i16])
+        .build();
     let image = Render::new(&[Source::Outline])
         .format(format)
         .fill_raster_limits(limits)
@@ -115,8 +124,18 @@ fn assert_same_image(actual: &Image, expected: &Image) {
     assert_eq!(actual.data, expected.data);
     assert_eq!(actual.content, expected.content);
     assert_eq!(
-        (actual.placement.left, actual.placement.top, actual.placement.width, actual.placement.height),
-        (expected.placement.left, expected.placement.top, expected.placement.width, expected.placement.height),
+        (
+            actual.placement.left,
+            actual.placement.top,
+            actual.placement.width,
+            actual.placement.height
+        ),
+        (
+            expected.placement.left,
+            expected.placement.top,
+            expected.placement.width,
+            expected.placement.height
+        ),
     );
     assert!(matches!(actual.source, Source::Outline));
 }
@@ -127,7 +146,13 @@ struct MaskObservation {
     usage: FillRasterUsage,
 }
 
-fn render_mask(path: &[Command], format: Format, width: u32, height: u32, limits: FillRasterLimits) -> MaskObservation {
+fn render_mask(
+    path: &[Command],
+    format: Format,
+    width: u32,
+    height: u32,
+    limits: FillRasterLimits,
+) -> MaskObservation {
     // These explicit fixture targets never exceed 32 by 8 pixels.
     assert!(width <= 32 && height <= 8);
     let mut data = vec![0; format.buffer_size(width, height)];
@@ -139,7 +164,11 @@ fn render_mask(path: &[Command], format: Format, width: u32, height: u32, limits
         .style(Fill::NonZero)
         .size(width, height)
         .render_into_with_budget(&mut data, None, &mut budget);
-    MaskObservation { data, result, usage: budget.usage() }
+    MaskObservation {
+        data,
+        result,
+        usage: budget.usage(),
+    }
 }
 
 fn strips(ascending: bool) -> Vec<Command> {
@@ -161,7 +190,10 @@ fn actual_tiny_ttf_cells_storage_and_work_exact_and_one_less() {
     let bytes = tiny_font();
     let baseline = render_font(&bytes, Format::Alpha, FillRasterLimits::default());
     let expected = baseline.image.as_ref().unwrap();
-    assert_eq!((expected.placement.width, expected.placement.height), (4, 4));
+    assert_eq!(
+        (expected.placement.width, expected.placement.height),
+        (4, 4)
+    );
     assert_eq!(baseline.usage.indices, 4);
     assert!(baseline.usage.cells > 0);
     assert_eq!(baseline.usage.maximum_live_cells, baseline.usage.cells);
@@ -172,7 +204,10 @@ fn actual_tiny_ttf_cells_storage_and_work_exact_and_one_less() {
     );
     let exact = FillRasterLimits {
         cells: baseline.usage.cells,
-        storage_bytes: baseline.usage.storage_bytes.max(baseline.usage.maximum_peak_storage_bytes),
+        storage_bytes: baseline
+            .usage
+            .storage_bytes
+            .max(baseline.usage.maximum_peak_storage_bytes),
         work_accesses: baseline.usage.work_accesses,
     };
     let admitted = render_font(&bytes, Format::Alpha, exact);
@@ -182,9 +217,33 @@ fn actual_tiny_ttf_cells_storage_and_work_exact_and_one_less() {
     assert_eq!(admitted.usage.storage_bytes, exact.storage_bytes);
     assert_eq!(admitted.usage.work_accesses, exact.work_accesses);
     for (limits, kind, outer_kind, requested) in [
-        (FillRasterLimits { cells: exact.cells - 1, ..exact }, FillRasterLimitKind::Cells, RasterLimitKind::FillCells, exact.cells),
-        (FillRasterLimits { storage_bytes: exact.storage_bytes - 1, ..exact }, FillRasterLimitKind::Storage, RasterLimitKind::FillStorage, exact.storage_bytes),
-        (FillRasterLimits { work_accesses: exact.work_accesses - 1, ..exact }, FillRasterLimitKind::Work, RasterLimitKind::FillWork, exact.work_accesses),
+        (
+            FillRasterLimits {
+                cells: exact.cells - 1,
+                ..exact
+            },
+            FillRasterLimitKind::Cells,
+            RasterLimitKind::FillCells,
+            exact.cells,
+        ),
+        (
+            FillRasterLimits {
+                storage_bytes: exact.storage_bytes - 1,
+                ..exact
+            },
+            FillRasterLimitKind::Storage,
+            RasterLimitKind::FillStorage,
+            exact.storage_bytes,
+        ),
+        (
+            FillRasterLimits {
+                work_accesses: exact.work_accesses - 1,
+                ..exact
+            },
+            FillRasterLimitKind::Work,
+            RasterLimitKind::FillWork,
+            exact.work_accesses,
+        ),
     ] {
         let denied = render_font(&bytes, Format::Alpha, limits);
         assert!(denied.image.is_none());
@@ -198,7 +257,14 @@ fn actual_tiny_ttf_cells_storage_and_work_exact_and_one_less() {
         assert_eq!(denied.target_usage.resize_calls, 1);
         assert_eq!(denied.target_usage.maximum_buffer_bytes, 16);
     }
-    let denied = render_font(&bytes, Format::Alpha, FillRasterLimits { cells: 0, ..Default::default() });
+    let denied = render_font(
+        &bytes,
+        Format::Alpha,
+        FillRasterLimits {
+            cells: 0,
+            ..Default::default()
+        },
+    );
     assert_eq!(denied.error.unwrap().kind, FillRasterLimitKind::Cells);
     assert_eq!(denied.usage.cells, 0);
     assert_eq!(denied.usage.maximum_live_cells, 0);
@@ -206,20 +272,34 @@ fn actual_tiny_ttf_cells_storage_and_work_exact_and_one_less() {
     // The zero-cell refusal identifies the real first insertion frontier.
     // Its two writes and one allocator request must fit before reserve or link.
     let first_growth_work = denied.usage.work_accesses.checked_add(3).unwrap();
-    let admitted_first_growth = render_font(&bytes, Format::Alpha, FillRasterLimits {
-        work_accesses: first_growth_work,
-        ..Default::default()
-    });
+    let admitted_first_growth = render_font(
+        &bytes,
+        Format::Alpha,
+        FillRasterLimits {
+            work_accesses: first_growth_work,
+            ..Default::default()
+        },
+    );
     assert_eq!(admitted_first_growth.usage.maximum_live_cells, 1);
     assert_eq!(admitted_first_growth.usage.cell_growths, 1);
     assert_eq!(admitted_first_growth.usage.cell_slots, 4);
-    assert_eq!(admitted_first_growth.usage.storage_bytes, 4 * FillRasterLimits::cell_bytes() + 4 * FillRasterLimits::index_bytes());
+    assert_eq!(
+        admitted_first_growth.usage.storage_bytes,
+        4 * FillRasterLimits::cell_bytes() + 4 * FillRasterLimits::index_bytes()
+    );
     assert!(admitted_first_growth.image.is_none());
-    let denied_first_growth = render_font(&bytes, Format::Alpha, FillRasterLimits {
-        work_accesses: first_growth_work - 1,
-        ..Default::default()
-    });
-    assert_eq!(denied_first_growth.error.unwrap().kind, FillRasterLimitKind::Work);
+    let denied_first_growth = render_font(
+        &bytes,
+        Format::Alpha,
+        FillRasterLimits {
+            work_accesses: first_growth_work - 1,
+            ..Default::default()
+        },
+    );
+    assert_eq!(
+        denied_first_growth.error.unwrap().kind,
+        FillRasterLimitKind::Work
+    );
     assert_eq!(denied_first_growth.usage.maximum_live_cells, 0);
     assert_eq!(denied_first_growth.usage.cell_growths, 0);
     assert_eq!(denied_first_growth.usage.cell_reserve_attempts, 0);
@@ -230,27 +310,63 @@ fn actual_tiny_ttf_cells_storage_and_work_exact_and_one_less() {
     let tall_bytes = rectangle_font(4, 64);
     let tall = render_font(&tall_bytes, Format::Alpha, FillRasterLimits::default());
     let expected = tall.image.as_ref().unwrap();
-    assert_eq!((expected.placement.width, expected.placement.height), (4, 64));
+    assert_eq!(
+        (expected.placement.width, expected.placement.height),
+        (4, 64)
+    );
     assert_eq!(tall.usage.cells, 64);
     assert_eq!(tall.usage.cell_slots, 64);
     assert_eq!(tall.usage.index_slots, 64);
     assert_eq!(tall.usage.cell_growths, 5);
     assert_eq!(tall.usage.cell_reserve_attempts, 5);
     assert_eq!(tall.usage.index_reserve_attempts, 1);
-    assert_eq!(tall.usage.potential_relocation_bytes, (4 + 8 + 16 + 32) * FillRasterLimits::cell_bytes());
-    assert_eq!(tall.usage.storage_bytes, 64 * FillRasterLimits::cell_bytes() + 64 * FillRasterLimits::index_bytes());
-    assert_eq!(tall.usage.maximum_peak_storage_bytes, (32 + 64) * FillRasterLimits::cell_bytes() + 64 * FillRasterLimits::index_bytes());
+    assert_eq!(
+        tall.usage.potential_relocation_bytes,
+        (4 + 8 + 16 + 32) * FillRasterLimits::cell_bytes()
+    );
+    assert_eq!(
+        tall.usage.storage_bytes,
+        64 * FillRasterLimits::cell_bytes() + 64 * FillRasterLimits::index_bytes()
+    );
+    assert_eq!(
+        tall.usage.maximum_peak_storage_bytes,
+        (32 + 64) * FillRasterLimits::cell_bytes() + 64 * FillRasterLimits::index_bytes()
+    );
     let exact = FillRasterLimits {
         cells: tall.usage.cells,
-        storage_bytes: tall.usage.storage_bytes.max(tall.usage.maximum_peak_storage_bytes),
+        storage_bytes: tall
+            .usage
+            .storage_bytes
+            .max(tall.usage.maximum_peak_storage_bytes),
         work_accesses: tall.usage.work_accesses,
     };
     let admitted = render_font(&tall_bytes, Format::Alpha, exact);
     assert_same_image(admitted.image.as_ref().unwrap(), expected);
     for (limits, kind, requested) in [
-        (FillRasterLimits { cells: exact.cells - 1, ..exact }, FillRasterLimitKind::Cells, exact.cells),
-        (FillRasterLimits { storage_bytes: exact.storage_bytes - 1, ..exact }, FillRasterLimitKind::Storage, exact.storage_bytes),
-        (FillRasterLimits { work_accesses: exact.work_accesses - 1, ..exact }, FillRasterLimitKind::Work, exact.work_accesses),
+        (
+            FillRasterLimits {
+                cells: exact.cells - 1,
+                ..exact
+            },
+            FillRasterLimitKind::Cells,
+            exact.cells,
+        ),
+        (
+            FillRasterLimits {
+                storage_bytes: exact.storage_bytes - 1,
+                ..exact
+            },
+            FillRasterLimitKind::Storage,
+            exact.storage_bytes,
+        ),
+        (
+            FillRasterLimits {
+                work_accesses: exact.work_accesses - 1,
+                ..exact
+            },
+            FillRasterLimitKind::Work,
+            exact.work_accesses,
+        ),
     ] {
         let denied = render_font(&tall_bytes, Format::Alpha, limits);
         assert!(denied.image.is_none());
@@ -260,24 +376,70 @@ fn actual_tiny_ttf_cells_storage_and_work_exact_and_one_less() {
         assert!(denied.usage.maximum_peak_storage_bytes <= limits.storage_bytes);
         assert!(denied.usage.work_accesses <= limits.work_accesses);
     }
-    let denied_peak = render_font(&tall_bytes, Format::Alpha, FillRasterLimits { storage_bytes: exact.storage_bytes - 1, ..exact });
-    assert_eq!(denied_peak.error.unwrap().kind, FillRasterLimitKind::Storage);
+    let denied_peak = render_font(
+        &tall_bytes,
+        Format::Alpha,
+        FillRasterLimits {
+            storage_bytes: exact.storage_bytes - 1,
+            ..exact
+        },
+    );
+    assert_eq!(
+        denied_peak.error.unwrap().kind,
+        FillRasterLimitKind::Storage
+    );
     assert_eq!(denied_peak.usage.cell_growths, 4);
     assert_eq!(denied_peak.usage.maximum_live_cells, 32);
 
     // The fifth node requires the first nonempty relocation. Prepay the old
     // four-cell layout's read/write upper bound before the second reserve.
-    let before_move = render_font(&tall_bytes, Format::Alpha, FillRasterLimits { cells: 4, ..Default::default() });
+    let before_move = render_font(
+        &tall_bytes,
+        Format::Alpha,
+        FillRasterLimits {
+            cells: 4,
+            ..Default::default()
+        },
+    );
     assert_eq!(before_move.error.unwrap().kind, FillRasterLimitKind::Cells);
     assert_eq!(before_move.usage.maximum_live_cells, 4);
-    let move_work = 4usize.checked_mul(FillRasterLimits::cell_bytes()).unwrap().checked_mul(2).unwrap().checked_add(1).unwrap();
-    let growth_work = before_move.usage.work_accesses.checked_add(2).unwrap().checked_add(move_work).unwrap();
-    let admitted_move = render_font(&tall_bytes, Format::Alpha, FillRasterLimits { work_accesses: growth_work, ..Default::default() });
+    let move_work = 4usize
+        .checked_mul(FillRasterLimits::cell_bytes())
+        .unwrap()
+        .checked_mul(2)
+        .unwrap()
+        .checked_add(1)
+        .unwrap();
+    let growth_work = before_move
+        .usage
+        .work_accesses
+        .checked_add(2)
+        .unwrap()
+        .checked_add(move_work)
+        .unwrap();
+    let admitted_move = render_font(
+        &tall_bytes,
+        Format::Alpha,
+        FillRasterLimits {
+            work_accesses: growth_work,
+            ..Default::default()
+        },
+    );
     assert_eq!(admitted_move.error.unwrap().kind, FillRasterLimitKind::Work);
     assert_eq!(admitted_move.usage.maximum_live_cells, 5);
     assert_eq!(admitted_move.usage.cell_growths, 2);
-    assert_eq!(admitted_move.usage.potential_relocation_bytes, 4 * FillRasterLimits::cell_bytes());
-    let denied_move = render_font(&tall_bytes, Format::Alpha, FillRasterLimits { work_accesses: growth_work - 1, ..Default::default() });
+    assert_eq!(
+        admitted_move.usage.potential_relocation_bytes,
+        4 * FillRasterLimits::cell_bytes()
+    );
+    let denied_move = render_font(
+        &tall_bytes,
+        Format::Alpha,
+        FillRasterLimits {
+            work_accesses: growth_work - 1,
+            ..Default::default()
+        },
+    );
     assert_eq!(denied_move.error.unwrap().kind, FillRasterLimitKind::Work);
     assert_eq!(denied_move.error.unwrap().requested, growth_work as u64);
     assert_eq!(denied_move.usage.maximum_live_cells, 4);
@@ -295,23 +457,60 @@ fn actual_empty_mask_index_bytes_exact_and_one_less_precede_growth() {
     assert_eq!(baseline.usage.indices, 4);
     let bytes = 4 * FillRasterLimits::index_bytes();
     assert_eq!(baseline.usage.storage_bytes, bytes);
-    let exact = FillRasterLimits { cells: 0, storage_bytes: bytes, work_accesses: baseline.usage.work_accesses };
+    let exact = FillRasterLimits {
+        cells: 0,
+        storage_bytes: bytes,
+        work_accesses: baseline.usage.work_accesses,
+    };
     let admitted = render_mask(&[], Format::Alpha, 4, 4, exact);
     assert!(admitted.result.is_ok());
     assert_eq!(admitted.data, [0; 16]);
     assert_eq!(admitted.usage.index_growths, 1);
-    let denied = render_mask(&[], Format::Alpha, 4, 4, FillRasterLimits { storage_bytes: bytes - 1, ..exact });
-    assert_eq!(denied.result.unwrap_err().kind, FillRasterLimitKind::Storage);
+    let denied = render_mask(
+        &[],
+        Format::Alpha,
+        4,
+        4,
+        FillRasterLimits {
+            storage_bytes: bytes - 1,
+            ..exact
+        },
+    );
+    assert_eq!(
+        denied.result.unwrap_err().kind,
+        FillRasterLimitKind::Storage
+    );
     assert_eq!(denied.usage.index_growths, 0);
     assert_eq!(denied.usage.maximum_live_indices, 0);
     assert_eq!(denied.usage.index_reserve_attempts, 0);
-    let denied = render_mask(&[], Format::Alpha, 4, 4, FillRasterLimits { work_accesses: 4, ..exact });
+    let denied = render_mask(
+        &[],
+        Format::Alpha,
+        4,
+        4,
+        FillRasterLimits {
+            work_accesses: 4,
+            ..exact
+        },
+    );
     assert_eq!(denied.result.unwrap_err().kind, FillRasterLimitKind::Work);
     assert_eq!(denied.usage.storage_bytes, bytes);
     assert_eq!(denied.usage.index_growths, 0);
     assert_eq!(denied.usage.maximum_live_indices, 0);
-    let admitted_initialization = render_mask(&[], Format::Alpha, 4, 4, FillRasterLimits { work_accesses: 5, ..exact });
-    assert_eq!(admitted_initialization.result.unwrap_err().kind, FillRasterLimitKind::Work);
+    let admitted_initialization = render_mask(
+        &[],
+        Format::Alpha,
+        4,
+        4,
+        FillRasterLimits {
+            work_accesses: 5,
+            ..exact
+        },
+    );
+    assert_eq!(
+        admitted_initialization.result.unwrap_err().kind,
+        FillRasterLimitKind::Work
+    );
     assert_eq!(admitted_initialization.usage.index_growths, 1);
     assert_eq!(admitted_initialization.usage.maximum_live_indices, 4);
 
@@ -319,20 +518,65 @@ fn actual_empty_mask_index_bytes_exact_and_one_less_precede_growth() {
     // eight slots. Its old layout can move even after indices.clear().
     let index_storage = (4 + 8) * FillRasterLimits::index_bytes();
     let move_bytes = 4 * FillRasterLimits::index_bytes();
-    let index_growth_work = baseline.usage.work_accesses.checked_add(8).unwrap()
-        .checked_add(move_bytes.checked_mul(2).unwrap()).unwrap().checked_add(1).unwrap();
+    let index_growth_work = baseline
+        .usage
+        .work_accesses
+        .checked_add(8)
+        .unwrap()
+        .checked_add(move_bytes.checked_mul(2).unwrap())
+        .unwrap()
+        .checked_add(1)
+        .unwrap();
     for (limits, expected_error, expected_growths, expected_live) in [
-        (FillRasterLimits { cells: 0, storage_bytes: index_storage, ..Default::default() }, None, 2, 8),
-        (FillRasterLimits { cells: 0, storage_bytes: index_storage - 1, ..Default::default() }, Some((FillRasterLimitKind::Storage, index_storage)), 1, 4),
-        (FillRasterLimits { cells: 0, storage_bytes: index_storage, work_accesses: index_growth_work }, Some((FillRasterLimitKind::Work, index_growth_work + 1)), 2, 8),
-        (FillRasterLimits { cells: 0, storage_bytes: index_storage, work_accesses: index_growth_work - 1 }, Some((FillRasterLimitKind::Work, index_growth_work)), 1, 4),
+        (
+            FillRasterLimits {
+                cells: 0,
+                storage_bytes: index_storage,
+                ..Default::default()
+            },
+            None,
+            2,
+            8,
+        ),
+        (
+            FillRasterLimits {
+                cells: 0,
+                storage_bytes: index_storage - 1,
+                ..Default::default()
+            },
+            Some((FillRasterLimitKind::Storage, index_storage)),
+            1,
+            4,
+        ),
+        (
+            FillRasterLimits {
+                cells: 0,
+                storage_bytes: index_storage,
+                work_accesses: index_growth_work,
+            },
+            Some((FillRasterLimitKind::Work, index_growth_work + 1)),
+            2,
+            8,
+        ),
+        (
+            FillRasterLimits {
+                cells: 0,
+                storage_bytes: index_storage,
+                work_accesses: index_growth_work - 1,
+            },
+            Some((FillRasterLimitKind::Work, index_growth_work)),
+            1,
+            4,
+        ),
     ] {
         let mut scratch = Scratch::new();
         let mut budget = FillRasterBudget::new(limits);
         let mut mask = Mask::with_scratch(&[] as &[Command], &mut scratch);
         let mut data = [0; 32];
         mask.size(4, 4);
-        assert!(mask.render_into_with_budget(&mut data[..16], None, &mut budget).is_ok());
+        assert!(mask
+            .render_into_with_budget(&mut data[..16], None, &mut budget)
+            .is_ok());
         mask.size(4, 8);
         let result = mask.render_into_with_budget(&mut data, None, &mut budget);
         if let Some((kind, requested)) = expected_error {
@@ -345,7 +589,10 @@ fn actual_empty_mask_index_bytes_exact_and_one_less_precede_growth() {
         assert_eq!(budget.usage().index_growths, expected_growths);
         assert_eq!(budget.usage().index_reserve_attempts, expected_growths);
         assert_eq!(budget.usage().maximum_live_indices, expected_live);
-        assert_eq!(budget.usage().potential_relocation_bytes, if expected_growths == 2 { move_bytes } else { 0 });
+        assert_eq!(
+            budget.usage().potential_relocation_bytes,
+            if expected_growths == 2 { move_bytes } else { 0 }
+        );
         assert!(budget.usage().storage_bytes <= limits.storage_bytes);
         assert!(budget.usage().maximum_peak_storage_bytes <= limits.storage_bytes);
         assert!(budget.usage().work_accesses <= limits.work_accesses);
@@ -361,7 +608,12 @@ fn denied_partial_sweep_preserves_old_image_metrics_and_coordinates() {
         let baseline = render_font(&bytes, format, FillRasterLimits::default());
         let advance = font.glyph_metrics(&[]).advance_width(1);
         let mut context = ScaleContext::new();
-        let mut scaler = context.builder(font).size(16.0).hint(false).normalized_coords([123i16]).build();
+        let mut scaler = context
+            .builder(font)
+            .size(16.0)
+            .hint(false)
+            .normalized_coords([123i16])
+            .build();
         let coordinates = scaler.coords.to_vec();
         let outline = scaler.scale_outline(1).unwrap();
         let points = outline.points().to_vec();
@@ -369,25 +621,54 @@ fn denied_partial_sweep_preserves_old_image_metrics_and_coordinates() {
         let mut image = Image {
             source: Source::ColorBitmap(StrikeWith::Index(9)),
             content: Content::Color,
-            placement: Placement { left: 7, top: 9, width: 3, height: 1 },
+            placement: Placement {
+                left: 7,
+                top: 9,
+                width: 3,
+                height: 1,
+            },
             data: vec![11, 22, 33],
         };
-        let limits = FillRasterLimits { work_accesses: baseline.usage.work_accesses - 1, ..Default::default() };
-        assert!(!Render::new(&[Source::Outline]).format(format).fill_raster_limits(limits).render_into(&mut scaler, 1, &mut image));
-        assert_eq!(scaler.raster_error().unwrap().kind, RasterLimitKind::FillWork);
+        let limits = FillRasterLimits {
+            work_accesses: baseline.usage.work_accesses - 1,
+            ..Default::default()
+        };
+        assert!(!Render::new(&[Source::Outline])
+            .format(format)
+            .fill_raster_limits(limits)
+            .render_into(&mut scaler, 1, &mut image));
+        assert_eq!(
+            scaler.raster_error().unwrap().kind,
+            RasterLimitKind::FillWork
+        );
         assert_eq!(scaler.fill_raster_usage().cells, baseline.usage.cells);
         assert!(scaler.fill_raster_usage().maximum_live_cells > 0);
         assert_eq!(scaler.raster_usage().resize_calls, 1);
         assert_eq!(image.data, [11, 22, 33]);
-        assert_eq!((image.placement.left, image.placement.top, image.placement.width, image.placement.height), (7, 9, 3, 1));
+        assert_eq!(
+            (
+                image.placement.left,
+                image.placement.top,
+                image.placement.width,
+                image.placement.height
+            ),
+            (7, 9, 3, 1)
+        );
         assert_eq!(image.content, Content::Color);
-        assert!(matches!(image.source, Source::ColorBitmap(StrikeWith::Index(9))));
+        assert!(matches!(
+            image.source,
+            Source::ColorBitmap(StrikeWith::Index(9))
+        ));
         assert_eq!(scaler.coords, coordinates);
         assert_eq!(font.glyph_metrics(&[]).advance_width(1), advance);
         let restored_outline = scaler.scale_outline(1).unwrap();
         assert_eq!(restored_outline.points(), points);
         assert_eq!(restored_outline.verbs(), verbs);
-        assert!(Render::new(&[Source::Outline]).format(format).render_into(&mut scaler, 1, &mut image));
+        assert!(Render::new(&[Source::Outline]).format(format).render_into(
+            &mut scaler,
+            1,
+            &mut image
+        ));
         assert_same_image(&image, baseline.image.as_ref().unwrap());
         assert_eq!(scaler.raster_error(), None);
         assert_eq!(scaler.fill_raster_error(), None);
@@ -399,20 +680,39 @@ fn denied_partial_sweep_preserves_old_image_metrics_and_coordinates() {
 fn ordered_strip_prefix_visits_consume_work_without_extra_cells() {
     let ascending = strips(true);
     let descending = strips(false);
-    let forward = render_mask(&ascending, Format::Alpha, 32, 4, FillRasterLimits::default());
-    let reverse = render_mask(&descending, Format::Alpha, 32, 4, FillRasterLimits::default());
+    let forward = render_mask(
+        &ascending,
+        Format::Alpha,
+        32,
+        4,
+        FillRasterLimits::default(),
+    );
+    let reverse = render_mask(
+        &descending,
+        Format::Alpha,
+        32,
+        4,
+        FillRasterLimits::default(),
+    );
     assert!(forward.result.is_ok() && reverse.result.is_ok());
     assert_eq!(forward.data, reverse.data);
     assert_eq!(forward.usage.cells, reverse.usage.cells);
     assert_eq!(forward.usage.storage_bytes, reverse.usage.storage_bytes);
     assert!(forward.usage.work_accesses > reverse.usage.work_accesses);
-    let limits = FillRasterLimits { work_accesses: reverse.usage.work_accesses, ..Default::default() };
+    let limits = FillRasterLimits {
+        work_accesses: reverse.usage.work_accesses,
+        ..Default::default()
+    };
     let denied = render_mask(&ascending, Format::Alpha, 32, 4, limits);
     assert_eq!(denied.result.unwrap_err().kind, FillRasterLimitKind::Work);
     assert!(denied.usage.work_accesses <= limits.work_accesses);
     assert!(denied.usage.cells <= forward.usage.cells);
     // This small original oracle has a fixed 128-byte target and 64 points.
-    let (expected, _) = Mask::new(&ascending).format(Format::Alpha).origin(Origin::BottomLeft).size(32, 4).render();
+    let (expected, _) = Mask::new(&ascending)
+        .format(Format::Alpha)
+        .origin(Origin::BottomLeft)
+        .size(32, 4)
+        .render();
     assert_eq!(forward.data, expected);
 }
 
@@ -422,20 +722,47 @@ fn scratch_reset_and_denied_attempts_never_refund_the_shared_budget() {
     let baseline = render_mask(&path, Format::Alpha, 32, 4, FillRasterLimits::default());
     assert!(baseline.result.is_ok());
     for (limits, kind) in [
-        (FillRasterLimits { cells: baseline.usage.cells, ..Default::default() }, FillRasterLimitKind::Cells),
-        (FillRasterLimits { storage_bytes: baseline.usage.storage_bytes.max(baseline.usage.maximum_peak_storage_bytes), ..Default::default() }, FillRasterLimitKind::Storage),
-        (FillRasterLimits { work_accesses: baseline.usage.work_accesses, ..Default::default() }, FillRasterLimitKind::Work),
+        (
+            FillRasterLimits {
+                cells: baseline.usage.cells,
+                ..Default::default()
+            },
+            FillRasterLimitKind::Cells,
+        ),
+        (
+            FillRasterLimits {
+                storage_bytes: baseline
+                    .usage
+                    .storage_bytes
+                    .max(baseline.usage.maximum_peak_storage_bytes),
+                ..Default::default()
+            },
+            FillRasterLimitKind::Storage,
+        ),
+        (
+            FillRasterLimits {
+                work_accesses: baseline.usage.work_accesses,
+                ..Default::default()
+            },
+            FillRasterLimitKind::Work,
+        ),
     ] {
         let mut scratch = Scratch::new();
         let mut budget = FillRasterBudget::new(limits);
         let mut mask = Mask::with_scratch(&path, &mut scratch);
-        mask.format(Format::Alpha).origin(Origin::BottomLeft).size(32, 4);
+        mask.format(Format::Alpha)
+            .origin(Origin::BottomLeft)
+            .size(32, 4);
         let mut first = vec![0; 128];
-        assert!(mask.render_into_with_budget(&mut first, None, &mut budget).is_ok());
+        assert!(mask
+            .render_into_with_budget(&mut first, None, &mut budget)
+            .is_ok());
         assert_eq!(first, baseline.data);
         let first_usage = budget.usage();
         let mut second = vec![0; 128];
-        let error = mask.render_into_with_budget(&mut second, None, &mut budget).unwrap_err();
+        let error = mask
+            .render_into_with_budget(&mut second, None, &mut budget)
+            .unwrap_err();
         assert_eq!(error.kind, kind);
         assert!(budget.usage().cells >= first_usage.cells);
         assert!(budget.usage().storage_bytes >= first_usage.storage_bytes);
@@ -443,7 +770,11 @@ fn scratch_reset_and_denied_attempts_never_refund_the_shared_budget() {
         assert_eq!(budget.usage().cell_growths, first_usage.cell_growths);
         assert_eq!(budget.usage().index_growths, first_usage.index_growths);
         let denied_usage = budget.usage();
-        assert_eq!(mask.render_into_with_budget(&mut second, None, &mut budget).unwrap_err(), error);
+        assert_eq!(
+            mask.render_into_with_budget(&mut second, None, &mut budget)
+                .unwrap_err(),
+            error
+        );
         assert_eq!(budget.usage(), denied_usage);
         assert_eq!(first, baseline.data);
     }
@@ -458,7 +789,10 @@ fn three_real_subpixel_passes_share_cells_storage_and_work_allowances() {
     assert!(observed.image.is_some());
     let exact = FillRasterLimits {
         cells: observed.usage.cells,
-        storage_bytes: observed.usage.storage_bytes.max(observed.usage.maximum_peak_storage_bytes),
+        storage_bytes: observed
+            .usage
+            .storage_bytes
+            .max(observed.usage.maximum_peak_storage_bytes),
         work_accesses: observed.usage.work_accesses,
     };
     let admitted = render_font(&bytes, format, exact);
@@ -474,18 +808,52 @@ fn three_real_subpixel_passes_share_cells_storage_and_work_allowances() {
     // Each pass reserves its capacity without refund, but the same scratch
     // vectors grow only on the first pass. Later passes owe no new reserve fee.
     let reserve_attempts = alpha.usage.cell_reserve_attempts + alpha.usage.index_reserve_attempts;
-    assert_eq!(admitted.usage.cell_reserve_attempts, alpha.usage.cell_reserve_attempts);
-    assert_eq!(admitted.usage.index_reserve_attempts, alpha.usage.index_reserve_attempts);
+    assert_eq!(
+        admitted.usage.cell_reserve_attempts,
+        alpha.usage.cell_reserve_attempts
+    );
+    assert_eq!(
+        admitted.usage.index_reserve_attempts,
+        alpha.usage.index_reserve_attempts
+    );
     assert_eq!(admitted.usage.potential_relocation_bytes, 0);
-    assert_eq!(admitted.usage.work_accesses, alpha.usage.work_accesses * 3 - reserve_attempts * 2);
-    assert_eq!(admitted.usage.maximum_live_cells, alpha.usage.maximum_live_cells);
-    for (pixel, alpha) in image.data.chunks_exact(4).zip(&alpha.image.as_ref().unwrap().data) {
+    assert_eq!(
+        admitted.usage.work_accesses,
+        alpha.usage.work_accesses * 3 - reserve_attempts * 2
+    );
+    assert_eq!(
+        admitted.usage.maximum_live_cells,
+        alpha.usage.maximum_live_cells
+    );
+    for (pixel, alpha) in image
+        .data
+        .chunks_exact(4)
+        .zip(&alpha.image.as_ref().unwrap().data)
+    {
         assert_eq!(pixel, &[*alpha, *alpha, *alpha, 0]);
     }
     for (limits, kind) in [
-        (FillRasterLimits { cells: exact.cells - 1, ..exact }, FillRasterLimitKind::Cells),
-        (FillRasterLimits { storage_bytes: exact.storage_bytes - 1, ..exact }, FillRasterLimitKind::Storage),
-        (FillRasterLimits { work_accesses: exact.work_accesses - 1, ..exact }, FillRasterLimitKind::Work),
+        (
+            FillRasterLimits {
+                cells: exact.cells - 1,
+                ..exact
+            },
+            FillRasterLimitKind::Cells,
+        ),
+        (
+            FillRasterLimits {
+                storage_bytes: exact.storage_bytes - 1,
+                ..exact
+            },
+            FillRasterLimitKind::Storage,
+        ),
+        (
+            FillRasterLimits {
+                work_accesses: exact.work_accesses - 1,
+                ..exact
+            },
+            FillRasterLimitKind::Work,
+        ),
     ] {
         let denied = render_font(&bytes, format, limits);
         assert!(denied.image.is_none());
@@ -501,14 +869,33 @@ fn three_real_subpixel_passes_share_cells_storage_and_work_allowances() {
 #[test]
 fn clipped_line_and_curve_loops_refuse_before_unbudgeted_continuation() {
     let mut vertical = Vec::new();
-    vertical.move_to([16.0, 0.0]).line_to([16.0, 128.0]).line_to([17.0, 0.0]).close();
+    vertical
+        .move_to([16.0, 0.0])
+        .line_to([16.0, 128.0])
+        .line_to([17.0, 0.0])
+        .close();
     let mut diagonal = Vec::new();
-    diagonal.move_to([1.0, 0.0]).line_to([7.0, 128.0]).line_to([1.0, 0.0]).close();
+    diagonal
+        .move_to([1.0, 0.0])
+        .line_to([7.0, 128.0])
+        .line_to([1.0, 0.0])
+        .close();
     let mut quadratic = Vec::new();
-    quadratic.move_to([1.0, 1.0]).quad_to([7.0, 7.0], [7.0, 1.0]).line_to([1.0, 1.0]).close();
+    quadratic
+        .move_to([1.0, 1.0])
+        .quad_to([7.0, 7.0], [7.0, 1.0])
+        .line_to([1.0, 1.0])
+        .close();
     let mut cubic = Vec::new();
-    cubic.move_to([1.0, 1.0]).curve_to([1.0, 7.0], [7.0, 7.0], [7.0, 1.0]).line_to([1.0, 1.0]).close();
-    let limits = FillRasterLimits { work_accesses: 18, ..Default::default() };
+    cubic
+        .move_to([1.0, 1.0])
+        .curve_to([1.0, 7.0], [7.0, 7.0], [7.0, 1.0])
+        .line_to([1.0, 1.0])
+        .close();
+    let limits = FillRasterLimits {
+        work_accesses: 18,
+        ..Default::default()
+    };
     for path in [&vertical, &diagonal, &quadratic, &cubic] {
         let denied = render_mask(path, Format::Alpha, 8, 8, limits);
         assert_eq!(denied.result.unwrap_err().kind, FillRasterLimitKind::Work);
@@ -530,22 +917,38 @@ fn guarded_public_target_math_is_checked_and_limits_only_tighten() {
     assert_eq!(budget.limits(), FillRasterLimits::default());
     let mut mask = Mask::new(&[] as &[Command]);
     mask.size(u32::MAX, 1);
-    assert_eq!(mask.render_into_with_budget(&mut [], None, &mut budget).unwrap_err().kind, FillRasterLimitKind::Coordinates);
+    assert_eq!(
+        mask.render_into_with_budget(&mut [], None, &mut budget)
+            .unwrap_err()
+            .kind,
+        FillRasterLimitKind::Coordinates
+    );
     assert_eq!(budget.usage().storage_bytes, 0);
     for (length, pitch) in [(15, None), (16, Some(3)), (16, Some(usize::MAX))] {
         let mut budget = FillRasterBudget::default();
         let mut data = vec![0; length];
         let mut mask = Mask::new(&[] as &[Command]);
         mask.size(4, 4);
-        assert_eq!(mask.render_into_with_budget(&mut data, pitch, &mut budget).unwrap_err().kind, FillRasterLimitKind::Target);
+        assert_eq!(
+            mask.render_into_with_budget(&mut data, pitch, &mut budget)
+                .unwrap_err()
+                .kind,
+            FillRasterLimitKind::Target
+        );
         assert_eq!(budget.usage().index_growths, 0);
         assert_eq!(budget.usage().cell_growths, 0);
         assert_eq!(budget.usage().work_accesses, 0);
     }
-    let mut budget = FillRasterBudget::new(FillRasterLimits { cells: 0, storage_bytes: 0, work_accesses: 1 });
+    let mut budget = FillRasterBudget::new(FillRasterLimits {
+        cells: 0,
+        storage_bytes: 0,
+        work_accesses: 1,
+    });
     let mut mask = Mask::new(&[] as &[Command]);
     mask.size(0, 0);
-    assert!(mask.render_into_with_budget(&mut [], None, &mut budget).is_ok());
+    assert!(mask
+        .render_into_with_budget(&mut [], None, &mut budget)
+        .is_ok());
 }
 
 #[test]
@@ -556,7 +959,10 @@ fn normal_noto_fill_formats_match_the_small_original_mask_oracle() {
     ];
     for compressed in fonts {
         let mut bytes = Vec::new();
-        GzDecoder::new(*compressed).take(64 * 1024 * 1024 + 1).read_to_end(&mut bytes).unwrap();
+        GzDecoder::new(*compressed)
+            .take(64 * 1024 * 1024 + 1)
+            .read_to_end(&mut bytes)
+            .unwrap();
         assert!(bytes.len() <= 64 * 1024 * 1024);
         let font = FontRef::from_index(&bytes, 0).unwrap();
         for size in [30.0, 152.0] {
@@ -573,18 +979,37 @@ fn normal_noto_fill_formats_match_the_small_original_mask_oracle() {
                         assert!(outline.points().len() < 4096);
                         let offset = Vector::new(2.25, -1.5);
                         let mut oracle = Mask::new(outline.path());
-                        oracle.format(format).origin(Origin::BottomLeft).style(fill).offset(offset).render_offset(offset)
+                        oracle
+                            .format(format)
+                            .origin(Origin::BottomLeft)
+                            .style(fill)
+                            .offset(offset)
+                            .render_offset(offset)
                             .inspect(|_, width, height| {
                                 // Only fixed, known-small Noto paths reach this unguarded oracle.
                                 assert!(width <= 256 && height <= 256);
                             });
                         let (expected, placement) = oracle.render();
-                        let image = Render::new(&[Source::Outline]).format(format).style(fill).offset(offset)
-                            .render(&mut scaler, glyph).unwrap();
+                        let image = Render::new(&[Source::Outline])
+                            .format(format)
+                            .style(fill)
+                            .offset(offset)
+                            .render(&mut scaler, glyph)
+                            .unwrap();
                         assert_eq!(image.data, expected);
                         assert_eq!(
-                            (image.placement.left, image.placement.top, image.placement.width, image.placement.height),
-                            (placement.left, placement.top, placement.width, placement.height),
+                            (
+                                image.placement.left,
+                                image.placement.top,
+                                image.placement.width,
+                                image.placement.height
+                            ),
+                            (
+                                placement.left,
+                                placement.top,
+                                placement.width,
+                                placement.height
+                            ),
                         );
                         assert_eq!(font.glyph_metrics(&[]).advance_width(glyph), advance);
                         assert_eq!(scaler.coords, coordinates);
@@ -592,7 +1017,10 @@ fn normal_noto_fill_formats_match_the_small_original_mask_oracle() {
                         assert_eq!(scaler.fill_raster_error(), None);
                         assert_eq!(scaler.raster_usage().work_bytes, image.data.len());
                         let passes = if format == Format::Alpha { 1 } else { 3 };
-                        assert_eq!(scaler.fill_raster_usage().indices, image.placement.height as usize * passes);
+                        assert_eq!(
+                            scaler.fill_raster_usage().indices,
+                            image.placement.height as usize * passes
+                        );
                         assert!(scaler.fill_raster_usage().work_accesses > 0);
                     }
                 }

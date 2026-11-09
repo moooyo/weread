@@ -51,7 +51,9 @@ impl fmt::Display for NativeOrientationError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
             Self::EventLoopTerminated => "the Kindle event loop has terminated",
-            Self::ActiveDisplayOwnership => "native calibration requires startup or suspended display ownership",
+            Self::ActiveDisplayOwnership => {
+                "native calibration requires startup or suspended display ownership"
+            }
             Self::InvalidRotation => "native framebuffer rotation must be in 0..=3",
             Self::RequestUnavailable => "the native orientation request is unavailable",
         })
@@ -70,7 +72,10 @@ pub(crate) struct PortraitCalibration {
 }
 
 impl PortraitCalibration {
-    fn scanout_at(self, raw_rotation: u32) -> Result<NativePortraitOrientation, NativeOrientationError> {
+    fn scanout_at(
+        self,
+        raw_rotation: u32,
+    ) -> Result<NativePortraitOrientation, NativeOrientationError> {
         if raw_rotation > 3 || self.raw_rotation > 3 {
             return Err(NativeOrientationError::InvalidRotation);
         }
@@ -119,8 +124,15 @@ impl NativeOrientationHandle {
         if self.initialized.load(Ordering::Acquire) && !self.managed_sleep.suspended() {
             return Err(NativeOrientationError::ActiveDisplayOwnership);
         }
-        let mut request = self.request.lock().map_err(|_| NativeOrientationError::RequestUnavailable)?;
-        let calibration = PortraitCalibration { holding, scanout, raw_rotation };
+        let mut request = self
+            .request
+            .lock()
+            .map_err(|_| NativeOrientationError::RequestUnavailable)?;
+        let calibration = PortraitCalibration {
+            holding,
+            scanout,
+            raw_rotation,
+        };
         if request.calibration != Some(calibration) {
             request.calibration = Some(calibration);
             request.sequence = request.sequence.wrapping_add(1);
@@ -157,7 +169,12 @@ pub(crate) struct PortraitController {
 
 impl PortraitController {
     pub(crate) fn new(legacy_render_offset: u32) -> Self {
-        Self { sequence: 0, calibration: None, mapping: None, legacy_render_offset }
+        Self {
+            sequence: 0,
+            calibration: None,
+            mapping: None,
+            legacy_render_offset,
+        }
     }
 
     pub(crate) fn calibrated(&self) -> bool {
@@ -165,7 +182,8 @@ impl PortraitController {
     }
 
     pub(crate) fn render_offset(&self) -> u32 {
-        self.mapping.map_or(self.legacy_render_offset, PortraitMapping::render_offset)
+        self.mapping
+            .map_or(self.legacy_render_offset, PortraitMapping::render_offset)
     }
 
     pub(crate) fn touch_offset(&self) -> u32 {
@@ -180,7 +198,9 @@ impl PortraitController {
         if request.sequence == self.sequence {
             return Ok(false);
         }
-        let Some(calibration) = request.calibration else { return Ok(false) };
+        let Some(calibration) = request.calibration else {
+            return Ok(false);
+        };
         let mapping = PortraitMapping {
             holding: calibration.holding,
             scanout: calibration.scanout_at(raw_rotation)?,
@@ -197,8 +217,13 @@ impl PortraitController {
         holding: NativePortraitOrientation,
         raw_rotation: u32,
     ) -> Result<bool, NativeOrientationError> {
-        let Some(calibration) = self.calibration else { return Ok(false) };
-        let mapping = PortraitMapping { holding, scanout: calibration.scanout_at(raw_rotation)? };
+        let Some(calibration) = self.calibration else {
+            return Ok(false);
+        };
+        let mapping = PortraitMapping {
+            holding,
+            scanout: calibration.scanout_at(raw_rotation)?,
+        };
         let changed = self.mapping != Some(mapping);
         self.mapping = Some(mapping);
         Ok(changed)
@@ -217,8 +242,14 @@ mod tests {
                 scanout: NativePortraitOrientation::Up,
                 raw_rotation,
             };
-            assert_eq!(calibration.scanout_at(raw_rotation), Ok(NativePortraitOrientation::Up));
-            assert_eq!(calibration.scanout_at((raw_rotation + 2) % 4), Ok(NativePortraitOrientation::Down));
+            assert_eq!(
+                calibration.scanout_at(raw_rotation),
+                Ok(NativePortraitOrientation::Up)
+            );
+            assert_eq!(
+                calibration.scanout_at((raw_rotation + 2) % 4),
+                Ok(NativePortraitOrientation::Down)
+            );
             assert!(calibration.scanout_at((raw_rotation + 1) % 4).is_err());
             assert!(calibration.scanout_at((raw_rotation + 3) % 4).is_err());
             assert!(calibration.scanout_at(4).is_err());
@@ -228,7 +259,10 @@ mod tests {
     #[test]
     fn stale_scanout_compensates_pixels_and_raw_touch_independently() {
         let mut controller = PortraitController::new(180);
-        assert_eq!((controller.render_offset(), controller.touch_offset()), (180, 0));
+        assert_eq!(
+            (controller.render_offset(), controller.touch_offset()),
+            (180, 0)
+        );
         let request = OrientationRequest {
             sequence: 1,
             calibration: Some(PortraitCalibration {
@@ -238,14 +272,42 @@ mod tests {
             }),
         };
         assert!(controller.apply_request(request, 3).unwrap());
-        assert_eq!((controller.render_offset(), controller.touch_offset()), (0, 0));
-        assert!(controller.observe(NativePortraitOrientation::Down, 3).unwrap());
-        assert_eq!((controller.render_offset(), controller.touch_offset()), (180, 180));
-        assert!(controller.observe(NativePortraitOrientation::Down, 1).unwrap());
-        assert_eq!((controller.render_offset(), controller.touch_offset()), (0, 180));
-        assert!(!controller.observe(NativePortraitOrientation::Down, 1).unwrap());
-        assert!(controller.observe(NativePortraitOrientation::Up, 1).unwrap());
-        assert_eq!((controller.render_offset(), controller.touch_offset()), (180, 0));
+        assert_eq!(
+            (controller.render_offset(), controller.touch_offset()),
+            (0, 0)
+        );
+        assert!(
+            controller
+                .observe(NativePortraitOrientation::Down, 3)
+                .unwrap()
+        );
+        assert_eq!(
+            (controller.render_offset(), controller.touch_offset()),
+            (180, 180)
+        );
+        assert!(
+            controller
+                .observe(NativePortraitOrientation::Down, 1)
+                .unwrap()
+        );
+        assert_eq!(
+            (controller.render_offset(), controller.touch_offset()),
+            (0, 180)
+        );
+        assert!(
+            !controller
+                .observe(NativePortraitOrientation::Down, 1)
+                .unwrap()
+        );
+        assert!(
+            controller
+                .observe(NativePortraitOrientation::Up, 1)
+                .unwrap()
+        );
+        assert_eq!(
+            (controller.render_offset(), controller.touch_offset()),
+            (180, 0)
+        );
     }
 
     #[test]
@@ -260,8 +322,15 @@ mod tests {
             }),
         };
         controller.apply_request(request, 0).unwrap();
-        assert!(controller.observe(NativePortraitOrientation::Up, 1).is_err());
-        assert_eq!((controller.render_offset(), controller.touch_offset()), (0, 180));
+        assert!(
+            controller
+                .observe(NativePortraitOrientation::Up, 1)
+                .is_err()
+        );
+        assert_eq!(
+            (controller.render_offset(), controller.touch_offset()),
+            (0, 180)
+        );
         assert!(!controller.apply_request(request, 2).unwrap());
     }
 }
