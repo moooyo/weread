@@ -16,8 +16,10 @@ observed missing-display sleep failure. Its 1,484-library/52-Main execution and
 ARM build have an exact runtime-source reuse proof; the corrected 30-case
 launcher target and all 183 corrected launcher cases passed. The gated package
 passed its exact 35-member, CRC, mode, and ELF/launcher identity checks. Physical
-acceptance remains pending after a connection attempt failed before reaching
-the device. Earlier failed launcher output and its package remain failed
+acceptance subsequently established TOC alignment, the resident system-setting
+commit, same-process wake, and exit persistence in an isolated R3 trial. The user
+observed native Library during both theme change and wake; visual handoff remains
+unaccepted and requires a new correction. Earlier failed launcher output and its package remain failed
 evidence, with no reassignment of historical artifact results.
 
 ## Finite resource closeout and active orientation

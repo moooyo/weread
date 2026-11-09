@@ -115,14 +115,17 @@ the launcher to exit during the sleep display-release phase. This identifies
 the observed launcher handoff failure; it is not evidence of a defect in the
 holding, scanout, or touch rotation formulas.
 
-The launcher now supplies a default `DISPLAY`, but the corrected package has
-not passed physical resident sleep/wake acceptance. The coordinator's later
+The launcher now supplies a default `DISPLAY`. The coordinator's later
 frozen-source rerun passed the corrected 30-case target and all 183 launcher
 cases, with the original Rust and ARM results retained through an exact
 runtime-source identity check. The earlier failed 183-case output remains
-failed historical evidence. A subsequent connection attempt did not reach the
-device. [Native reading corrections](NATIVE_FIX_ACCEPTANCE.md) records the
-current package and the still-open physical sleep gate.
+failed historical evidence. After an initially unreachable connection, the R3
+physical trial confirmed a Down startup using raw GETVAR rotation 1, working
+reading touch, a committed system night-mode change, and resident wake with the
+same process and anchor. The user observed native Library before Reader returned
+during both theme change and wake. [Native reading corrections](NATIVE_FIX_ACCEPTANCE.md)
+records these scoped results and the still-open visual handoff gate; this
+exposure is distinct from a rotation-coordinate mapping failure.
 
 This review ran no tests, builds, runtime probes, SSH verification, or device
 actions. KOReader source behavior and the source-derived alignment are kept

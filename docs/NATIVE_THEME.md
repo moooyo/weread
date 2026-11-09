@@ -1,8 +1,9 @@
 # Native theme continuity and login exit
 
-Status: the resident system-theme transaction described below is implemented
-and has passing current remote verification; its new physical verification is
-pending. [Native reading corrections](NATIVE_FIX_ACCEPTANCE.md) binds those
+Status: the resident system-theme transaction described below has passing
+remote verification and scoped physical system-setting, same-process, and exit
+persistence results. Its visual handoff is not accepted: native Library briefly
+appears during theme changes and wake. [Native reading corrections](NATIVE_FIX_ACCEPTANCE.md) binds those
 results to the current source and artifact. Historical explicit-exit
 theme continuity was verified on the user-identified Scribe 2022 / firmware
 5.19.5 with executable `2fd3d6ab2d64` and launcher `799d5bba5eb9`. Native exit
@@ -102,7 +103,8 @@ Successful mock tests do not establish native panel appearance or persistence
 across a real device restart.
 
 The current resident transaction, TOC alignment correction, and default SSH
-display environment have their own remote results and pending physical gates. Earlier
+display environment have their own remote and physical results, with a still-open
+native-Library exposure correction. Earlier
 `2fd3/799d` and resource-review `381a` observations must not be retagged as
 acceptance of these later changes.
 

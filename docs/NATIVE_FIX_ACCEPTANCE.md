@@ -91,10 +91,50 @@ The unused lease was exactly released and the global lease directory was
 independently confirmed absent. No new native appearance or touch result is
 claimed for that attempt.
 
-The corrected candidate still needs physical confirmation of TOC alignment,
-immediate system night-mode readback/persistence with the same Reader process,
-sleep/wake with the same page and input, and voluntary exit without reverting
-the system theme. The earlier formal daily-trial installation has not been
-replaced by these isolated runs. USB insertion remains deferred at the user's
-request. Manual rotation is disabled, and no four-way automatic rotation or
-other model/firmware support is claimed.
+The later R3 isolated trial used the same ELF and launcher. Its first window
+confirmed startup feedback, Library, reading touch, and a TOC framebuffer
+capture with aligned download icons and chapter-status text. The initial native
+portrait calibration was Down with raw GETVAR rotation 1. The framebuffer was
+1860 x 2480, 8bpp, stride 1872, with zero visible offsets and scale 2. The raw
+rotation code was treated relative to the observed native origin.
+
+That first window ended when the operator's 900-second guard requested one
+owned TERM; launcher exit was 143 with successful native restoration. The
+subsequent user dark-mode report could not be reconciled with the expired
+process, so it is not accepted as a system-theme result. Only the private
+operator guard was extended to 3600 seconds for the second window; the product
+ELF, launcher, and application arguments remained unchanged.
+
+The second window confirmed the live system transaction: generation 1 retained
+the same process and birth, theme sequence 1 returned `ok:Y8INV`, the matching
+renderer acknowledgment was present, the request was removed, the persistent
+native preference was `Y8INV`, and the application's dark preference was true.
+The private framebuffer capture, decoded using the confirmed native inversion,
+showed black background, white text, and removal of the old hint.
+However, the user also observed the native Library for several seconds before
+Reader returned. That visible handoff does not meet the required reading
+experience, despite the successful resident system change.
+
+A subsequent five-second stock power-button cycle retained the same process,
+matching sleep/wake cycle 1, the same chapter/anchor, and dark mode. After the
+completed wake acknowledgment, the process had four threads and 249 descriptors.
+The user confirmed the original position, dark appearance, and working page
+turns, but wake also showed native Library before Reader returned. This is
+same-process recovery evidence with a failed visual handoff gate, rather than
+acceptance of uninterrupted wake presentation.
+
+Voluntary UI exit then finished with launcher exit zero. Native mode and its
+persistent preference remained `Y8INV`; the original window manager was running,
+the status bar was restored, no test GUI or launcher lock remained, and the user
+confirmed native dark appearance and touch. The exact device lease was released
+and its directory independently confirmed absent before BiliComics resumed.
+
+The current correction therefore still requires elimination of native-Library
+exposure during both theme change and wake, followed by a new artifact-specific
+physical check. Factory-source review confirms that the native `epdcMode`
+setter explicitly requests root repaint and a full-screen refresh trigger;
+merely retaining the application process does not suppress that drawing.
+The earlier formal daily-trial installation has not been replaced by these
+isolated runs. USB insertion remains deferred at the user's request. Manual
+rotation is disabled, and no four-way automatic rotation or other model/firmware
+support is claimed.
