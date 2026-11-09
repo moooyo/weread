@@ -1,10 +1,10 @@
-//! Application-owned output transforms, independent of hardware inversion.
+//! Renderer-owned night-mode requests and canonical RGB output transforms.
 
 use std::fmt;
 use std::ops::Range;
 use std::os::fd::OwnedFd;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 use slint::Rgb8Pixel;
 
@@ -14,27 +14,119 @@ use crate::refresh::PhysicalRect;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RenderError {
     EventLoopTerminated,
+    AlreadyInitialized,
 }
 
 impl fmt::Display for RenderError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("the Kindle event loop has terminated")
+        formatter.write_str(match self {
+            Self::EventLoopTerminated => "the Kindle event loop has terminated",
+            Self::AlreadyInitialized => "night-mode configuration must precede the event loop",
+        })
     }
 }
 
 impl std::error::Error for RenderError {}
 
-/// A producer for process-local rendering preferences, with no system writes.
+/// Hardware support must be approved for the exact model and firmware.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum NightModeConfig {
+    #[default]
+    SoftwareOnly,
+    HardwareIfSupported,
+}
+
+const HARDWARE_ENABLED: u8 = 1;
+const CONFIGURATION_LOCKED: u8 = 2;
+
+pub(crate) struct NightModeControl {
+    desired: AtomicBool,
+    configuration: AtomicU8,
+    native_baseline: AtomicU8,
+}
+
+impl Default for NightModeControl {
+    fn default() -> Self {
+        Self {
+            desired: AtomicBool::new(false),
+            configuration: AtomicU8::new(0),
+            native_baseline: AtomicU8::new(0),
+        }
+    }
+}
+
+impl NightModeControl {
+    fn configure(&self, config: NightModeConfig) -> Result<(), RenderError> {
+        self.configuration
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+                if current & CONFIGURATION_LOCKED != 0 {
+                    None
+                } else {
+                    Some(match config {
+                        NightModeConfig::SoftwareOnly => 0,
+                        NightModeConfig::HardwareIfSupported => HARDWARE_ENABLED,
+                    })
+                }
+            })
+            .map(|_| ())
+            .map_err(|_| RenderError::AlreadyInitialized)
+    }
+
+    pub(crate) fn lock_configuration(&self) -> NightModeConfig {
+        let current = self
+            .configuration
+            .fetch_or(CONFIGURATION_LOCKED, Ordering::AcqRel);
+        if current & HARDWARE_ENABLED != 0 {
+            NightModeConfig::HardwareIfSupported
+        } else {
+            NightModeConfig::SoftwareOnly
+        }
+    }
+
+    pub(crate) fn desired(&self) -> bool {
+        self.desired.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn observe_native_baseline(&self, inverted: bool) {
+        self.native_baseline
+            .store(if inverted { 2 } else { 1 }, Ordering::Release);
+    }
+
+    fn native_output_inverted(&self) -> Option<bool> {
+        match self.native_baseline.load(Ordering::Acquire) {
+            1 => Some(false),
+            2 => Some(true),
+            _ => None,
+        }
+    }
+}
+
+/// A producer for renderer-owned preferences, with no LIPC or dynconf writes.
 /// Success acknowledges a request, not completion of a physical panel update.
 #[derive(Clone)]
 pub struct RenderHandle {
-    pub(crate) dark_mode: Arc<AtomicBool>,
+    pub(crate) night_mode: Arc<NightModeControl>,
     pub(crate) managed_sleep: Arc<ManagedSleepControl>,
     pub(crate) wake: Arc<OwnedFd>,
     pub(crate) quit: Arc<AtomicBool>,
 }
 
 impl RenderHandle {
+    /// Configure the renderer before its event loop opens the framebuffer.
+    /// An opt-in still requires actual 8-bpp grayscale 1/2 metadata at runtime.
+    pub fn configure_night_mode(&self, config: NightModeConfig) -> Result<(), RenderError> {
+        if self.quit.load(Ordering::SeqCst) {
+            return Err(RenderError::EventLoopTerminated);
+        }
+        self.night_mode.configure(config)
+    }
+
+    /// The latest native baseline observed at startup or a real resident wake.
+    /// This does not report the renderer's temporary hardware inversion mode.
+    pub fn native_output_inverted(&self) -> Option<bool> {
+        self.night_mode.native_output_inverted()
+    }
+
     /// Ask the event loop to release input and display ownership without exiting.
     /// The caller must wait for Suspended before allowing native UI to draw.
     pub fn set_managed_sleep(&self, sleeping: bool) -> Result<(), RenderError> {
@@ -58,16 +150,22 @@ impl RenderHandle {
         }
     }
 
-    /// Invert the rendered grayscale output without changing canonical RGB pixels.
-    /// The event loop rewrites and fully refreshes the panel on a mode transition.
-    pub fn set_dark_mode(&self, enabled: bool) -> Result<(), RenderError> {
+    /// Request the application's physical night appearance from canonical light RGB.
+    /// The event loop owns inversion, a complete rewrite, and one full refresh.
+    /// This request does not release touch or enter the managed-sleep protocol.
+    pub fn set_night_mode(&self, enabled: bool) -> Result<(), RenderError> {
         if self.quit.load(Ordering::SeqCst) {
             return Err(RenderError::EventLoopTerminated);
         }
-        if self.dark_mode.swap(enabled, Ordering::AcqRel) != enabled {
+        if self.night_mode.desired.swap(enabled, Ordering::AcqRel) != enabled {
             crate::wakeup::poke(&self.wake);
         }
         Ok(())
+    }
+
+    /// Compatibility alias for [`Self::set_night_mode`].
+    pub fn set_dark_mode(&self, enabled: bool) -> Result<(), RenderError> {
+        self.set_night_mode(enabled)
     }
 }
 
@@ -193,6 +291,30 @@ mod tests {
             g: value,
             b: value,
         }
+    }
+
+    #[test]
+    fn configuration_is_sealed_at_start_and_native_observation_is_separate_from_desired() {
+        let control = NightModeControl::default();
+        assert_eq!(control.native_output_inverted(), None);
+        control
+            .configure(NightModeConfig::HardwareIfSupported)
+            .unwrap();
+        assert_eq!(
+            control.lock_configuration(),
+            NightModeConfig::HardwareIfSupported
+        );
+        assert_eq!(
+            control.configure(NightModeConfig::SoftwareOnly),
+            Err(RenderError::AlreadyInitialized)
+        );
+        control.observe_native_baseline(true);
+        assert_eq!(control.native_output_inverted(), Some(true));
+        assert!(!control.desired());
+        control.desired.store(true, Ordering::Release);
+        control.observe_native_baseline(false);
+        assert_eq!(control.native_output_inverted(), Some(false));
+        assert!(control.desired());
     }
 
     struct Panel {
@@ -371,7 +493,7 @@ mod tests {
     fn render_requests_wake_the_loop_and_latest_state_controls_actual_pixels() {
         let wakeup = crate::wakeup::make_wakeup().unwrap();
         let handle = RenderHandle {
-            dark_mode: Arc::new(AtomicBool::new(false)),
+            night_mode: Arc::new(NightModeControl::default()),
             managed_sleep: Arc::new(ManagedSleepControl::default()),
             wake: wakeup.write.clone(),
             quit: Arc::new(AtomicBool::new(false)),
@@ -392,7 +514,7 @@ mod tests {
         let mut panel = Panel::new(2, 1);
         let rgb = [gray(255), gray(20)];
         let mode = GrayMode {
-            dark_mode: handle.dark_mode.load(Ordering::Acquire),
+            dark_mode: handle.night_mode.desired(),
             black_and_white: false,
         };
         panel.draw(&mut renderer, &rgb, None, mode);
@@ -468,7 +590,7 @@ mod tests {
     fn sleep_requests_wake_the_backend_and_only_acknowledgment_completes_the_transition() {
         let wakeup = crate::wakeup::make_wakeup().unwrap();
         let handle = RenderHandle {
-            dark_mode: Arc::new(AtomicBool::new(false)),
+            night_mode: Arc::new(NightModeControl::default()),
             managed_sleep: Arc::new(ManagedSleepControl::default()),
             wake: wakeup.write.clone(),
             quit: Arc::new(AtomicBool::new(false)),

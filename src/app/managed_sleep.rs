@@ -56,6 +56,9 @@ trait ManagedSleepHost {
     fn native_base(&self) -> Option<bool> {
         None
     }
+    fn observes_native_output_on_resume(&self) -> bool {
+        false
+    }
     fn set_native_base(&mut self, _: bool) -> Result<()> {
         bail!("The resident renderer cannot compensate a native output mode")
     }
@@ -90,8 +93,12 @@ impl ManagedSleepHost for App {
         self.platform.native_output_inverted()
     }
 
+    fn observes_native_output_on_resume(&self) -> bool {
+        self.platform.observes_native_output_on_resume()
+    }
+
     fn set_native_base(&mut self, inverted: bool) -> Result<()> {
-        self.synchronize_native_dark_mode(inverted)
+        self.synchronize_native_output_base(inverted)
     }
     fn prepare_native_portrait_resume(
         &self,
@@ -126,6 +133,15 @@ impl App {
 }
 
 impl ManagedSleep {
+    #[cfg(test)]
+    pub(super) fn with_test_context(context: LauncherContext) -> Self {
+        Self {
+            initialized: true,
+            context: Some(context),
+            ..Self::default()
+        }
+    }
+
     fn poll(
         &mut self,
         host: &mut impl ManagedSleepHost,
@@ -253,13 +269,17 @@ impl ManagedSleep {
                     );
                     self.pending_wake = false;
                     let native_base = context.managed_native_output_mode(cycle)?;
+                    // A self-observing backend reads the fresh kernel base as
+                    // it resumes. Present launcher records remain validated.
                     ensure!(
-                        host.native_base().is_none() || native_base.is_some(),
+                        host.native_base().is_none()
+                            || host.observes_native_output_on_resume()
+                            || native_base.is_some(),
                         "The native output mode is unavailable for the current wake cycle"
                     );
                     if let Some(inverted) = native_base {
-                        // Synchronize the confirmed system mode while display
-                        // and input remain suspended, before the full restore.
+                        // Observe the confirmed native base and reapply the app
+                        // preference before the full frame and input restore.
                         host.set_native_base(inverted)?;
                     }
                     if let Some(observation) = context.managed_native_portrait_calibration(cycle)? {

@@ -16,6 +16,7 @@ pub(super) struct NativeControl {
     set_property: Option<PathBuf>,
     native_viewport: (u32, u32),
     native_output_inverse: Option<bool>,
+    framebuffer_night_mode_allowed: bool,
 }
 
 impl NativeControl {
@@ -51,6 +52,7 @@ impl NativeControl {
             set_property: find_command("lipc-set-prop"),
             native_viewport,
             native_output_inverse: super::native_theme::startup_native_output_inverted(),
+            framebuffer_night_mode_allowed: framebuffer_night_mode_allowed(profile, &firmware),
         })
     }
 
@@ -86,6 +88,10 @@ impl DeviceControl for NativeControl {
 
     fn native_output_inverted(&self) -> Option<bool> {
         self.native_output_inverse
+    }
+
+    fn allows_framebuffer_night_mode(&self) -> bool {
+        self.framebuffer_night_mode_allowed
     }
 
     fn capabilities(&self) -> PlatformCapabilities {
@@ -150,6 +156,11 @@ impl DeviceControl for NativeControl {
     fn quiesce_commands(&self, timeout: std::time::Duration) -> Result<(), PlatformError> {
         super::native_command::quiesce_commands(timeout)
     }
+}
+
+fn framebuffer_night_mode_allowed(profile: DeviceProfile, firmware: &str) -> bool {
+    // This is a supervised implementation target, not a released support matrix.
+    profile == DeviceProfile::Scribe && firmware == "5.19.5"
 }
 
 fn expected_framebuffer_size(
@@ -217,6 +228,23 @@ fn find_command(name: &str) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn framebuffer_mode_writes_require_the_reviewed_model_firmware_pair() {
+        assert!(framebuffer_night_mode_allowed(
+            DeviceProfile::Scribe,
+            "5.19.5"
+        ));
+        for (profile, firmware) in [
+            (DeviceProfile::Scribe, "5.20.1"),
+            (DeviceProfile::Scribe, ""),
+            (DeviceProfile::Paperwhite5, "5.19.5"),
+            (DeviceProfile::Paperwhite6, "5.19.5"),
+            (DeviceProfile::Scribe2025, "5.19.5"),
+        ] {
+            assert!(!framebuffer_night_mode_allowed(profile, firmware));
+        }
+    }
 
     fn framebuffer_info(size: (u32, u32), offset: (u32, u32)) -> FramebufferInfo {
         let mut information = FramebufferInfo { words: [0; 40] };

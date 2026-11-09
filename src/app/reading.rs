@@ -2128,11 +2128,7 @@ impl App {
         let capabilities = self.platform.capabilities();
         state.set_hardware_light(capabilities.brightness && state.get_brightness_known());
         state.set_hardware_warmth(capabilities.warmth && state.get_warmth_known());
-        state.set_night_supported(
-            capabilities.application_dark_mode
-                && (!self.platform.is_kindle || self.native_theme_sync_available()),
-        );
-        state.set_native_theme_sync(self.native_theme_sync_available());
+        state.set_night_supported(capabilities.application_dark_mode);
         state.set_pen_supported(capabilities.pen);
         state.set_can_download(
             book.source == "weread"

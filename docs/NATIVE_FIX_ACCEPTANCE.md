@@ -1,14 +1,85 @@
 # Native reading corrections and acceptance
 
 Recorded: 2026-11-09 (Asia/Shanghai).
-Updated with the v10 continuation: 2026-11-10 (Asia/Shanghai).
+Updated with the KOReader alignment decision: 2026-11-10 (Asia/Shanghai).
 
-This record covers the requested TOC status alignment, immediate system night
-mode, the observed display-release failure during sleep, and the bounded
-[KOReader rotation comparison](ROTATION_ALIGNMENT.md). It does not reopen the
-completed finite resource closeout or certify other devices.
+This record preserves the historical TOC status alignment, immediate SYSTEM
+night-mode implementation, display-release correction, and bounded
+[KOReader rotation comparison](ROTATION_ALIGNMENT.md), followed by their v8/v10
+physical evidence and normal-mode deployment. The latest accepted night-mode
+decision supersedes the SYSTEM path; it does not reopen the completed finite
+resource closeout or certify other devices.
 
-## Implemented behavior
+## Current KOReader-alignment candidate
+
+The user explicitly chose the reviewed KOReader framebuffer approach on
+2026-11-10 (Asia/Shanghai). Application night mode now has an independently saved
+preference. The implemented source candidate uses renderer-owned grayscale 1/2
+hardware inversion only for the explicit Scribe 2022 / firmware 5.19.5 target
+with actual 8bpp and checked layout; it uses software compensation otherwise.
+Ordinary toggles retain touch ownership and a checked full redraw without SYSTEM
+IPC, native WM continuation, application suspension, work quiescence, or explicit
+light setters. Native day/night settings remain unchanged. Real stock sleep
+still uses coherent native-baseline frame-guard handoff; active ordinary exit
+restores startup hardware state, and an already-yielded exit performs no further
+mode write. See [KOReader night-mode alignment](KOREADER_NIGHT_ALIGNMENT.md).
+
+On `test-env`, this candidate passed 1,492 library cases with three manual
+benchmarks ignored, 52 Main cases, 82 backend cases, four package-contract cases,
+and checks covering 463 translation keys. The first launcher execution passed
+194 of 195 cases, retaining one failure involving exit 143. After the minimal
+grace correction, all 10 targeted and all 198 full launcher cases passed.
+The shell correction left the Rust/UI/assets/vendor/lock inputs unchanged,
+preserving the scope of their recorded results. No second Rust execution is
+claimed.
+
+ARM application `d221d65d`, development ZIP `dae7dd52`, and production launcher
+`a5fec72f` now have recorded identities in
+[KOReader night-mode alignment](KOREADER_NIGHT_ALIGNMENT.md#remote-software-and-artifacts).
+The isolated R1 physical continuation below has its own observations. Its isolated
+preference-reopen gate is now closed; the normal-entry update and remaining
+physical gates are **OPEN**. The
+historical sections keep every earlier test count, hash, measurement, and device
+result bound to its named artifact.
+The installed normal trial remains the historical v10 SYSTEM implementation:
+launcher `15aab68c`, application `8010a217`, and helper `a235b41c`. Its full
+identities and normal-mode observations are retained at the end of this record.
+Overall acceptance remains incomplete.
+
+### R1 isolated physical continuation
+
+On 2026-11-10 (Asia/Shanghai), the matching candidate ran in a separate home on
+the identified Scribe 2022 / firmware 5.19.5. A short operator-terminated window
+returned real exit 143 with owned-family, lock, and window cleanup and native
+grayscale 2 restoration. In the later manual window, generation 1 retained the
+same application while confirmed black and white transitions saved the matching
+app preference and changed kernel grayscale 2/1 without changing native `Y8INV`.
+The user estimated each confirmed transition at at most one second, saw no native
+Home or startup detour, and reported stable illumination. The initial click was
+inconclusive and is not counted as a successful transition.
+
+A five-second stock power-button cycle retained the same application and matched
+sleep/wake cycle 1; the user returned directly to the same white page with working
+touch. An inverted-holding stage confirmed automatic orientation and a right-side
+page turn. After returning upright, voluntary UI exit returned real status zero,
+and the user confirmed dark native presentation and touch. The immediate operator
+native-after guard reported `native-awesome-not-running` without a process state.
+A later read-only sample found the original native manager running normally,
+with native `Y8INV`, grayscale 2, restored status bar, active power, and native
+foreground. All owned process-family identities, locks, and the guard window had
+ended. The initial guard failure remains evidence with an unproven cause; it is
+not reported as an immediate first-pass restoration result. Detailed chronology
+and raw relative rotation values are retained in
+[KOReader night-mode alignment](KOREADER_NIGHT_ALIGNMENT.md#r1-isolated-physical-continuation).
+
+A subsequent isolated reopen confirmed the saved light startup and Library,
+followed by real UI-exit status zero and dark native appearance with working
+touch. Its first native-after check succeeded and all owned processes, locks,
+and the guard window had ended. The earlier failed receipt is retained; the new
+result closes only the isolated preference-reopen gate. The normal entry remains
+the old v10 installation pending its separate update.
+
+## Historical implemented SYSTEM behavior
 
 The Reader TOC download icon and chapter status use the same full-height row,
 with the icon and text vertically centered. The night-mode information subtitle
@@ -29,7 +100,7 @@ and checks stopping before waiting. The fallback allows the original wrapper
 to reap its proven child before retiring the wrapper. Original PID, birth,
 ancestry, first-signal, and native-restoration guards remain enforced.
 
-## Remote verification
+## Historical remote verification
 
 All software verification in this record ran on `test-env`. Local operations
 were source review, file transfer, documentation editing, and Git operations.
@@ -462,13 +533,20 @@ ended, and native `Y8INV`, locks, and owned windows were restored or cleared.
 The overall operator completion returned 1 because the controller gate was
 invalid; that failed operator gate remains recorded despite successful cleanup.
 
-## Accepted native illumination policy
+## Historical native illumination policy for the SYSTEM path
 
-After reviewing the observed behavior, the user chose to retain the Kindle's
+After reviewing the observed SYSTEM behavior, the user chose to retain the Kindle's
 native day/night illumination presets. The application does not own two
 illumination profiles or snapshot and restore light values around mode changes.
 Automatic brightness remains outside product and acceptance scope. Manual
 brightness and device-supported warmth remain available controls.
+
+The later explicit KOReader-alignment decision supersedes this system-triggered
+policy for ordinary application toggles. The new candidate does not change the
+native system setting or select its illumination presets. Manual controls remain
+unchanged, with no app-mode-driven profile copying, light snapshot/restore, or
+ambient automatic-brightness action. No zero-transient claim is made for the
+unverified direct framebuffer ioctl.
 
 Source review found no light setter in the normal night-mode transaction;
 light setters remain attached to manual UI controls. The existing native
@@ -504,8 +582,9 @@ The R10 private receipts include
 `evidence/private/r10-v10-manual-after-user-wake.stdout`,
 `evidence/private/r10-v10-manual-finished.stdout`, and
 `evidence/private/r10-v10-manual-guard-gone.stdout`.
-The R10 lease remains held at this record's cutoff; no lease release or
-replacement of the earlier `2fd3/799d` formal private trial is recorded here.
+At this manual-reopen checkpoint, the R10 lease remained held and the earlier
+`2fd3/799d` formal private trial had not been replaced. The subsequent matching
+normal-mode deployment below records that replacement and the final lease release.
 
 The v10 visual, sleep, and UI-exit gates are closed only for this Scribe 2022
 and firmware 5.19.5. The separate inverted-holding observations remain v8/R9

@@ -86,6 +86,10 @@ pub trait DeviceControl: Send + Sync {
     fn native_output_inverted(&self) -> Option<bool> {
         None
     }
+    /// Permit reviewed framebuffer writes only for an explicitly scoped target.
+    fn allows_framebuffer_night_mode(&self) -> bool {
+        false
+    }
     fn capabilities(&self) -> PlatformCapabilities;
     fn brightness(&self) -> Result<u8, PlatformError>;
     fn set_brightness(&self, value: u8) -> Result<(), PlatformError>;
@@ -106,10 +110,16 @@ pub trait RefreshSink: Send + Sync {
     fn submit(&self, plan: RefreshPlan) -> Result<(), PlatformError>;
 }
 
-/// Application output transforms are compensated for a separately observed native theme.
-/// This sink never changes the device's global preferences itself.
+/// Application appearance is owned by the renderer. A Kindle sink can use
+/// framebuffer inversion without changing native system preferences.
 pub trait RenderSink: Send + Sync {
     fn set_dark_mode(&self, enabled: bool) -> Result<(), PlatformError>;
+
+    /// A renderer that reads native framebuffer metadata on every real resume
+    /// does not require the launcher's optional LIPC appearance snapshot.
+    fn observes_native_output_on_resume(&self) -> bool {
+        false
+    }
 
     fn native_output_inverted(&self) -> Option<bool> {
         None
@@ -149,12 +159,12 @@ pub trait RenderSink: Send + Sync {
 
 /// Canonical UI colors stay unchanged. Only the process-local output transform
 /// compensates for the native EPDC mode observed by the trusted supervisor.
-#[cfg(any(all(feature = "kindle", target_os = "linux"), test))]
+#[cfg(test)]
 fn software_output_inverted(desired_dark: bool, native_inverse: Option<bool>) -> bool {
     desired_dark ^ native_inverse.unwrap_or(false)
 }
 
-#[cfg(any(all(feature = "kindle", target_os = "linux"), test))]
+#[cfg(test)]
 struct OutputCompensation {
     desired_dark: std::sync::atomic::AtomicBool,
     native_inverse: std::sync::atomic::AtomicBool,
@@ -162,7 +172,7 @@ struct OutputCompensation {
     apply: Mutex<()>,
 }
 
-#[cfg(any(all(feature = "kindle", target_os = "linux"), test))]
+#[cfg(test)]
 impl OutputCompensation {
     fn new(native_inverse: Option<bool>) -> Self {
         Self {
@@ -354,7 +364,7 @@ impl Platform {
         Ok(())
     }
 
-    /// Request application-only inversion; this never calls hardware inversion.
+    /// Request application appearance without writing native system preferences.
     pub fn set_dark_mode(&self, enabled: bool) -> Result<(), PlatformError> {
         let sink = self
             .render_sink
@@ -363,6 +373,18 @@ impl Platform {
             .clone()
             .ok_or(PlatformError::Unsupported("application_dark_mode"))?;
         sink.set_dark_mode(enabled)
+    }
+
+    pub fn allows_framebuffer_night_mode(&self) -> bool {
+        self.control.allows_framebuffer_night_mode()
+    }
+
+    pub fn observes_native_output_on_resume(&self) -> bool {
+        self.render_sink
+            .lock()
+            .ok()
+            .and_then(|sink| sink.clone())
+            .is_some_and(|sink| sink.observes_native_output_on_resume())
     }
 
     /// The renderer retains the newest wake snapshot; early startup uses the
@@ -670,7 +692,7 @@ pub struct KindleRefreshSink(slint_backend_kindle::RefreshHandle);
 #[cfg(all(feature = "kindle", target_os = "linux"))]
 pub struct KindleRenderSink {
     handle: slint_backend_kindle::RenderHandle,
-    output: OutputCompensation,
+    native_observation: Mutex<Option<bool>>,
     orientation: Option<slint_backend_kindle::NativeOrientationHandle>,
     portrait_anchor: Mutex<Option<NativePortraitCalibration>>,
 }
@@ -680,7 +702,7 @@ impl KindleRenderSink {
     pub fn new(handle: slint_backend_kindle::RenderHandle) -> Self {
         Self {
             handle,
-            output: OutputCompensation::new(None),
+            native_observation: Mutex::new(None),
             orientation: None,
             portrait_anchor: Mutex::new(None),
         }
@@ -694,7 +716,7 @@ impl KindleRenderSink {
     ) -> Self {
         Self {
             handle,
-            output: OutputCompensation::new(Some(native_inverse)),
+            native_observation: Mutex::new(Some(native_inverse)),
             orientation: None,
             portrait_anchor: Mutex::new(None),
         }
@@ -711,24 +733,29 @@ impl KindleRenderSink {
 
 #[cfg(all(feature = "kindle", target_os = "linux"))]
 impl RenderSink for KindleRenderSink {
+    fn observes_native_output_on_resume(&self) -> bool {
+        true
+    }
+
     fn set_dark_mode(&self, enabled: bool) -> Result<(), PlatformError> {
-        self.output.set_desired(enabled, |software| {
-            self.handle
-                .set_dark_mode(software)
-                .map_err(|error| PlatformError::Operation(error.to_string()))
-        })
+        self.handle
+            .set_night_mode(enabled)
+            .map_err(|error| PlatformError::Operation(error.to_string()))
     }
 
     fn native_output_inverted(&self) -> Option<bool> {
-        self.output.native_output_inverted()
+        self.handle
+            .native_output_inverted()
+            .or_else(|| self.native_observation.lock().ok().and_then(|value| *value))
     }
 
     fn set_native_output_inverted(&self, inverted: bool) -> Result<(), PlatformError> {
-        self.output.set_native(inverted, |software| {
-            self.handle
-                .set_dark_mode(software)
-                .map_err(|error| PlatformError::Operation(error.to_string()))
-        })
+        // The backend observes the actual framebuffer on resume. This trusted
+        // launcher observation is an early baseline, never another night request.
+        *self.native_observation.lock().map_err(|_| {
+            PlatformError::Operation("native observation lock was poisoned".into())
+        })? = Some(inverted);
+        Ok(())
     }
 
     fn set_native_portrait_calibration(
@@ -1018,26 +1045,14 @@ mod tests {
     }
 
     #[test]
-    fn output_and_startup_compensation_preserve_the_target_in_both_native_modes() {
+    fn software_sink_compensation_preserves_the_target_in_both_native_modes() {
         for native in [None, Some(false), Some(true)] {
-            let platform = Platform::with_control(
-                DeviceProfile::Scribe,
-                true,
-                Arc::new(FakeControl {
-                    native_inverse: native,
-                    ..Default::default()
-                }),
-            );
             let sink = Arc::new(CompensatingRenderSink::new(native));
             for desired in [false, true] {
                 sink.set_dark_mode(desired).unwrap();
                 let software = *sink.writes.lock().unwrap().last().unwrap();
                 assert_eq!(software, desired ^ native.unwrap_or(false));
-                assert_eq!(
-                    super::startup::startup_output_inverted(&platform, desired),
-                    software
-                );
-                // Vendor initial paper fill and RGB conversion use this same bit.
+                // A software-only sink preserves physical appearance too.
                 let raw_paper = if software { 0_u8 } else { 255_u8 };
                 let physical_paper = if native == Some(true) {
                     255 - raw_paper

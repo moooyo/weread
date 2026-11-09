@@ -57,25 +57,45 @@ The [Kindle development bundle instructions](packaging/kindle/README.md) describ
 - Build our own application, with its own executable, interface, data directory, launcher, and KPM package identity.
 - Target Paperwhite 5 / 11th generation, Paperwhite 6 / 12th generation, and Kindle Scribe. The initial physical test target is the first-generation Scribe released in 2022 on firmware 5.19.5; the supported model/firmware matrix remains open.
 - Support Chinese text and search input, book browsing, cover display, search, details, and local caching.
-- Retain Reader brightness, system night-mode control on a supported Kindle, startup feedback, continuous selection, and managed sleep recovery in product scope. Desktop night mode remains local.
+- Retain Reader brightness, independently saved application night mode, startup feedback, continuous selection, and managed sleep recovery in product scope. The current Kindle candidate follows the reviewed KOReader framebuffer approach; desktop night mode remains local.
 - Automatic brightness is outside the accepted product and acceptance scope. Retain manual brightness and device-supported warmth controls; ambient-light automation is not an outstanding delivery gate.
 - Keep content acquisition dependent on inspected source contracts and configured credentials. The current implementation downloads validated chapter text and provides its own paginated reader; it does not infer a downloadable EPUB or PDF from a cover URL.
 - Use WeChat Read as the confirmed source of cover images. Cover availability is a user-provided requirement, not evidence that the upstream exposes downloadable book files.
 
-[Native theme continuity](docs/NATIVE_THEME.md) records the correction for retaining dark native UI after explicit exit, compensating the next startup and wake, and closing every login state. Executable `2fd3d6ab2d64` and launcher `799d5bba5eb9` passed these scoped physical checks on the identified Scribe 2022 / firmware 5.19.5. The 440 core and 86 launcher tests cover additional controlled states; they do not establish other device support or a full-device-reboot result.
+[Native theme continuity](docs/NATIVE_THEME.md) preserves the historical explicit-exit correction for retaining dark native UI, compensating the next startup and wake, and closing every login state. Executable `2fd3d6ab2d64` and launcher `799d5bba5eb9` passed these scoped physical checks on the identified Scribe 2022 / firmware 5.19.5. The 440 core and 86 launcher tests cover additional controlled states; they do not establish other device support or a full-device-reboot result.
 
-The subsequent night-mode requirement uses a resident system-setting transaction
-and treats confirmed native state as authoritative at startup and wake. The
-isolated v10 trial passed scoped visual, sleep, and UI-exit checks on Scribe
-2022 / firmware 5.19.5; its approximately five-second response remains open.
-System mode changes retain the Kindle's native day/night illumination presets.
-The matching v10 normal-mode private trial is now installed at the existing
-document entry, retaining the account data and books. The user confirmed the
-original Library and normal native restoration after UI exit.
+The latest accepted night-mode decision, recorded on 2026-11-10
+(Asia/Shanghai), aligns the application with the reviewed KOReader framebuffer
+approach. The application saves its own preference independently of the native
+system setting. The renderer uses temporary hardware inversion only for the
+explicit Scribe 2022 / firmware 5.19.5 implementation target with checked 8bpp
+metadata, and uses software inversion otherwise. Ordinary toggles retain touch
+ownership, submit a checked full redraw, and issue no system-theme or light
+setter. Startup and wake compensate for the actual kernel inversion; ordinary
+exit restores the original native appearance. Manual brightness and warmth
+controls remain available. Remote verification passed 1,492 library, 52 Main,
+82 backend, and 198 launcher cases, with three manual library benchmarks ignored.
+The matching ARM application `d221d65d` and development ZIP `dae7dd52` are built.
+An isolated R1 trial on Scribe 2022 / firmware 5.19.5 recorded both night-mode
+directions, each estimated by the user at at most one second, stable illumination,
+same-process stock sleep/wake, automatic portrait orientation, and UI
+exit. The first click was inconclusive and is not counted; an immediate native
+restoration guard failure remains recorded despite a later healthy readback.
+An isolated reopen confirmed the saved light startup and clean native-dark
+restoration; the normal-entry update remains pending.
+[KOReader night-mode alignment](docs/KOREADER_NIGHT_ALIGNMENT.md) preserves these
+limits, the software results, and exact build identities.
+
+The existing normal-mode private trial still contains the earlier v10 SYSTEM
+implementation: launcher `15aab68c`, application `8010a217`, and native frame
+guard `a235b41c`. Its scoped visual, sleep, and UI-exit acceptance on Scribe
+2022 / firmware 5.19.5, retained account data and books, and normal native
+restoration remain historical facts. The approximately five-second response
+belongs to that implementation and is not a measurement of the new candidate.
 [Rotation alignment](docs/ROTATION_ALIGNMENT.md) compares the accepted automatic
 0/180-degree display and touch paths with pinned KOReader sources.
-[Current native corrections](docs/NATIVE_FIX_ACCEPTANCE.md) records the TOC,
-system-theme, and display-release verification separately from earlier builds.
+[Native corrections](docs/NATIVE_FIX_ACCEPTANCE.md) preserves the TOC,
+SYSTEM-theme, and display-release results separately from the latest candidate.
 
 The [resource lifetime review](docs/RESOURCE_LEAK_REVIEW.md) records cancellation,
 fault, input-admission, and ownership corrections with same-process Linux
@@ -122,6 +142,7 @@ A custom server is conditional. The first implementation should aim to use upstr
 | Document | Purpose |
 | --- | --- |
 | [Architecture](docs/ARCHITECTURE.md) | Components, data flows, ownership boundaries, and superseded choices |
+| [KOReader night-mode alignment](docs/KOREADER_NIGHT_ALIGNMENT.md) | Current app-owned night-mode decision, pinned source comparison, and open candidate gates |
 | [Research](docs/RESEARCH.md) | Primary sources, relevant community projects, and evidence limitations |
 | [UI guidelines](docs/UI_GUIDELINES.md) | E-ink design direction, references, and the design system still to be specified |
 | [Implementation plan](docs/IMPLEMENTATION_PLAN.md) | Discovery gates, prototype scope, and implementation sequence |
@@ -146,7 +167,7 @@ The pinned PW6 5.20.1 firmware-emulator experiment now exercises the native ARM 
 
 The same ARM executable also passed six native flows in a separate Scribe 2022 firmware 5.20.1 instance with its original 1 GiB RAM configuration and the nominal `scribe` display profile. The [Scribe record](docs/SCRIBE_EMULATOR.md) preserves that environment and separately records the later VM-only boot-recovery delta. Recorded `2b39140b` VM cases demonstrated continuous held selection, matching light/dark Reader text masks, and recovery of a saved Reader anchor. Quick Settings and Wi-Fi return results remain historical evidence for the removed experiments. These scoped guest-software results do not complete physical acceptance.
 
-The physical record distinguishes the earlier `61fa9afd` results from the `2b39140b/0226f613` experience run. Native Quick returned to the application, but its visible stock-UI detour did not satisfy the requested default interaction; that work and in-app Wi-Fi were later removed. Reader night-mode persistence, same-position sleep/wake, and voluntary UI exit remain dedicated physical checks. The user explicitly skipped USB testing in this round. See [Physical testing](docs/PHYSICAL_TESTING.md) for the current gates and [Verification](docs/VERIFICATION.md) for retained historical Quick/Wi-Fi/helper records, including the `582b` and `3ec60` experiments.
+The physical record distinguishes the earlier `61fa9afd` results from the `2b39140b/0226f613` experience run. Native Quick returned to the application, but its visible stock-UI detour did not satisfy the requested default interaction; that work and in-app Wi-Fi were later removed. Reader night-mode persistence, same-position sleep/wake, and voluntary UI exit were dedicated open checks in that experience run; later v10 results have their own artifact-specific record in [Native reading corrections](docs/NATIVE_FIX_ACCEPTANCE.md). The user explicitly skipped USB testing in that round. See [Physical testing](docs/PHYSICAL_TESTING.md) and [Verification](docs/VERIFICATION.md) for retained historical Quick/Wi-Fi/helper records, including the `582b` and `3ec60` experiments. The new KOReader-alignment candidate requires its own acceptance.
 
 Community applications such as Jobman are implementation references. Our application does not require Jobman or a KOReader plugin to run. Specific dependencies, device support, and release suitability must be established through our own implementation and target-device acceptance work.
 

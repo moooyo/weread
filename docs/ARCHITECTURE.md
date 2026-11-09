@@ -86,21 +86,47 @@ Content access is distinct from transport integrity and image readiness. A fresh
 
 Managed sleep uses a resident application handoff by default. The application persists reading state, quiesces account work and hardware helpers, and asks the backend to cancel pointer input, release its touch descriptor, and stop drawing. Only a matching private generation/nonce/cycle acknowledgement permits the supervisor to stop all application threads and return control to the stock screensaver. After native dismissal, the same process reacquires touch and rewrites its complete retained frame before work resumes. Fonts, the paginator, drafts, and the current route remain in memory. Saved-session cold recovery remains a bounded fallback, and an ordinary manual launch still opens Library. The `2fd3/799d` Scribe 2022 / firmware 5.19.5 trial established its scoped same-process Reader/touch/theme return. The later v10 native-correction trial and normal-mode deployment have separate evidence in [Native reading corrections](NATIVE_FIX_ACCEPTANCE.md). Earlier resource and cold-resume observations retain their original artifact scope.
 
-The user's subsequent night-mode requirement changes the reviewed native system setting immediately through a resident transaction. Application rendering and input pause before the owning supervisor briefly resumes its captured native window manager, performs the guarded setter/readback/persistence check, pauses that same manager, and resumes the retained application frame. Confirmed system mode is authoritative at startup, wake, and commit; software output compensates for actual native inversion. A failed preference mirror cannot revert a committed system change, and an ordinary exit does not republish stale preferences. An explicitly supervised demo or offline session may exercise this control. Sleep, USB, faults, and unknown native modes do not independently authorize a theme write. The login close action uses ordinary exit. [Native theme continuity](NATIVE_THEME.md) separates the new transaction's acceptance gates from historical explicit-exit results.
+The accepted 2026-11-10 (Asia/Shanghai) night-mode decision follows the reviewed
+KOReader framebuffer implementation. The application owns an independently
+persisted preference; native system settings do not replace it at startup or
+wake. The Kindle backend owns the single output transform, using
+`desired_dark XOR observed_kernel_inverse` for canonical RGB. Temporary hardware
+inversion uses `FBIOPUT_VSCREENINFO` grayscale 1/2 only for the explicitly allowed
+Scribe 2022 / firmware 5.19.5 target with actual 8bpp and checked layout; other
+targets use software inversion. Ordinary toggles use the existing render
+pipeline and a checked full redraw, without SYSTEM IPC, dynconf writes, native
+window-manager continuation, process suspension, work quiescence, or touch
+release. This candidate passed its scoped remote software gates and produced
+ARM application `d221d65d` and development ZIP `dae7dd52`, with production
+launcher `a5fec72f`. An isolated Scribe 2022 / 5.19.5 R1 trial observed both theme
+directions, same-process stock sleep/wake, automatic portrait orientation, and UI
+exit. The user estimated each confirmed theme transition at at most one second
+with stable illumination. An inconclusive first click and the immediate native
+restoration guard failure retain their separate evidence. An isolated reopen
+confirmed the saved light startup and native-dark UI exit, closing that scoped
+preference gate. The normal-entry update remains pending; the existing installation is
+unchanged. See
+[KOReader night-mode alignment](KOREADER_NIGHT_ALIGNMENT.md) for counts, the
+retained initial launcher failure, and build-time frozen fingerprints.
 
-The R3 physical trial exposed native Library during the native compositor's
-theme and wake work, although the process, reading anchor, and system setting
-were retained. The visual-handoff implementation adds a project-owned native
-frame guard within the Kindle platform boundary. It retains an exact reading
-frame in a separately owned native window above application content and below
-the native screensaver. This is not a replacement for the SYSTEM transaction,
-fresh wake observations, full-frame/input acknowledgment, or restoration gates.
-The main application remains static musl; the small separate helper uses the
-existing device X11/glibc runtime, with no firmware libraries redistributed.
-The isolated v10 trial passed scoped visual, sleep, and UI-exit checks on Scribe
-2022 / firmware 5.19.5. Its approximately five-second response remains open;
-other devices and normal-mode deployment retain their separate evidence in
-[Native reading corrections](NATIVE_FIX_ACCEPTANCE.md).
+The project-owned native frame guard remains separate from the Rust/Slint main
+process for real stock screensaver handoff. Before the backend acknowledges
+Suspended, it restores the latest native grayscale baseline and rewrites the
+retained canonical frame with matching software compensation, allowing the C
+helper to capture coherent RGB. Wake observes actual kernel metadata before
+reapplying the application preference, repainting, and acknowledging input.
+Ordinary active exit restores the startup hardware state; exit after a completed
+native yield performs no further mode write. Native day/night settings remain
+unchanged. The small helper uses the existing device X11/glibc runtime, with no
+firmware libraries redistributed.
+
+The earlier R3 SYSTEM path exposed native Library. Later v8/R9 and v10 trials
+closed their scoped visual-handoff gates, and the matching v10 normal entry is
+installed with launcher `15aab68c`, application `8010a217`, and helper `a235b41c`.
+Their approximately five-second SYSTEM response and accepted native illumination
+presets are historical evidence and policy for that superseded path. They do not
+verify the new renderer-owned candidate. [Native reading corrections](NATIVE_FIX_ACCEPTANCE.md)
+preserves the full artifacts and acceptance boundaries.
 
 Report settlement validates the measured run's account, book, and start time
 before trusting its durable allocation cursor, including a zero-demand return.
@@ -115,8 +141,9 @@ the independent application rotation. A transition cancels stale input and
 requires a complete rewritten frame before fresh mapped contacts. Calibration
 and managed-wake records use the existing private generation/nonce/cycle fence.
 These changes preserve Reader state and native display ownership during an
-active flip. Current controlled execution and ARM/private-bundle checks passed;
-device acceptance remains separate, and the private trial was not replaced.
+active flip. That orientation checkpoint passed its controlled execution and
+ARM/private-bundle checks without replacing the private trial at that time.
+Later native-correction deployments retain their own artifact-specific record.
 
 ## Stack
 
@@ -223,6 +250,7 @@ Do not host cover images merely because they are displayed by the client. A futu
 | Treating Jobman as an SDK or runtime dependency | Corrected; it is an application reference |
 | Treating a low-star backend or recent commit as proof of production readiness | Replaced by source review and model/firmware-specific evidence |
 | Pull-down Quick panel, in-app Wi-Fi, and the project-owned Wi-Fi helper | Removed at the user's request; retained only as historical experiments |
+| Immediate SYSTEM night-mode synchronization and native day/night illumination presets | Superseded on 2026-11-10 by independently saved application night mode and renderer-owned temporary inversion; manual light controls remain |
 
 ## Implementation note: 2026-11-03
 
@@ -239,11 +267,13 @@ and acceptance scope. Manual brightness and device-supported warmth remain
 accepted controls. Do not treat ambient-light automation as unfinished work or
 an acceptance blocker.
 
-System night-mode changes retain the Kindle's native day/night illumination
-presets. The accepted policy adds no application-owned pair of light profiles
-and no snapshot/restore of light values; manual controls retain their existing
-validated setter range. [Native reading corrections](NATIVE_FIX_ACCEPTANCE.md)
-separates the driver observations from this product decision.
+Application night-mode changes do not copy, restore, or select light profiles
+and do not set ambient automatic brightness. Manual brightness and warmth
+controls retain their existing validated setter range. The earlier acceptance
+of native day/night presets applied to the superseded SYSTEM path. No explicit
+light setter exists in an ordinary candidate toggle. The R1 user reported stable
+illumination during the two confirmed transitions; this does not establish an
+absence of every hardware frontlight transient.
 
 Implementation is still being iterated and has not completed acceptance. The accepted architecture above remains in force. Source behavior, remote checks, firmware-emulator observations, and physical-device observations are separate evidence classes; none establishes a released support matrix.
 
@@ -251,7 +281,7 @@ The native startup path presents the project name and loading dots before bundle
 
 An ordinary start opens Library when a configured session, local books, or demo data exists; otherwise first use opens Login. A new launch after explicit exit must not implicitly reopen the previous book. Only a managed recovery requests Reader restoration. The physical experience-test wrapper uses Library on a fresh start and preserves the supervisor's sleep-resume intent.
 
-The Reader opens with its notes sidebar hidden and updates continuous drag selection on an 80 ms cadence. Its TOC download icon and status text share a vertically centered row. Reader brightness and system night-mode controls remain in scope. Native inversion and software grayscale compensation are separate layers; the night-mode control does not silently fall back to a local toggle after a rejected system transaction. These are source behaviors with current remote and physical gates; see [the Reader record](READER.md) and [Native theme continuity](NATIVE_THEME.md).
+The Reader opens with its notes sidebar hidden and updates continuous drag selection on an 80 ms cadence. Its TOC download icon and status text share a vertically centered row. Reader brightness and independently saved application night mode remain in scope. Startup feedback uses software compensation for actual native kernel inversion before renderer ownership begins. The renderer then applies the desired appearance exactly once, with software fallback on unapproved framebuffers. These are source behaviors with separate remote and physical gates; see [the Reader record](READER.md) and [Native theme continuity](NATIVE_THEME.md).
 
 Sleep recovery belongs to the project-owned supervisor and application lifecycle. The default resident path requires saved local work and a matching private input/display acknowledgement before application threads are stopped for the native screen saver; native dismissal resumes the same process and retained frame. The saved-anchor restart-and-restore path is a bounded cold fallback: its checkpoint must be committed and the old application must exit successfully before a new generation can request that anchor. Explicit application exit and USB takeover take precedence over recovery. Physical `2fd3/799d` observations establish only their recorded resident paths; newer resource candidates, physical USB, full-device reboot, and other model/firmware combinations retain separate verification gates.
 

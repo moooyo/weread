@@ -35,7 +35,7 @@ pub use orientation::{NativeOrientationError, NativeOrientationHandle, NativePor
 pub use refresh::{
     PhysicalRect, RefreshArea, RefreshError, RefreshHandle, RefreshRequest, RefreshWaveform,
 };
-pub use render_control::{RenderError, RenderHandle};
+pub use render_control::{NightModeConfig, RenderError, RenderHandle};
 pub use splash::{StartupImage, StartupImages, StartupSplash};
 
 use platform::KindlePlatform;
@@ -95,7 +95,7 @@ impl<State> KindleBackend<State> {
         self.refresh_handle.clone()
     }
 
-    /// Control application rendering without changing system display preferences.
+    /// Control renderer-owned night appearance without changing system preferences.
     pub fn render_handle(&self) -> RenderHandle {
         self.render_handle.clone()
     }

@@ -502,7 +502,7 @@ impl App {
             .setting::<AppPreferences>("preferences")?
             .unwrap_or_else(|| AppPreferences::for_device(options.profile.is_scribe()));
         prefs.normalize_for_device(options.profile.is_scribe());
-        lighting::restore_dark_mode(&platform, &store, &mut prefs)?;
+        lighting::restore_dark_mode(&platform, &prefs)?;
         let pending = if let Some(owner) = content_owner.as_deref() {
             store.pending_tasks_for_owner(owner)
         } else {
@@ -1000,9 +1000,6 @@ impl App {
 
     /// Save state and request an explicit user exit through one lifecycle path.
     pub fn request_exit(&mut self) -> Result<()> {
-        if self.defer_exit_during_native_theme() {
-            return Ok(());
-        }
         if let Err(error) = self.shutdown().and_then(|_| self.mark_explicit_exit()) {
             self.resume_reader_after_failed_exit();
             return Err(error);

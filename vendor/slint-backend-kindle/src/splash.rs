@@ -109,6 +109,7 @@ impl Renderer {
         let title_y = (height - group_height) / 2;
         let starting_y = title_y + images.title.height + 56;
         let dynamic_y = starting_y + images.starting.height + 24;
+        let dark_mode = framebuffer.software_inversion(dark_mode);
         Ok(Self {
             framebuffer,
             images,

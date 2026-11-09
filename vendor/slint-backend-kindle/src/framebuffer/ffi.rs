@@ -4,15 +4,15 @@
 // Typed as c_ulong (not libc::Ioctl) so the crate still type-checks on
 // non-Linux dev hosts where libc::Ioctl isn't defined, like macos
 pub(super) const FBIOGET_VSCREENINFO: libc::c_ulong = 0x4600;
+pub(super) const FBIOPUT_VSCREENINFO: libc::c_ulong = 0x4601;
 pub(super) const FBIOGET_FSCREENINFO: libc::c_ulong = 0x4602;
 
 // These structs mirror the kernel's `fb_var_screeninfo` and `fb_fix_screeninfo`.
-// We only read from them, fields we care about are `xres`, `yres` (visible
-// resolution) and `line_length` (stride in bytes per row, which may be larger
-// than xres due to alignment padding).
+// Mode writes copy a fresh variable-info structure and change only grayscale.
+// Geometry and stride are rechecked before and after each mode write.
 
 #[repr(C)]
-#[derive(Default)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(super) struct FbBitfield {
     pub(super) offset: u32,
     pub(super) length: u32,
@@ -20,7 +20,7 @@ pub(super) struct FbBitfield {
 }
 
 #[repr(C)]
-#[derive(Default)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(super) struct FbVarScreeninfo {
     pub(super) xres: u32,
     pub(super) yres: u32,
@@ -53,8 +53,12 @@ pub(super) struct FbVarScreeninfo {
     pub(super) reserved: [u32; 4],
 }
 
+const _: () = assert!(std::mem::size_of::<FbVarScreeninfo>() == 160);
+const _: () = assert!(std::mem::offset_of!(FbVarScreeninfo, grayscale) == 28);
+const _: () = assert!(std::mem::offset_of!(FbVarScreeninfo, rotate) == 136);
+
 #[repr(C)]
-#[derive(Default)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(super) struct FbFixScreeninfo {
     pub(super) id: [u8; 16],
     pub(super) smem_start: libc::c_ulong,
@@ -197,6 +201,9 @@ pub(super) struct UpdateMarkerData {
 }
 
 pub(super) const WAVEFORM_MODE_GC16: u32 = 2; // Full 16-level grayscale refresh (slow, high quality)
+// Reviewed MTK night-mode full-refresh value:
+// https://github.com/koreader/koreader-base/blob/1c9682506757d5fd30cfa01c5698929dcc35340f/ffi/mxcfb_kindle_h.lua#L134-L153
+pub(super) const WAVEFORM_MODE_GCK16_MTK: u32 = 8;
 // Reviewed against KOReader-base 6e4bc81af4e04f78d81677a323a780a71b29702a
 // ffi/mxcfb_kindle_h.lua. A2 differs between the legacy and newer driver ABIs.
 pub(super) const WAVEFORM_MODE_DU: u32 = 1;

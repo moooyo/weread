@@ -627,12 +627,12 @@ fn run_isolated_closing_scenarios(
     Ok(())
 }
 
-struct RecordingThemeSink {
+struct RecordingAppearanceSink {
     native_base: Option<bool>,
     desired: Mutex<Vec<bool>>,
 }
 
-impl RenderSink for RecordingThemeSink {
+impl RenderSink for RecordingAppearanceSink {
     fn set_dark_mode(&self, desired_dark: bool) -> Result<(), PlatformError> {
         self.desired.lock().unwrap().push(desired_dark);
         Ok(())
@@ -643,7 +643,7 @@ impl RenderSink for RecordingThemeSink {
     }
 }
 
-fn run_native_dark_default_exit_scenario(saved_dark: Option<bool>) -> Result<()> {
+fn run_independent_app_appearance_exit_scenario(saved_dark: Option<bool>) -> Result<()> {
     let loop_state = Arc::new(LoopState::default());
     let ui_platform = TestUiPlatform::new(loop_state.clone());
     let window_slot = ui_platform.window.clone();
@@ -654,14 +654,14 @@ fn run_native_dark_default_exit_scenario(saved_dark: Option<bool>) -> Result<()>
         true,
         Arc::new(TestDeviceControl),
     ));
-    let display = Arc::new(RecordingThemeSink {
+    let display = Arc::new(RecordingAppearanceSink {
         native_base: Some(true),
         desired: Mutex::new(Vec::new()),
     });
     platform.set_render_sink(display.clone())?;
     let directory = tempfile::tempdir()?;
-    let expected_dark = true;
     let mut expected_preferences = AppPreferences::for_device(true);
+    let expected_dark = saved_dark.unwrap_or(expected_preferences.dark_mode);
     expected_preferences.dark_mode = expected_dark;
     if saved_dark.is_some() {
         expected_preferences.view_mode = "list".into();
@@ -681,8 +681,8 @@ fn run_native_dark_default_exit_scenario(saved_dark: Option<bool>) -> Result<()>
     }
     drop(database);
     let session = AuthSession {
-        api_key: "synthetic-native-theme-account".into(),
-        user_vid: "native-theme-account".into(),
+        api_key: "synthetic-app-appearance-account".into(),
+        user_vid: "app-appearance-account".into(),
         ..AuthSession::default()
     };
     let account_file = SessionFile::new(directory.path());
@@ -755,14 +755,18 @@ fn run_native_dark_default_exit_scenario(saved_dark: Option<bool>) -> Result<()>
 }
 
 #[test]
-fn first_login_and_settings_exit_follow_native_dark_without_erasing_other_preferences() -> Result<()>
-{
+fn first_login_and_settings_exit_keep_app_appearance_independent_of_native_dark() -> Result<()> {
     run_isolated_closing_scenarios(
-        "app::closing_tests::first_login_and_settings_exit_follow_native_dark_without_erasing_other_preferences",
+        "app::closing_tests::first_login_and_settings_exit_keep_app_appearance_independent_of_native_dark",
         &[
-            ("first-use", || run_native_dark_default_exit_scenario(None)),
+            ("first-use", || {
+                run_independent_app_appearance_exit_scenario(None)
+            }),
             ("saved-light", || {
-                run_native_dark_default_exit_scenario(Some(false))
+                run_independent_app_appearance_exit_scenario(Some(false))
+            }),
+            ("saved-dark", || {
+                run_independent_app_appearance_exit_scenario(Some(true))
             }),
         ],
     )

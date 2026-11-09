@@ -38,7 +38,7 @@ The baseline already defines GC16 as 2, AUTO as 257, and the four update ioctl s
 | GC16 | 2 | 2 |
 | A2 | 4 | 6 |
 
-DU requests set the reviewed `EPDC_FLAG_FORCE_MONOCHROME` value of 2. A2 falls back to AUTO when the driver family is not yet known or is unsupported. No new hardware inversion or pen support is introduced.
+DU requests set the reviewed `EPDC_FLAG_FORCE_MONOCHROME` value of 2. A2 falls back to AUTO when the driver family is not yet known or is unsupported. This refresh extension adds no pen support. Renderer-owned inversion uses the separate standard framebuffer mode API described below.
 
 The application adapter maps UI and reading partial requests to AUTO, press feedback to DU, and flashing/full requests to GC16. A2 is exposed for a future measured policy but is not selected by the application's initial adapter.
 
@@ -49,24 +49,30 @@ The application adapter maps UI and reading partial requests to AUTO, press feed
 - `src/touch.rs`: convert normalized panel pixels to Slint logical coordinates using the current window scale after undoing rotation.
 - `src/lib.rs`: public refresh, render-mode, and startup APIs, with handle preservation across backend typestates.
 - `src/platform.rs`: queue wiring, render-mode changes, suspend eligibility, post-render execution, bounded startup orientation queries, and termination state.
-- `src/render_control.rs`: software dark-mode requests, canonical-buffer conversion, and controlled rendering tests.
+- `src/render_control.rs`: night-mode configuration and requests, native-baseline observation, canonical-buffer conversion, and controlled rendering tests.
 - `src/splash.rs`: an exclusive temporary framebuffer owner for startup text, stages, and low-frequency loading feedback.
 - `src/wakeup.rs`: make the existing pipe nudge usable inside this crate and retry interrupted writes.
-- `src/framebuffer/mod.rs`: execute resolved plans through the existing driver and map driver-specific waveforms.
-- `src/framebuffer/ffi.rs`: reviewed DU/A2 and monochrome constants.
+- `src/framebuffer/mod.rs`: execute resolved plans through the existing driver, map driver-specific waveforms, and perform checked framebuffer mode I/O.
+- `src/framebuffer/night_mode.rs`: hardware opt-in, software compensation, native-sleep baseline, startup restoration, and mocked mode-I/O regressions.
+- `src/framebuffer/ffi.rs`: reviewed DU/A2, monochrome constants, and the standard Linux framebuffer mode ABI.
 - `Cargo.toml`: omit the unavailable example workspace and align font dependencies with Slint 1.17.1's actual resolved versions and dlopen requirements.
 
 ## Resident managed power handoff
 
 The project adds a process-local managed-sleep request and acknowledgement API
-to the existing render handle. Suspension cancels the Slint pointer, drops the
-touch descriptor to release `EVIOCGRAB`, and gates every framebuffer write and
-refresh. Event-loop timers remain available for the application/supervisor
+to the existing render handle. Before suspension is acknowledged, the renderer
+restores the observed native grayscale baseline and rewrites retained canonical
+RGB pixels with the matching software compensation. The raw framebuffer and
+native mode then describe the same physical app frame for the launcher's frame
+guard. This preparation submits no extra panel refresh. Suspension then cancels
+the Slint pointer, drops the touch descriptor to release `EVIOCGRAB`, and gates
+every further framebuffer write and refresh. Event-loop timers remain available for the application/supervisor
 handshake; the supervisor subsequently stops the entire application process.
 This does not enable `WakeSchedule` or write a new kernel suspend policy.
 
 Wake restores the existing process and its retained canonical RGB frame. The
-backend reopens touch input, resets its gesture state, repaints with a new
+backend reopens touch input, observes the current native framebuffer baseline,
+reapplies the retained app night request, resets its gesture state, repaints with a new
 buffer, writes every panel row even when the previous dirty region was empty,
 and submits a checked full GC16 update before acknowledging `Running`.
 Acknowledgement establishes successful update submission, not unbounded
@@ -89,17 +95,80 @@ Touch controller axes remain normalized to the physical framebuffer dimensions. 
 
 The added regression vectors cover a noncentral point and the logical origin at scale 2 for rotations 0, 90, 180, and 270 degrees. They exercise the pure coordinate conversion without opening an input device or framebuffer. Controlled-test and firmware-emulator results are recorded below; these vectors alone do not establish physical-device support.
 
-## Software display mode
+## Renderer-owned night mode
 
-`KindleBackend::render_handle()` returns a thread-safe `RenderHandle`. Its `set_dark_mode(bool)` method wakes the event loop after a mode change and rejects requests after termination. The renderer retains a canonical light RGB buffer and applies inversion only while converting pixels for grayscale framebuffer output. Text, images, overlays, and later dirty regions therefore use the same mode without repeatedly inverting stored pixels.
+`KindleBackend::render_handle()` returns a thread-safe `RenderHandle`.
+`set_night_mode(bool)` requests the application's physical night appearance;
+`set_dark_mode(bool)` remains a compatibility alias with the same desired-mode
+semantics. A successful call acknowledges the queued preference, not a physical
+panel update. The event loop applies it without releasing touch, entering managed
+sleep, stopping the process, or writing LIPC/dynconf preferences. The application
+retains its own persisted preference independently of the native owner's theme.
 
-A mode change rewrites the complete framebuffer and requests a full GC16 refresh, even when Slint has no dirty region or reports only a partial region. The application persists its appearance preference through its own platform boundary. This extension does not implement a hardware inversion ioctl or modify the stock Kindle dark-mode preference.
+`configure_night_mode(NightModeConfig)` must precede the event loop. The default
+is `SoftwareOnly`. `HardwareIfSupported` is an explicit model/firmware opt-in and
+still requires actual startup metadata with 8 bits per pixel and grayscale 1 or
+2. The hardware path follows [`koreader-base` at
+`1c9682506757d5fd30cfa01c5698929dcc35340f`,
+`ffi/framebuffer_linux.lua`, lines 157-200](https://github.com/koreader/koreader-base/blob/1c9682506757d5fd30cfa01c5698929dcc35340f/ffi/framebuffer_linux.lua#L157-L200):
+change only `grayscale` between 1 and 2 through Linux `FBIOPUT_VSCREENINFO`
+(`0x4601`). The complete fresh `fb_var_screeninfo` is copied before that single
+field is changed. The 160-byte layout and grayscale/rotation offsets have compile
+time assertions. GETVAR (`0x4600`) and GETFIX (`0x4602`) verify the mapped layout
+before and after each write, and the readback must confirm the requested grayscale
+without changing rotation. A write or readback failure ends the event loop with
+an error; an uncertain hardware write is never reported as applied.
+
+Unsupported or unapproved framebuffers use software inversion. All paths retain
+canonical light RGB and convert using `desired_dark XOR observed_kernel_inverse`.
+Text, images, overlays, and later dirty regions therefore invert exactly once,
+including when native UI had already enabled kernel inversion at launch. A mode
+transition rewrites every visible pixel and submits one checked full GC16 update,
+even when the required software transform is unchanged or Slint reports no dirty
+region. Ordinary night requests do not create an input/presentation transition.
+
+For the MTK update ABI, final request packing maps a full GC16 request to GCK16
+(`8`) only when hardware inversion was explicitly enabled and the current
+observed framebuffer state is inverted. The native baseline does not select this
+waveform. Packing applies this mapping even to the first uncached MTK ioctl
+probe; its ioctl number, probe order, and flags remain unchanged. Global
+`grayscale = 2` already provides inversion, so no EPDC inversion flag is added.
+Day mode, software fallback, other waveforms, partial updates, and Legacy/Rex/Zelda
+requests keep their existing values. The reviewed MTK definitions are GC16 `2`,
+GCK16 `8`, and GLKW16 `9` in [`koreader-base` at
+`1c9682506757d5fd30cfa01c5698929dcc35340f`,
+`ffi/mxcfb_kindle_h.lua`, lines 134-153](https://github.com/koreader/koreader-base/blob/1c9682506757d5fd30cfa01c5698929dcc35340f/ffi/mxcfb_kindle_h.lua#L134-L153).
+The full-refresh mapping follows [`ffi/framebuffer_mxcfb.lua`, lines
+433-455](https://github.com/koreader/koreader-base/blob/1c9682506757d5fd30cfa01c5698929dcc35340f/ffi/framebuffer_mxcfb.lua#L433-L455),
+[lines 978-981](https://github.com/koreader/koreader-base/blob/1c9682506757d5fd30cfa01c5698929dcc35340f/ffi/framebuffer_mxcfb.lua#L978-L981),
+and [lines 1072-1100](https://github.com/koreader/koreader-base/blob/1c9682506757d5fd30cfa01c5698929dcc35340f/ffi/framebuffer_mxcfb.lua#L1072-L1100).
+GLKW16 partial policy remains future work. This source review and the controlled
+packing regressions do not establish a physical Kindle pass.
+
+`native_output_inverted()` returns the latest observed native baseline, or `None`
+before the framebuffer is initialized. That baseline is separate from the
+renderer-owned temporary hardware mode. A real resident wake reobserves native
+metadata before reapplying app night mode. The original startup grayscale is
+retained separately for normal process exit and unwinding panic cleanup, matching
+the restoration approach reviewed in [`koreader` at
+`9040116`, `frontend/device/generic/device.lua`](https://github.com/koreader/koreader/blob/9040116/frontend/device/generic/device.lua).
+Framebuffer destruction best-effort restores only that original grayscale using
+fresh metadata while the app owns display mode, then unmaps memory. A successful
+native-baseline and compensated-raw rewrite commits a yield before Suspended is
+acknowledged. Exit after that yield issues no mode write, preserving any later
+native grayscale change. A failed baseline restoration or unwinding raw rewrite
+retains app cleanup authority until a later successful yield. Wake observation
+retains native ownership; reapplying app night mode reacquires it. The original
+startup value survives this ownership handoff for a later active app exit.
+Uncatchable signals, `SIGKILL`, and aborting
+panics cannot execute Rust cleanup; this patch does not add a global recovery
+mechanism or claim those exits restore native state.
 
 ## Startup framebuffer ownership
 
 `StartupSplash` displays application-supplied raster text and stage images before the main font initialization completes. Its worker updates loading dots at 0.8 Hz within a local region. Startup and the normal renderer never write the framebuffer concurrently: `pause()` stops and joins the worker before backend installation changes the process environment, `resume()` resumes startup feedback, and `finish()` joins it before the application event loop takes over. The splash uses the same software display mode as the application.
 
-Startup orientation lookup has a 500 ms polling budget, validates the supported orientation values, and reaps its child process on success, failure, or timeout. These changes do not alter framebuffer geometry or claim a physical-panel completion deadline.
+Startup images also compensate for the actual kernel inverse observed by their exclusive framebuffer owner. `StartupSplash::show()` receives app desired mode and never enables hardware inversion. Startup orientation lookup has a 500 ms polling budget, validates the supported orientation values, and reaps its child process on success, failure, or timeout. These changes do not alter framebuffer geometry or claim a physical-panel completion deadline.
 
 ### Orientation test process ownership
 
@@ -130,6 +199,15 @@ window before the existing flag checks. Both descriptors still immediately enter
 no additional legacy-kernel or physical-device support claim.
 
 ## Verification boundary
+
+The renderer-owned night-mode patch adds mocked framebuffer regressions for
+hardware 1/2 transitions, unchanged nonmode metadata, software fallback, physical
+pixel equivalence without double inversion, startup restoration, failed writes
+and readbacks, changed layouts/rotation, coherent native-sleep snapshots, fresh
+wake baselines, retained app requests, configuration sealing, and preserved input
+ownership during ordinary night requests. These additions have not yet been
+executed. They require the integrated remote verification run; no physical
+model/firmware acceptance follows from their source alone.
 
 Controlled tests exercise empty/outside rectangles, integer bounds, rotation, region merging, full requests, default AUTO behavior, queue saturation, cross-thread producers, termination, and driver-specific waveform mapping without opening a Kindle framebuffer. Remote ARM cross-compilation checks the code and ABI layout assertions for the intended build target. Neither test class establishes a physical model/firmware support claim, ghosting quality, or panel timing.
 

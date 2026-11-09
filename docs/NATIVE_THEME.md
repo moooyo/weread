@@ -1,116 +1,124 @@
 # Native theme continuity and login exit
 
-Status: the resident system-theme transaction described below has passing
-remote verification and scoped physical system-setting, same-process, and exit
-persistence results. Its visual handoff is not accepted: native Library briefly
-appears during theme changes and wake. [Native reading corrections](NATIVE_FIX_ACCEPTANCE.md) binds those
-results to the current source and artifact. Historical explicit-exit
-theme continuity was verified on the user-identified Scribe 2022 / firmware
-5.19.5 with executable `2fd3d6ab2d64` and launcher `799d5bba5eb9`. Native exit
-synchronization, the next startup, Reader wake, and login close passed the
-scoped physical checks. See [Verification](VERIFICATION.md) and
-[Physical testing](PHYSICAL_TESTING.md) for artifact-specific results.
+Updated: 2026-11-10 (Asia/Shanghai).
 
-## Accepted behavior
+The latest accepted decision aligns application night mode with the reviewed
+KOReader framebuffer implementation. The renderer-owned candidate passed its
+scoped remote software gates and has a matching ARM application `d221d65d`,
+development ZIP `dae7dd52`, and production launcher `a5fec72f`. Its isolated R1
+Scribe 2022 / firmware 5.19.5 trial observed two confirmed theme transitions,
+same-process stock sleep/wake, automatic portrait orientation, and UI exit. The
+user estimated both transitions at at most one second with stable illumination.
+The inconclusive first click and immediate native-restoration guard failure
+remain recorded. An isolated reopen confirmed the saved light startup and clean
+native-dark UI exit, closing the isolated preference-reopen gate. The normal-entry
+update and broader physical gates remain **OPEN**.
+[KOReader night-mode alignment](KOREADER_NIGHT_ALIGNMENT.md) records the current
+contract, pinned source comparison, software failures, exact build identities,
+and the bounded R1 physical observations.
 
-The user requested that leaving a dark WeRead page should also leave the native
-Kindle interface dark. The earlier `2dd3` candidate intentionally used only
-application-local grayscale inversion. Its saved dark preference remained true
-after exit, while the native system remained in `Y8`; it did not erase the
-application preference. The new behavior extends that earlier boundary.
+The installed normal-mode private trial remains the earlier v10 SYSTEM path:
+launcher `15aab68c`, application `8010a217`, and native frame guard `a235b41c`.
+Its scoped Scribe 2022 / firmware 5.19.5 visual, sleep, and UI-exit checks passed.
+The earlier R3 native-Library exposure was subsequently closed by v8/R9 and v10
+observations; the approximately five-second SYSTEM response remains historical
+open evidence. [Native reading corrections](NATIVE_FIX_ACCEPTANCE.md) preserves
+the full hashes, failures, later acceptance, and normal-mode deployment.
 
-The user subsequently requested that the night-mode control change the Kindle
-system setting immediately and remove the local-only informational hint. On a
-supported Kindle, including an explicitly supervised demo or offline session,
-the control now requests a protected resident transaction. Application input
-and rendering pause, the owning launcher briefly continues its captured window
-manager, sets and reads back the system mode, pauses the same manager again,
-and resumes the retained application only after a complete frame and input
-acknowledgment. Ordinary night-mode changes preserve the application process,
-Reader position, and user rotation. Desktop appearance remains local.
+## Accepted current behavior
 
-Known system state is authoritative at startup, wake, and a successful change.
-A rejected or unknown system transaction does not silently become a local-only
-toggle. After a system change commits, preference-mirror failure is reported
-without reverting the system or the displayed state. New application exits do
-not publish a stale preference as a second system transaction. Sleep, USB,
-external termination, unsupported firmware, and unknown modes do not independently
-authorize a theme write. The earlier explicit-exit behavior remains a historical
-artifact-specific result rather than proof of the new transaction.
+Application night mode has its own persisted preference, independent of the
+native day/night setting. A new launch uses that preference. Native observations
+describe the actual output transform; they do not overwrite the application
+preference. Desktop night mode remains local.
 
-The login screen provides an always-available close icon. Closing cancels and
-fences login work, then uses the ordinary application-exit path. It preserves
-stored account material and is distinct from signing out.
+An ordinary toggle stays in the renderer's existing pipeline, keeps touch
+ownership, rewrites every visible pixel, and submits one checked full redraw.
+It does not issue SYSTEM `epdcMode` or dynconf writes, continue the native window
+manager, suspend the application, quiesce background work, or release touch.
+The separate C frame guard is retained for real stock sleep handoff.
 
-## Reviewed native interface
+Hardware inversion is an explicit implementation opt-in for Scribe 2022 /
+firmware 5.19.5, conditional on actual 8bpp, grayscale 1/2, and valid framebuffer
+layout. Other targets use software inversion. This allowlist is not a released
+compatibility claim. A failed hardware write or readback is an error, not a
+successful fallback claim. The hardware-night MTK full-update candidate uses
+the reviewed GCK16 waveform. R1 supplies scoped visible light/dark observations,
+not comprehensive waveform or other-device acceptance.
 
-The official first-generation Scribe 5.20.1 filesystem registers the string
-property `com.lab126.winmgr.epdcMode` in
-`/etc/xdg/awesome/lab126_ligl.lua`. The reviewed grayscale values are `Y8` and
-`Y8INV`. Its successful listener updates EPDC grayscale inversion, persists
-`winmgr.colorinverse.pref`, refreshes the native interface, and publishes the
-theme-change event. A successful command exit alone is insufficient: the
-listener can restore the old property value when the driver rejects a change.
+Manual brightness and device-supported warmth remain unchanged. Ordinary night
+mode has no explicit light setter, application-owned pair of light profiles,
+light-value snapshot/restore, or ambient automatic-brightness action. The prior
+decision to retain native illumination presets applied to the old SYSTEM path
+and is superseded for application toggles. R1's reported stable illumination is
+a scoped user observation; it does not prove that the direct ioctl avoids every
+hardware frontlight transient.
 
-Initial read-only observation on the identified Scribe 2022 / firmware 5.19.5
-confirmed that both the property and persisted configuration returned `Y8`.
-The subsequent `2fd3` physical run changed them to `Y8INV` after explicit exit;
-readback and the user confirmed the dark native interface. This does not
-establish support for other device/firmware combinations.
+The login screen retains its always-available close icon. Closing cancels and
+fences login work, then uses ordinary application exit. It preserves stored
+account material and is distinct from signing out.
 
-The property producer runs in `awesome`, which the supervisor pauses while
-WeRead owns the panel. Therefore the application does not issue theme IPC
-while that producer is paused. The supervisor samples the actual mode before
-taking native control and handles a protected live theme request only after
-the application has suspended its rendering and input. Setter/readback and available persistent-config
-checks use bounded private helper process groups. Failure must still return
-native input and display ownership.
+## Output and lifecycle ownership
 
-## Output compensation
+The backend retains canonical light RGB and applies exactly one software
+transform: `desired_dark XOR observed_kernel_inverse`. Actual kernel inversion
+is read from framebuffer metadata rather than inferred from a saved preference
+or a successful setter exit.
 
-Native EPDC inversion affects direct framebuffer applications. Retaining the
-old software inversion unchanged would invert the next session twice. The
-requested preference remains unchanged; only the software output transform
-compensates for the actual native mode.
-
-| Application target | Native EPDC inversion | Software inversion |
+| Application target | Observed kernel inversion | Software inversion |
 | --- | --- | --- |
-| Dark | Off (`Y8`) | On |
-| Dark | On (`Y8INV`) | Off |
-| Light | On (`Y8INV`) | On |
-| Light | Off (`Y8`) | Off |
+| Dark | Off | On |
+| Dark | On | Off |
+| Light | On | On |
+| Light | Off | Off |
 
-This applies to startup feedback, the initial panel fill, and subsequent RGB
-output. On an identified Kindle with a confirmed native observation, the system
-mode overrides a stale saved application preference. With unknown system state,
-the current appearance is retained; desktop saved preferences remain local.
+Startup feedback compensates in software for the actual native kernel state
+before backend ownership begins. The backend then applies the application's
+saved target. Text, images, overlays, and later dirty regions use the same
+conversion, avoiding separate application and backend inversions.
 
-Startup mode records bind the private supervisor generation and nonce; wake
-records also bind the current sleep cycle. Wake updates compensation before
-restoring touch and the complete retained frame. A known mode cannot silently
-reuse an invalid or missing cycle snapshot.
+Real stock screensaver entry retains the managed lifecycle fence. Before
+acknowledging Suspended, the backend restores the latest observed native
+baseline and rewrites retained RGB with matching compensation. The frame guard
+therefore captures a coherent frame. Wake reobserves actual kernel state,
+reapplies the retained application target, performs the complete frame rewrite,
+and only then acknowledges input readiness.
 
-Global inversion also affects other direct framebuffer applications. Device
-handoffs must communicate a confirmed mode change rather than assuming every
-application uses the same software transform.
+Ordinary exit while the application still owns display mode restores the
+original startup hardware inversion. The native day/night preference is never
+changed by this path, so the original native appearance returns. Exit after a
+completed native yield issues no further mode write and preserves native changes
+made while yielded. The startup restoration value remains separate from the
+fresh sleep/wake baseline. Uncatchable termination cannot be treated as a proven
+cleanup result.
 
-## Verification boundaries
+## Historical system-setting evidence
 
-Controlled tests cover output truth tables, early startup ancestry and record
-checks, same-cycle wake ordering, ordinary-exit intent, IPC acceptance and
-readback, helper cleanup, failure recovery, and login close interaction.
-Successful mock tests do not establish native panel appearance or persistence
-across a real device restart.
+The reviewed first-generation Scribe 5.20.1 native filesystem exposes
+`com.lab126.winmgr.epdcMode` values `Y8` and `Y8INV`. Its listener can update the
+driver, persist `winmgr.colorinverse.pref`, refresh native UI, and publish a
+theme event; command exit alone does not establish a committed setting. This
+interface supported the older SYSTEM implementation and is not an ordinary
+night-mode setter in the current candidate.
 
-The current resident transaction, TOC alignment correction, and default SSH
-display environment have their own remote and physical results, with a still-open
-native-Library exposure correction. Earlier
-`2fd3/799d` and resource-review `381a` observations must not be retagged as
-acceptance of these later changes.
+Executable `2fd3d6ab2d64` and launcher `799d5bba5eb9` established scoped native
+dark appearance after explicit exit, compensated next startup, same-process
+Reader wake, and login close on the identified Scribe 2022 / firmware 5.19.5.
+Controlled busy/code/key/error close cases were additional software evidence,
+not separate physical observations. Later v8/v10 tests and deployment retain
+their own identities in [Native reading corrections](NATIVE_FIX_ACCEPTANCE.md).
+None of these results verifies the new renderer-owned implementation.
 
-The normal-entry physical run verified native dark appearance after exit, the
-next startup without double inversion, Reader screen-saver sleep/wake with the
-same PID and page, and the login close icon. Busy/code/key/error close states
-remain covered by controlled tests rather than separate physical observations.
-Reading back the persisted setting is not a full-device-reboot test. The
-existing user-deferred USB gate is unchanged.
+The remote software and ARM/package gates have passed for their recorded frozen
+inputs. R1 used an isolated installation, leaving the normal v10 entry unchanged.
+It observed native dark restoration after UI exit, but an immediate operator
+guard reported `native-awesome-not-running` without a process state. A later
+read-only observation found the same original native manager running normally;
+the initial failure and its unproven cause are preserved. A subsequent isolated
+reopen passed its first native-after check and closed the scoped preference-reopen
+gate; it does not erase the earlier failure. The normal-entry update and remaining
+physical scope stay open. Reading a
+persisted setting is not a full-device-reboot test.
+Automatic 0/180-degree orientation remains the accepted scope; manual rotation
+is disabled, USB is deferred, and no new model or firmware compatibility is
+claimed. Overall acceptance remains incomplete.

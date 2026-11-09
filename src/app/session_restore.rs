@@ -16,12 +16,6 @@ pub(super) struct LauncherContext {
     token: String,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct NativeThemeResult {
-    pub confirmed: bool,
-    pub inverted: bool,
-}
-
 #[derive(Clone, Copy)]
 pub(super) enum ManagedMarker {
     SleepRequest,
@@ -180,234 +174,6 @@ impl LauncherContext {
         self.write("managed-sleep-available")
     }
 
-    pub(super) fn native_theme_advertised(&self) -> Result<bool> {
-        self.validate_managed_owner()?;
-        self.matches("native-theme-available")
-    }
-
-    pub(super) fn native_theme_available(&self) -> Result<bool> {
-        Ok(self.native_theme_advertised()?
-            && !self.matches("ordinary-exit")?
-            && !self.matches("sleep-request")?
-            && !self.native_theme_interrupted()?)
-    }
-
-    pub(super) fn native_theme_interrupted(&self) -> Result<bool> {
-        self.validate_managed_owner()?;
-        self.matches("native-theme-interrupt")
-    }
-
-    /// The caller has already received the renderer's display/input release.
-    /// FIFO bytes only wake the supervisor; the private record authorizes work.
-    pub(super) fn request_native_theme(&self, sequence: u64, inverted: bool) -> Result<()> {
-        ensure!(sequence > 0, "The native theme sequence must be positive");
-        ensure!(
-            self.native_theme_available()?,
-            "The native theme request is unavailable for this application owner"
-        );
-        for name in [
-            "native-theme-result",
-            "native-theme-ready",
-            "native-theme-portrait-calibration",
-        ] {
-            self.remove_native_theme_record(name)?;
-        }
-        self.write_record(
-            "native-theme-request",
-            &format!(
-                "{}:{sequence}:{}",
-                self.record(),
-                if inverted { "Y8INV" } else { "Y8" }
-            ),
-        )?;
-        self.notify_native_theme("request", sequence)
-    }
-
-    pub(super) fn native_theme_result(&self, sequence: u64) -> Result<Option<NativeThemeResult>> {
-        ensure!(sequence > 0, "The native theme sequence must be positive");
-        self.validate_managed_owner()?;
-        if self.matches("ordinary-exit")? {
-            return Ok(None);
-        }
-        let prefix = format!("{}:{sequence}:", self.record());
-        let Some(request) = read_private_record(&self.directory.join("native-theme-request"))?
-        else {
-            return Ok(None);
-        };
-        let requested = match request.strip_prefix(&prefix) {
-            Some("Y8") => false,
-            Some("Y8INV") => true,
-            _ => return Ok(None),
-        };
-        let Some(value) = read_private_record(&self.directory.join("native-theme-result"))? else {
-            return Ok(None);
-        };
-        let Some(value) = value.strip_prefix(&prefix) else {
-            return Ok(None);
-        };
-        let mut fields = value.split(':');
-        let confirmed = match fields.next() {
-            Some("ok") => true,
-            Some("error") => false,
-            _ => return Ok(None),
-        };
-        let inverted = match fields.next() {
-            Some("Y8") => false,
-            Some("Y8INV") => true,
-            _ => return Ok(None),
-        };
-        if fields.next().is_some() {
-            return Ok(None);
-        }
-        ensure!(
-            !confirmed || inverted == requested,
-            "The confirmed native theme result does not match its requested target"
-        );
-        Ok(Some(NativeThemeResult {
-            confirmed,
-            inverted,
-        }))
-    }
-
-    pub(super) fn native_theme_portrait_calibration(
-        &self,
-        sequence: u64,
-    ) -> Result<Option<crate::platform::NativePortraitCalibration>> {
-        ensure!(
-            sequence > 0,
-            "The native theme portrait sequence must be positive"
-        );
-        self.validate_managed_owner()?;
-        let result = self.native_theme_result(sequence)?;
-        if result.is_none() || self.native_theme_interrupted()? {
-            return Ok(None);
-        }
-        let path = self.directory.join("native-theme-portrait-calibration");
-        // Optional missing, fixed, invalid or stale observations retain the
-        // immutable startup scanout anchor and the prior presentation mapping.
-        let Ok(Some(record)) = read_private_record(&path) else {
-            return Ok(None);
-        };
-        let prefix = format!("{}:{sequence}:", self.record());
-        let Some(payload) = record.strip_prefix(&prefix) else {
-            return Ok(None);
-        };
-        let Some(calibration) = crate::platform::NativePortraitCalibration::parse_payload(payload)
-        else {
-            return Ok(None);
-        };
-        self.validate_managed_owner()?;
-        if self.native_theme_result(sequence)? != result
-            || self.native_theme_interrupted()?
-            || read_private_record(&path).ok().flatten().as_deref() != Some(record.as_str())
-        {
-            return Ok(None);
-        }
-        Ok(Some(calibration))
-    }
-
-    /// Publish only after the retained frame and touch input are running again.
-    pub(super) fn acknowledge_native_theme(&self, sequence: u64) -> Result<()> {
-        ensure!(
-            !self.native_theme_interrupted()?,
-            "Native power ownership interrupted the theme acknowledgement"
-        );
-        ensure!(
-            self.native_theme_result(sequence)?.is_some(),
-            "The native theme acknowledgement has no current confirmed observation"
-        );
-        self.write_record(
-            "native-theme-ready",
-            &format!("{}:{sequence}", self.record()),
-        )
-    }
-
-    pub(super) fn native_theme_committed(&self, sequence: u64) -> Result<bool> {
-        ensure!(
-            sequence > 0,
-            "The native theme commit sequence must be positive"
-        );
-        self.validate_managed_owner()?;
-        let ready = format!("{}:{sequence}", self.record());
-        let ready_path = self.directory.join("native-theme-ready");
-        if read_private_record(&ready_path)?.as_deref() != Some(ready.as_str()) {
-            return Ok(false);
-        }
-        let request_path = self.directory.join("native-theme-request");
-        if let Some(request) = read_private_record(&request_path)? {
-            let prefix = format!("{}:{sequence}:", self.record());
-            ensure!(
-                matches!(request.strip_prefix(&prefix), Some("Y8" | "Y8INV")),
-                "The native theme request was replaced before its supervisor commit"
-            );
-            return Ok(false);
-        }
-        // The supervisor unlinks this exact request only after its own running
-        // phase is restored. Recheck the private owner and the same ready proof.
-        self.validate_managed_owner()?;
-        Ok(!self.matches("ordinary-exit")?
-            && !self.native_theme_interrupted()?
-            && read_private_record(&request_path)?.is_none()
-            && read_private_record(&ready_path)?.as_deref() == Some(ready.as_str()))
-    }
-
-    fn remove_native_theme_record(&self, name: &'static str) -> Result<()> {
-        self.validate_managed_owner()?;
-        if read_private_record(&self.directory.join(name))?
-            .is_some_and(|value| value.starts_with(&format!("{}:", self.record())))
-        {
-            std::fs::remove_file(self.directory.join(name))?;
-        }
-        Ok(())
-    }
-
-    #[cfg(target_os = "linux")]
-    fn notify_native_theme(&self, action: &str, sequence: u64) -> Result<()> {
-        use std::io::Write;
-        use std::os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt};
-
-        self.validate_managed_owner()?;
-        let path = self.directory.join("power-events");
-        let before = std::fs::symlink_metadata(&path)?;
-        // SAFETY: geteuid only reads the process identity.
-        let owner = unsafe { libc::geteuid() };
-        ensure!(
-            before.file_type().is_fifo() && before.uid() == owner && before.mode() & 0o077 == 0,
-            "The native theme notification pipe is not private to this process owner"
-        );
-        let mut pipe = std::fs::OpenOptions::new()
-            .write(true)
-            .custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW | libc::O_CLOEXEC)
-            .open(path)?;
-        let opened = pipe.metadata()?;
-        ensure!(
-            opened.file_type().is_fifo()
-                && opened.uid() == owner
-                && opened.mode() & 0o077 == 0
-                && opened.dev() == before.dev()
-                && opened.ino() == before.ino(),
-            "The native theme notification pipe changed before it was opened"
-        );
-        let hint = format!(
-            "_weread_native_theme_{action} {} {sequence}\n",
-            self.generation
-        );
-        ensure!(
-            hint.len() <= 128,
-            "The native theme notification is too large"
-        );
-        ensure!(
-            pipe.write(hint.as_bytes())? == hint.len(),
-            "The native theme notification was not written atomically"
-        );
-        Ok(())
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    fn notify_native_theme(&self, _: &str, _: u64) -> Result<()> {
-        anyhow::bail!("Native theme notifications require the Linux Kindle supervisor")
-    }
-
     pub(super) fn native_output_mode(&self) -> Result<Option<bool>> {
         self.validate_managed_owner()?;
         if self.matches("ordinary-exit")? {
@@ -419,15 +185,26 @@ impl LauncherContext {
     pub(super) fn managed_native_output_mode(&self, cycle: u64) -> Result<Option<bool>> {
         ensure!(cycle > 0, "The native output cycle must be positive");
         self.validate_managed_owner()?;
-        if self.matches("ordinary-exit")?
-            || self.managed_cycle(ManagedMarker::WakeRequest)? != Some(cycle)
-        {
+        ensure!(
+            !self.matches("ordinary-exit")?
+                && self.managed_cycle(ManagedMarker::WakeRequest)? == Some(cycle),
+            "The native output snapshot is not authorized by the current wake cycle"
+        );
+        let Some(value) = read_private_record(&self.directory.join("managed-native-epdc-mode"))?
+        else {
             return Ok(None);
-        }
-        self.native_mode_record(
-            "managed-native-epdc-mode",
-            &format!("{}:{cycle}:", self.record()),
-        )
+        };
+        let prefix = format!("{}:{cycle}:", self.record());
+        let mode = match value.strip_prefix(&prefix) {
+            Some("Y8") => Some(false),
+            Some("Y8INV") => Some(true),
+            _ => None,
+        };
+        ensure!(
+            mode.is_some(),
+            "The native output snapshot does not match the current wake cycle"
+        );
+        Ok(mode)
     }
 
     fn native_mode_record(&self, name: &'static str, prefix: &str) -> Result<Option<bool>> {
@@ -475,7 +252,7 @@ impl LauncherContext {
         Ok(Some(calibration))
     }
 
-    pub(super) fn native_dark_target(&self) -> Result<Option<bool>> {
+    fn native_dark_target(&self) -> Result<Option<bool>> {
         self.validate_managed_owner()?;
         let Some(value) = read_private_record(&self.directory.join("native-dark-target"))? else {
             return Ok(None);
@@ -487,22 +264,12 @@ impl LauncherContext {
         })
     }
 
-    pub(super) fn mark_explicit_exit(&self, dark_target: Option<bool>) -> Result<()> {
+    pub(super) fn mark_explicit_exit(&self) -> Result<()> {
         self.validate_managed_owner()?;
-        // A failed previous quit cannot lend its old appearance intent to a new
-        // exit whose native base is unknown or whose preference has changed.
+        // Remove an owned record left by an older launcher protocol. App
+        // appearance must never become a native output target during exit.
         self.remove_native_dark_target()?;
-        if let Some(target) = dark_target {
-            self.write_record(
-                "native-dark-target",
-                &format!("{}:{}", self.record(), u8::from(target)),
-            )?;
-        }
-        let result = self.write("ordinary-exit");
-        if result.is_err() {
-            let _ = self.remove_native_dark_target();
-        }
-        result
+        self.write("ordinary-exit")
     }
 
     pub(super) fn clear_explicit_exit(&self) -> Result<()> {
@@ -737,9 +504,9 @@ impl App {
     /// Signal-driven shutdown must not call this method.
     pub(crate) fn mark_explicit_exit(&self) -> Result<()> {
         if let Some(context) = LauncherContext::from_environment()? {
-            // Native changes commit in their own acknowledged transaction.
-            // Closing cannot publish a stale preference as a new system write.
-            context.mark_explicit_exit(None)?;
+            // Renderer teardown restores the startup kernel inversion. An exit
+            // marker cannot turn app appearance into a new native output target.
+            context.mark_explicit_exit()?;
         }
         Ok(())
     }

@@ -1,4 +1,5 @@
 mod ffi;
+mod night_mode;
 
 use crate::refresh::{RefreshWaveform, ResolvedRefresh};
 use std::cell::Cell;
@@ -6,13 +7,16 @@ use std::ops::Range;
 use std::os::fd::AsRawFd;
 
 use ffi::{
-    EPDC_FLAG_FORCE_MONOCHROME, FBIOGET_FSCREENINFO, FBIOGET_VSCREENINFO, FbFixScreeninfo,
-    FbVarScreeninfo, MXCFB_SEND_UPDATE, MXCFB_SEND_UPDATE_MTK, MXCFB_SEND_UPDATE_REX,
-    MXCFB_SEND_UPDATE_ZELDA, MXCFB_WAIT_FOR_UPDATE_COMPLETE, TEMP_USE_AMBIENT, UPDATE_MODE_FULL,
-    UPDATE_MODE_PARTIAL, UpdateMarkerData, UpdateRect, UpdateRequest, UpdateRequestMtk,
-    UpdateRequestRex, UpdateRequestZelda, WAVEFORM_MODE_A2_LEGACY, WAVEFORM_MODE_A2_MODERN,
-    WAVEFORM_MODE_AUTO, WAVEFORM_MODE_DU, WAVEFORM_MODE_GC16,
+    EPDC_FLAG_FORCE_MONOCHROME, FBIOGET_FSCREENINFO, FBIOGET_VSCREENINFO, FBIOPUT_VSCREENINFO,
+    FbFixScreeninfo, FbVarScreeninfo, MXCFB_SEND_UPDATE, MXCFB_SEND_UPDATE_MTK,
+    MXCFB_SEND_UPDATE_REX, MXCFB_SEND_UPDATE_ZELDA, MXCFB_WAIT_FOR_UPDATE_COMPLETE,
+    TEMP_USE_AMBIENT, UPDATE_MODE_FULL, UPDATE_MODE_PARTIAL, UpdateMarkerData, UpdateRect,
+    UpdateRequest, UpdateRequestMtk, UpdateRequestRex, UpdateRequestZelda, WAVEFORM_MODE_A2_LEGACY,
+    WAVEFORM_MODE_A2_MODERN, WAVEFORM_MODE_AUTO, WAVEFORM_MODE_DU, WAVEFORM_MODE_GC16,
+    WAVEFORM_MODE_GCK16_MTK,
 };
+pub(crate) use night_mode::NightModeApplied;
+use night_mode::{ModeIo, ModeSnapshot, NightModeState};
 
 /// Which MXCFB update ioctl this kernel accepts, varies with the Kindle model
 ///
@@ -56,6 +60,7 @@ pub(crate) struct Framebuffer {
     /// The update ioctl variant this kernel accepts, cached after the first
     /// successful refresh. `None` until then.
     update_variant: Cell<Option<UpdateVariant>>,
+    night_mode: NightModeState,
 }
 
 // SAFETY: The mmap is process-wide and we only access it from the event loop thread.
@@ -67,6 +72,11 @@ impl Framebuffer {
     /// This works on any Kindle model - the resolution and stride are read at
     /// runtime rather than being hardcoded.
     pub(crate) fn open() -> std::io::Result<Self> {
+        Self::open_with_hardware_inversion(false)
+    }
+
+    /// Hardware inversion is restricted by both application approval and GETVAR.
+    pub(crate) fn open_with_hardware_inversion(enabled: bool) -> std::io::Result<Self> {
         let file = std::fs::OpenOptions::new()
             .read(true)
             .write(true)
@@ -74,29 +84,9 @@ impl Framebuffer {
 
         let fd = file.as_raw_fd();
 
-        let mut vinfo = FbVarScreeninfo::default();
-        if unsafe {
-            libc::ioctl(
-                fd,
-                FBIOGET_VSCREENINFO as _,
-                &mut vinfo as *mut _ as *mut libc::c_void,
-            )
-        } == -1
-        {
-            return Err(std::io::Error::last_os_error());
-        }
-
-        let mut finfo = FbFixScreeninfo::default();
-        if unsafe {
-            libc::ioctl(
-                fd,
-                FBIOGET_FSCREENINFO as _,
-                &mut finfo as *mut _ as *mut libc::c_void,
-            )
-        } == -1
-        {
-            return Err(std::io::Error::last_os_error());
-        }
+        let snapshot = FramebufferModeIo(&file).read()?;
+        let vinfo = snapshot.variable;
+        let finfo = snapshot.fixed;
 
         let width = vinfo.xres;
         let height = vinfo.yres;
@@ -153,7 +143,40 @@ impl Framebuffer {
             stride,
             bytes_per_pixel,
             update_variant: Cell::new(None),
+            night_mode: NightModeState::new(snapshot, enabled),
         })
+    }
+
+    pub(crate) fn apply_night_mode(&mut self, desired: bool) -> std::io::Result<NightModeApplied> {
+        self.night_mode
+            .apply(&mut FramebufferModeIo(&self.file), desired)
+    }
+
+    pub(crate) fn applied_night_mode(&self) -> Option<bool> {
+        self.night_mode.applied_desired()
+    }
+
+    pub(crate) fn native_output_inverted(&self) -> bool {
+        self.night_mode.native_inverse()
+    }
+
+    pub(crate) fn software_inversion(&self, desired: bool) -> bool {
+        self.night_mode.software_inverse(desired)
+    }
+
+    /// Returns the compensation for the retained, already presented app mode.
+    pub(crate) fn prepare_native_snapshot(&mut self) -> std::io::Result<bool> {
+        self.night_mode
+            .prepare_native_snapshot(&mut FramebufferModeIo(&self.file))
+    }
+
+    pub(crate) fn yield_native_display(&mut self) {
+        self.night_mode.yield_native_ownership();
+    }
+
+    pub(crate) fn observe_native_night_mode(&mut self) -> std::io::Result<()> {
+        self.night_mode
+            .observe_native(&mut FramebufferModeIo(&self.file))
     }
 
     /// Read current scanout rotation without changing native display settings.
@@ -306,7 +329,23 @@ impl Framebuffer {
     /// Issue `MXCFB_SEND_UPDATE_MTK` (96-byte struct, MediaTek devices).
     /// Returns whether the ioctl succeeded.
     fn send_update_mtk(&self, region: UpdateRect, waveform: u32, mode: u32) -> bool {
-        let update = UpdateRequestMtk {
+        let update = self.mtk_update_request(region, waveform, mode);
+        self.send_update_ioctl(MXCFB_SEND_UPDATE_MTK, &update)
+    }
+
+    fn mtk_update_request(&self, region: UpdateRect, waveform: u32, mode: u32) -> UpdateRequestMtk {
+        // Map at final packing so the uncached first MTK probe uses GCK16 too.
+        // Global grayscale inversion is already active; no EPDC inversion flag is added.
+        // https://github.com/koreader/koreader-base/blob/1c9682506757d5fd30cfa01c5698929dcc35340f/ffi/framebuffer_mxcfb.lua#L433-L455
+        let waveform = if self.night_mode.hardware_inverse()
+            && waveform == WAVEFORM_MODE_GC16
+            && mode == UPDATE_MODE_FULL
+        {
+            WAVEFORM_MODE_GCK16_MTK
+        } else {
+            waveform
+        };
+        UpdateRequestMtk {
             update_region: region,
             waveform_mode: waveform,
             update_mode: mode,
@@ -318,8 +357,7 @@ impl Framebuffer {
                 0
             },
             ..Default::default()
-        };
-        self.send_update_ioctl(MXCFB_SEND_UPDATE_MTK, &update)
+        }
     }
 
     /// Issue `MXCFB_SEND_UPDATE_ZELDA` (88-byte struct, KOA2/KOA3 — Oasis 2/3).
@@ -444,6 +482,12 @@ impl Framebuffer {
 
 impl Drop for Framebuffer {
     fn drop(&mut self) {
+        if let Err(error) = self
+            .night_mode
+            .restore_startup(&mut FramebufferModeIo(&self.file))
+        {
+            log::error!("failed to restore startup framebuffer grayscale: {error}");
+        }
         unsafe { libc::munmap(self.map as *mut libc::c_void, self.len) };
     }
 }
@@ -473,6 +517,34 @@ fn read_variable_info(file: &std::fs::File) -> std::io::Result<FbVarScreeninfo> 
     Ok(info)
 }
 
+struct FramebufferModeIo<'a>(&'a std::fs::File);
+
+impl ModeIo for FramebufferModeIo<'_> {
+    fn read(&mut self) -> std::io::Result<ModeSnapshot> {
+        let variable = read_variable_info(self.0)?;
+        let mut fixed = FbFixScreeninfo::default();
+        // SAFETY: The initialized structure matches FBIOGET_FSCREENINFO and
+        // remains live for the ioctl; the kernel does not retain its pointer.
+        if unsafe { libc::ioctl(self.0.as_raw_fd(), FBIOGET_FSCREENINFO as _, &mut fixed) } < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(ModeSnapshot { variable, fixed })
+    }
+
+    fn write(&mut self, variable: &FbVarScreeninfo) -> std::io::Result<()> {
+        // The Linux ioctl may normalize its argument. Only the paired fresh
+        // GETVAR/GETFIX result is accepted as the observed hardware state.
+        let mut requested = *variable;
+        // SAFETY: The complete Linux fb_var_screeninfo layout is initialized
+        // and remains live for FBIOPUT_VSCREENINFO, which retains no pointer.
+        if unsafe { libc::ioctl(self.0.as_raw_fd(), FBIOPUT_VSCREENINFO as _, &mut requested) } < 0
+        {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(())
+    }
+}
+
 fn validated_portrait_rotation(rotation: u32) -> std::io::Result<u32> {
     if rotation <= 3 {
         Ok(rotation)
@@ -498,8 +570,7 @@ pub(crate) fn probe_framebuffer_rotation() -> std::io::Result<u32> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn a_rejected_wake_update_is_not_acknowledged_as_a_restored_panel() {
+    fn update_test_framebuffer(night_mode: NightModeState) -> Framebuffer {
         // This is anonymous memory and a non-device file; no Kindle is probed.
         let map = unsafe {
             libc::mmap(
@@ -512,7 +583,7 @@ mod tests {
             )
         };
         assert_ne!(map, libc::MAP_FAILED);
-        let framebuffer = Framebuffer {
+        Framebuffer {
             file: std::fs::File::open("/dev/null").unwrap(),
             map: map.cast::<u8>(),
             len: 4096,
@@ -521,7 +592,123 @@ mod tests {
             stride: 2,
             bytes_per_pixel: 1,
             update_variant: Cell::new(None),
+            night_mode,
+        }
+    }
+
+    struct ModeFixture(ModeSnapshot);
+
+    impl ModeIo for ModeFixture {
+        fn read(&mut self) -> std::io::Result<ModeSnapshot> {
+            Ok(self.0)
+        }
+
+        fn write(&mut self, variable: &FbVarScreeninfo) -> std::io::Result<()> {
+            self.0.variable = *variable;
+            Ok(())
+        }
+    }
+
+    fn observed_night_mode(startup: u32, enabled: bool, desired: bool) -> NightModeState {
+        let snapshot = ModeSnapshot {
+            variable: FbVarScreeninfo {
+                xres: 2,
+                yres: 2,
+                xres_virtual: 2,
+                yres_virtual: 2,
+                bits_per_pixel: 8,
+                grayscale: startup,
+                ..Default::default()
+            },
+            fixed: FbFixScreeninfo {
+                line_length: 2,
+                smem_len: 4096,
+                ..Default::default()
+            },
         };
+        let mut mode = NightModeState::new(snapshot, enabled);
+        mode.apply(&mut ModeFixture(snapshot), desired).unwrap();
+        mode
+    }
+
+    #[test]
+    fn mtk_night_full_requests_pack_gck16_before_the_driver_probe_is_cached() {
+        let framebuffer = update_test_framebuffer(observed_night_mode(1, true, true));
+        assert!(framebuffer.update_variant.get().is_none());
+        assert!(!framebuffer.native_output_inverted());
+        assert!(framebuffer.night_mode.hardware_inverse());
+        for cached in [false, true] {
+            if cached {
+                framebuffer.update_variant.set(Some(UpdateVariant::Mtk));
+            }
+            let request = framebuffer.mtk_update_request(
+                UpdateRect {
+                    top: 0,
+                    left: 0,
+                    width: 2,
+                    height: 2,
+                },
+                WAVEFORM_MODE_GC16,
+                UPDATE_MODE_FULL,
+            );
+            assert_eq!(request.waveform_mode, 8);
+            assert_eq!(request.update_mode, UPDATE_MODE_FULL);
+            assert_eq!(
+                request.flags, 0,
+                "Global inversion must not be applied twice"
+            );
+            assert_eq!(
+                (request.update_region.width, request.update_region.height),
+                (2, 2)
+            );
+        }
+    }
+
+    #[test]
+    fn mtk_day_and_software_only_full_requests_keep_gc16() {
+        for (startup, hardware_enabled, desired) in
+            [(2, true, false), (2, false, true), (1, false, true)]
+        {
+            let framebuffer =
+                update_test_framebuffer(observed_night_mode(startup, hardware_enabled, desired));
+            let request = framebuffer.mtk_update_request(
+                UpdateRect::default(),
+                WAVEFORM_MODE_GC16,
+                UPDATE_MODE_FULL,
+            );
+            assert_eq!(request.waveform_mode, 2);
+            assert_eq!(request.flags, 0);
+        }
+    }
+
+    #[test]
+    fn mtk_partial_and_other_waveforms_keep_their_requested_value() {
+        let framebuffer = update_test_framebuffer(observed_night_mode(1, true, true));
+        for (waveform, mode, flags) in [
+            (WAVEFORM_MODE_GC16, UPDATE_MODE_PARTIAL, 0),
+            (WAVEFORM_MODE_AUTO, UPDATE_MODE_FULL, 0),
+            (
+                WAVEFORM_MODE_DU,
+                UPDATE_MODE_FULL,
+                EPDC_FLAG_FORCE_MONOCHROME,
+            ),
+        ] {
+            let request = framebuffer.mtk_update_request(UpdateRect::default(), waveform, mode);
+            assert_eq!(request.waveform_mode, waveform);
+            assert_eq!(request.update_mode, mode);
+            assert_eq!(request.flags, flags);
+        }
+    }
+
+    #[test]
+    fn a_rejected_wake_update_is_not_acknowledged_as_a_restored_panel() {
+        let framebuffer = update_test_framebuffer(NightModeState::new(
+            ModeSnapshot {
+                variable: FbVarScreeninfo::default(),
+                fixed: FbFixScreeninfo::default(),
+            },
+            false,
+        ));
         assert!(framebuffer.refresh_full_checked().is_err());
         assert!(matches!(
             framebuffer.update_variant.get(),
@@ -557,5 +744,12 @@ mod tests {
             waveform_for_driver(RefreshWaveform::Gc16, Some(UpdateVariant::Mtk)),
             2
         );
+        for variant in [
+            UpdateVariant::Legacy,
+            UpdateVariant::Rex,
+            UpdateVariant::Zelda,
+        ] {
+            assert_eq!(waveform_for_driver(RefreshWaveform::Gc16, Some(variant)), 2);
+        }
     }
 }

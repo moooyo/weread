@@ -21,7 +21,9 @@ use crate::managed_sleep::ManagedSleepControl;
 use crate::orientation::{NativeOrientationHandle, OrientationRequest, PortraitController};
 use crate::power::{arm_wakealarm, find_wakealarm, suspend_to_mem};
 use crate::refresh::{PendingRefresh, PhysicalRect, RefreshHandle};
-use crate::render_control::{GrayMode, GrayRenderer, RenderHandle};
+use crate::render_control::{
+    GrayMode, GrayRenderer, NightModeConfig, NightModeControl, RenderHandle,
+};
 use crate::touch::{TouchInput, TransitionDrain, has_accelerometer};
 use crate::wakeup::{self, KindleEventLoopProxy, Queue, Wakeup};
 use crate::{OnWakeCallback, WakeSchedule};
@@ -41,7 +43,7 @@ pub(crate) struct KindlePlatform {
     pub(crate) wake_schedule: Arc<Mutex<Option<WakeSchedule>>>,
     pub(crate) on_wake: OnWakeCallback,
     black_and_white: Arc<AtomicBool>,
-    dark_mode: Arc<AtomicBool>,
+    night_mode: Arc<NightModeControl>,
     managed_sleep: Arc<ManagedSleepControl>,
     rotation: Arc<AtomicU32>,
     native_orientation: Arc<Mutex<OrientationRequest>>,
@@ -68,7 +70,7 @@ impl KindlePlatform {
             wake_schedule,
             on_wake,
             black_and_white,
-            dark_mode: Arc::new(AtomicBool::new(false)),
+            night_mode: Arc::new(NightModeControl::default()),
             managed_sleep: Arc::new(ManagedSleepControl::default()),
             rotation,
             native_orientation: Arc::new(Mutex::new(OrientationRequest::default())),
@@ -88,7 +90,7 @@ impl KindlePlatform {
 
     pub(crate) fn render_handle(&self) -> RenderHandle {
         RenderHandle {
-            dark_mode: self.dark_mode.clone(),
+            night_mode: self.night_mode.clone(),
             managed_sleep: self.managed_sleep.clone(),
             wake: self.wakeup.write.clone(),
             quit: self.quit_flag.clone(),
@@ -105,9 +107,9 @@ impl KindlePlatform {
         }
     }
 
-    fn output_mode(&self) -> GrayMode {
+    fn output_mode(&self, software_inverse: bool) -> GrayMode {
         GrayMode {
-            dark_mode: self.dark_mode.load(Ordering::Acquire),
+            dark_mode: software_inverse,
             black_and_white: self.black_and_white.load(Ordering::Relaxed),
         }
     }
@@ -144,7 +146,9 @@ impl KindlePlatform {
                 .lock()
                 .expect("refresh queue poisoned")
                 .is_empty();
-        let nothing_pending = nothing_pending && self.output_mode() == applied_mode;
+        let nothing_pending = nothing_pending
+            && frame_buffer.applied_night_mode() == Some(self.night_mode.desired())
+            && self.black_and_white.load(Ordering::Relaxed) == applied_mode.black_and_white;
         if last_interaction.elapsed() < schedule.stay_awake || !nothing_pending {
             return false;
         }
@@ -221,20 +225,39 @@ impl Platform for KindlePlatform {
         }
         let _quit_on_exit = QuitOnExit(self.quit_flag.clone(), self.managed_sleep.clone());
         self.initialized.store(true, Ordering::Release);
-        let mut frame_buffer = Framebuffer::open()
-            .map_err(|e| PlatformError::Other(format!("failed to open /dev/fb0: {e}")))?;
+        let night_mode_config = self.night_mode.lock_configuration();
+        let mut frame_buffer = Framebuffer::open_with_hardware_inversion(
+            night_mode_config == NightModeConfig::HardwareIfSupported,
+        )
+        .map_err(|e| PlatformError::Other(format!("failed to open /dev/fb0: {e}")))?;
+        self.night_mode
+            .observe_native_baseline(frame_buffer.native_output_inverted());
 
         let mut touch_input = Some(
             TouchInput::open(frame_buffer.width, frame_buffer.height)
                 .map_err(|e| PlatformError::Other(format!("failed to open touch input: {e}")))?,
         );
 
-        let initial_mode = self.output_mode();
+        let initial_night_mode = frame_buffer
+            .apply_night_mode(self.night_mode.desired())
+            .map_err(|error| {
+                PlatformError::Other(format!("failed to apply initial night mode: {error}"))
+            })?;
+        let initial_mode = self.output_mode(initial_night_mode.software_inverse);
         frame_buffer.fill(initial_mode.paper());
         frame_buffer.refresh_full();
 
         let width = frame_buffer.width as usize;
-        let mut rgb_buffer = vec![Rgb8Pixel::default(); width * frame_buffer.height as usize];
+        // The retained frame must describe the paper already filled above even
+        // if managed sleep arrives before Slint's first application frame.
+        let mut rgb_buffer = vec![
+            Rgb8Pixel {
+                r: 255,
+                g: 255,
+                b: 255,
+            };
+            width * frame_buffer.height as usize
+        ];
         let mut gray_renderer = GrayRenderer::new(width, initial_mode);
 
         let (panel_width, panel_height) = (frame_buffer.width, frame_buffer.height);
@@ -264,7 +287,8 @@ impl Platform for KindlePlatform {
                 &mut portrait,
                 &mut input_generation,
                 &self.window,
-            ) {
+                || prepare_native_display(&mut frame_buffer, &mut gray_renderer, &rgb_buffer),
+            )? {
                 restore_full_frame = false;
                 presentation_barrier = false;
                 post_frame_input.clear();
@@ -276,6 +300,7 @@ impl Platform for KindlePlatform {
                     panel_width,
                     panel_height,
                 )? {
+                    observe_native_display(&mut frame_buffer, &self.night_mode)?;
                     restore_full_frame = true;
                     presentation_barrier = true;
                 }
@@ -395,7 +420,8 @@ impl Platform for KindlePlatform {
                 &mut portrait,
                 &mut input_generation,
                 &self.window,
-            ) {
+                || prepare_native_display(&mut frame_buffer, &mut gray_renderer, &rgb_buffer),
+            )? {
                 restore_full_frame = false;
                 presentation_barrier = false;
                 post_frame_input.clear();
@@ -408,6 +434,7 @@ impl Platform for KindlePlatform {
                 panel_width,
                 panel_height,
             )? {
+                observe_native_display(&mut frame_buffer, &self.night_mode)?;
                 restore_full_frame = true;
                 presentation_barrier = true;
             }
@@ -499,7 +526,8 @@ impl Platform for KindlePlatform {
                 &mut portrait,
                 &mut input_generation,
                 &self.window,
-            ) {
+                || prepare_native_display(&mut frame_buffer, &mut gray_renderer, &rgb_buffer),
+            )? {
                 restore_full_frame = false;
                 presentation_barrier = false;
                 post_frame_input.clear();
@@ -508,8 +536,15 @@ impl Platform for KindlePlatform {
             if portrait.input_gated() {
                 continue;
             }
-            let output_mode = self.output_mode();
-            let mode_changed = output_mode != gray_renderer.mode();
+            let night_mode = frame_buffer
+                .apply_night_mode(self.night_mode.desired())
+                .map_err(|error| {
+                    PlatformError::Other(format!("failed to apply night mode: {error}"))
+                })?;
+            let output_mode = self.output_mode(night_mode.software_inverse);
+            // Hardware inversion can change while the software transform stays
+            // identical. It still needs a complete framebuffer rewrite and FULL.
+            let mode_changed = night_mode.changed || output_mode != gray_renderer.mode();
             let force_full = restore_full_frame
                 || presentation_barrier
                 || (post_frame_input.waiting && mode_changed);
@@ -561,7 +596,7 @@ impl Platform for KindlePlatform {
                 (panel_width, panel_height),
                 dirty_region,
                 output_mode,
-                force_full,
+                force_full || mode_changed,
                 |row, columns, pixels| frame_buffer.write_line(row, columns, pixels),
             );
             if force_full {
@@ -583,8 +618,10 @@ impl Platform for KindlePlatform {
                 post_frame_input.finish_frame(drain, restore_full_frame, &self.managed_sleep);
                 restore_full_frame = false;
                 last_interaction = Instant::now();
-            } else if written.mode_changed {
-                frame_buffer.refresh_full();
+            } else if night_mode.changed || written.mode_changed {
+                frame_buffer.refresh_full_checked().map_err(|error| {
+                    PlatformError::Other(format!("failed to refresh night-mode output: {error}"))
+                })?;
             } else if let Some(refresh) = crate::refresh::resolve(
                 pending,
                 written.region,
@@ -819,17 +856,65 @@ fn pause_native_inputs(
     portrait: &mut PortraitRuntime,
     generation: &mut u64,
     window: &MinimalSoftwareWindow,
-) -> bool {
+    prepare_display: impl FnOnce() -> Result<(), PlatformError>,
+) -> Result<bool, PlatformError> {
     let had_input = input.is_some();
     if control.requested() {
         // Close the observer before the input-release acknowledgement can escape.
         portrait.pause();
     }
-    let paused = pause_managed_input(control, input, |input| input.cancel(window));
+    let paused = pause_managed_input(
+        control,
+        input,
+        |input| input.cancel(window),
+        prepare_display,
+    )?;
     if had_input && input.is_none() {
         *generation = generation.wrapping_add(1);
     }
-    paused
+    Ok(paused)
+}
+
+fn prepare_native_display(
+    framebuffer: &mut Framebuffer,
+    renderer: &mut GrayRenderer,
+    rgb: &[Rgb8Pixel],
+) -> Result<(), PlatformError> {
+    framebuffer.wait_for_update_complete();
+    let software_inverse = framebuffer.prepare_native_snapshot().map_err(|error| {
+        PlatformError::Other(format!(
+            "failed to restore native framebuffer mode for sleep: {error}"
+        ))
+    })?;
+    let mode = GrayMode {
+        dark_mode: software_inverse,
+        ..renderer.mode()
+    };
+    renderer.write_frame(
+        rgb,
+        (framebuffer.width, framebuffer.height),
+        None,
+        mode,
+        true,
+        |row, columns, pixels| framebuffer.write_line(row, columns, pixels),
+    );
+    framebuffer.yield_native_display();
+    // Baseline metadata and raw pixels now describe the same physical frame.
+    // The guard captures after Suspended; no extra panel refresh is necessary.
+    Ok(())
+}
+
+fn observe_native_display(
+    framebuffer: &mut Framebuffer,
+    control: &NightModeControl,
+) -> Result<(), PlatformError> {
+    framebuffer.observe_native_night_mode().map_err(|error| {
+        PlatformError::Other(format!(
+            "failed to observe native framebuffer mode on wake: {error}"
+        ))
+    })?;
+    control.observe_native_baseline(framebuffer.native_output_inverted());
+    Ok(())
 }
 
 fn resume_native_input(
@@ -849,13 +934,14 @@ fn resume_native_input(
 
 /// A completed pause must never retain an input owner. This gate is repeated
 /// after callbacks because the main timer can request suspension mid-iteration.
-fn pause_managed_input<T>(
+fn pause_managed_input<T, E>(
     control: &ManagedSleepControl,
     input: &mut Option<T>,
     cancel: impl FnOnce(&mut T),
-) -> bool {
+    prepare_display: impl FnOnce() -> Result<(), E>,
+) -> Result<bool, E> {
     if !control.requested() {
-        return false;
+        return Ok(false);
     }
     if input.is_some() || !control.suspended() {
         control.begin_transition();
@@ -865,7 +951,17 @@ fn pause_managed_input<T>(
             } else {
                 control.acknowledge_suspended();
             }
-            return false;
+            return Ok(false);
+        }
+        // Once display preparation starts, a reversed request must still drop
+        // input and finish this handoff. Resume then uses the full-frame ACK.
+        if let Err(error) = prepare_display() {
+            if let Some(mut contact) = input.take() {
+                cancel(&mut contact);
+                drop(contact);
+            }
+            control.terminate();
+            return Err(error);
         }
         if let Some(mut contact) = input.take() {
             cancel(&mut contact);
@@ -873,7 +969,7 @@ fn pause_managed_input<T>(
         }
         control.acknowledge_suspended();
     }
-    true
+    Ok(true)
 }
 
 /// Keep Resuming observable while input is open but its retained RGB has not
@@ -1011,7 +1107,7 @@ fn retire_orientation_child(mut child: Child) {
 
 #[cfg(test)]
 mod managed_sleep_tests {
-    use super::{begin_managed_resume, pause_managed_input};
+    use super::{begin_managed_resume, pause_managed_input as pause_with_display};
     use crate::managed_sleep::{ManagedSleepControl, ManagedSleepState};
     use std::{cell::RefCell, rc::Rc};
 
@@ -1020,6 +1116,110 @@ mod managed_sleep_tests {
         fn drop(&mut self) {
             self.0.borrow_mut().push("release-input");
         }
+    }
+
+    fn pause_managed_input<T>(
+        control: &ManagedSleepControl,
+        input: &mut Option<T>,
+        cancel: impl FnOnce(&mut T),
+    ) -> bool {
+        pause_with_display(control, input, cancel, || Ok::<_, ()>(())).unwrap()
+    }
+
+    #[test]
+    fn ordinary_night_requests_keep_the_input_owner_and_running_ack() {
+        use crate::render_control::{NightModeControl, RenderHandle};
+        use std::sync::{Arc, atomic::AtomicBool};
+        let control = Arc::new(ManagedSleepControl::default());
+        let wake = crate::wakeup::make_wakeup().unwrap();
+        let handle = RenderHandle {
+            night_mode: Arc::new(NightModeControl::default()),
+            managed_sleep: control.clone(),
+            wake: wake.write,
+            quit: Arc::new(AtomicBool::new(false)),
+        };
+        let observed = Rc::new(RefCell::new(Vec::new()));
+        let mut input = Some(InputOwner(observed.clone()));
+        for desired in [true, false, true] {
+            handle.set_night_mode(desired).unwrap();
+            assert!(
+                !pause_with_display(
+                    &control,
+                    &mut input,
+                    |_| panic!("An ordinary theme request cannot cancel input"),
+                    || -> Result<(), ()> {
+                        panic!("An ordinary theme request cannot hand off display")
+                    },
+                )
+                .unwrap()
+            );
+            assert!(input.is_some());
+            assert!(observed.borrow().is_empty());
+            assert_eq!(control.state(), ManagedSleepState::Running);
+        }
+    }
+
+    #[test]
+    fn native_display_preparation_precedes_release_and_suspended_ack() {
+        let control = ManagedSleepControl::default();
+        let observed = Rc::new(RefCell::new(Vec::new()));
+        let mut input = Some(InputOwner(observed.clone()));
+        control.request(true);
+        assert!(
+            pause_with_display(
+                &control,
+                &mut input,
+                |_| observed.borrow_mut().push("cancel-pointer"),
+                || {
+                    assert_eq!(control.state(), ManagedSleepState::Suspending);
+                    observed.borrow_mut().push("restore-baseline-and-raw");
+                    // A concurrent wake must not skip the full-frame resume path.
+                    control.request(false);
+                    Ok::<_, ()>(())
+                },
+            )
+            .unwrap()
+        );
+        assert_eq!(
+            &*observed.borrow(),
+            &[
+                "restore-baseline-and-raw",
+                "cancel-pointer",
+                "release-input"
+            ]
+        );
+        assert_eq!(control.state(), ManagedSleepState::Resuming);
+        assert!(control.suspended());
+        assert!(
+            begin_managed_resume(&control, &mut input, || Ok::<_, ()>(InputOwner(
+                observed.clone()
+            )))
+            .unwrap()
+        );
+        assert_eq!(control.state(), ManagedSleepState::Resuming);
+        control.acknowledge_running();
+        assert_eq!(control.state(), ManagedSleepState::Running);
+    }
+
+    #[test]
+    fn failed_native_display_preparation_releases_input_without_a_sleep_ack() {
+        let control = ManagedSleepControl::default();
+        let observed = Rc::new(RefCell::new(Vec::new()));
+        let mut input = Some(InputOwner(observed.clone()));
+        control.request(true);
+        assert_eq!(
+            pause_with_display(
+                &control,
+                &mut input,
+                |_| observed.borrow_mut().push("cancel-pointer"),
+                || Err("Synthetic native-mode restoration failure"),
+            ),
+            Err("Synthetic native-mode restoration failure")
+        );
+        assert!(input.is_none());
+        assert!(!control.suspended());
+        assert_eq!(control.state(), ManagedSleepState::Terminated);
+        assert_eq!(&*observed.borrow(), &["cancel-pointer", "release-input"]);
     }
 
     #[test]

@@ -15,6 +15,7 @@ struct Host {
     resume_action: Option<Box<dyn FnOnce() -> Result<()>>>,
     native_base: Cell<Option<bool>>,
     native_base_fails: bool,
+    observes_native_output_on_resume: bool,
     portrait_observations: RefCell<Vec<crate::platform::NativePortraitCalibration>>,
 }
 
@@ -30,6 +31,7 @@ impl Default for Host {
             resume_action: None,
             native_base: Cell::new(None),
             native_base_fails: false,
+            observes_native_output_on_resume: false,
             portrait_observations: RefCell::new(Vec::new()),
         }
     }
@@ -60,6 +62,9 @@ impl ManagedSleepHost for Host {
     }
     fn native_base(&self) -> Option<bool> {
         self.native_base.get()
+    }
+    fn observes_native_output_on_resume(&self) -> bool {
+        self.observes_native_output_on_resume
     }
     fn set_native_base(&mut self, inverted: bool) -> Result<()> {
         self.events.borrow_mut().push("native_base");
@@ -515,50 +520,53 @@ fn a_wake_intent_changed_during_lifecycle_recovery_is_checked_again_before_ackno
 
 #[test]
 fn native_output_snapshot_is_applied_before_the_resident_framebuffer_can_resume() -> Result<()> {
-    let mut fixture = Fixture::new()?;
-    fixture.host.native_base.set(Some(false));
-    fixture.sleep(1)?;
-    fixture.request_wake(1)?;
-    write_private(
-        &fixture.path("managed-native-epdc-mode"),
-        "7:0123456789abcdef0123456789abcdef:1:Y8INV\n",
-    )?;
-    assert!(fixture.poll(false, true)?);
-    assert_eq!(fixture.host.native_base.get(), Some(true));
-    assert_eq!(
-        &*fixture.host.events.borrow(),
-        &["prepare", "request_sleep", "native_base", "request_wake"]
-    );
-    assert!(!fixture.path("managed-wake-ready").exists());
-    fixture.host.state.set(ManagedSleepState::Running);
-    assert!(!fixture.poll(false, false)?);
-    assert_eq!(
-        fixture.context().managed_cycle(ManagedMarker::WakeReady)?,
-        Some(1)
-    );
+    for observes_native_output_on_resume in [false, true] {
+        let mut fixture = Fixture::new()?;
+        fixture.host.observes_native_output_on_resume = observes_native_output_on_resume;
+        fixture.host.native_base.set(Some(false));
+        fixture.sleep(1)?;
+        fixture.request_wake(1)?;
+        write_private(
+            &fixture.path("managed-native-epdc-mode"),
+            "7:0123456789abcdef0123456789abcdef:1:Y8INV\n",
+        )?;
+        assert!(fixture.poll(false, true)?);
+        assert_eq!(fixture.host.native_base.get(), Some(true));
+        assert_eq!(
+            &*fixture.host.events.borrow(),
+            &["prepare", "request_sleep", "native_base", "request_wake"]
+        );
+        assert!(!fixture.path("managed-wake-ready").exists());
+        fixture.host.state.set(ManagedSleepState::Running);
+        assert!(!fixture.poll(false, false)?);
+        assert_eq!(
+            fixture.context().managed_cycle(ManagedMarker::WakeReady)?,
+            Some(1)
+        );
 
-    fixture.sleep(3)?;
-    fixture.request_wake(3)?;
-    write_private(
-        &fixture.path("managed-native-epdc-mode"),
-        "7:0123456789abcdef0123456789abcdef:3:Y8\n",
-    )?;
-    assert!(fixture.poll(false, true)?);
-    assert_eq!(fixture.host.native_base.get(), Some(false));
-    assert_eq!(
-        &*fixture.host.events.borrow(),
-        &[
-            "prepare",
-            "request_sleep",
-            "native_base",
-            "request_wake",
-            "resume",
-            "prepare",
-            "request_sleep",
-            "native_base",
-            "request_wake",
-        ]
-    );
+        fixture.sleep(3)?;
+        fixture.request_wake(3)?;
+        write_private(
+            &fixture.path("managed-native-epdc-mode"),
+            "7:0123456789abcdef0123456789abcdef:3:Y8\n",
+        )?;
+        assert!(fixture.poll(false, true)?);
+        assert_eq!(fixture.host.native_base.get(), Some(false));
+        assert_eq!(
+            &*fixture.host.events.borrow(),
+            &[
+                "prepare",
+                "request_sleep",
+                "native_base",
+                "request_wake",
+                "resume",
+                "prepare",
+                "request_sleep",
+                "native_base",
+                "request_wake",
+            ]
+        );
+    }
     Ok(())
 }
 
@@ -621,32 +629,86 @@ fn unavailable_or_stale_portrait_metadata_preserves_the_existing_resident_wake()
 }
 
 #[test]
-fn a_known_native_base_requires_a_valid_current_wake_snapshot() -> Result<()> {
-    for snapshot in [
-        None,
-        Some("7:0123456789abcdef0123456789abcdef:2:Y8INV\n"),
-        Some("7:ffffffffffffffffffffffffffffffff:1:Y8INV\n"),
-        Some("6:0123456789abcdef0123456789abcdef:1:Y8INV\n"),
-        Some("7:0123456789abcdef0123456789abcdef:1:UNKNOWN\n"),
-        Some("7:0123456789abcdef0123456789abcdef:1:Y8:Y8INV\n"),
-        Some("7:0123456789abcdef0123456789abcdef:1:1\n"),
-        Some("7:0123456789abcdef0123456789abcdef:1:y8inv\n"),
-    ] {
-        let mut fixture = Fixture::new()?;
-        fixture.host.native_base.set(Some(false));
-        fixture.sleep(1)?;
-        fixture.request_wake(1)?;
-        if let Some(snapshot) = snapshot {
+fn present_native_output_snapshots_must_be_valid_for_every_resume_strategy() -> Result<()> {
+    for observes_native_output_on_resume in [false, true] {
+        for snapshot in [
+            "",
+            "7:0123456789abcdef0123456789abcdef:1:Y8INV\n",
+            "7:0123456789abcdef0123456789abcdef:3:Y8INV\n",
+            "7:ffffffffffffffffffffffffffffffff:2:Y8INV\n",
+            "6:0123456789abcdef0123456789abcdef:2:Y8INV\n",
+            "7:0123456789abcdef0123456789abcdef:2:UNKNOWN\n",
+            "7:0123456789abcdef0123456789abcdef:2:Y8:Y8INV\n",
+            "7:0123456789abcdef0123456789abcdef:2:1\n",
+            "7:0123456789abcdef0123456789abcdef:2:y8inv\n",
+        ] {
+            let mut fixture = Fixture::new()?;
+            fixture.host.observes_native_output_on_resume = observes_native_output_on_resume;
+            fixture.host.native_base.set(Some(false));
+            fixture.sleep(2)?;
+            fixture.request_wake(2)?;
             write_private(&fixture.path("managed-native-epdc-mode"), snapshot)?;
+            assert!(fixture.poll(false, true).is_err());
+            assert_eq!(fixture.host.native_base.get(), Some(false));
+            assert_eq!(fixture.host.state.get(), ManagedSleepState::Suspended);
+            assert_eq!(
+                &*fixture.host.events.borrow(),
+                &["prepare", "request_sleep"]
+            );
+            assert!(!fixture.path("managed-wake-ready").exists());
         }
-        assert!(fixture.poll(false, true).is_err());
-        assert_eq!(fixture.host.state.get(), ManagedSleepState::Suspended);
-        assert_eq!(
-            &*fixture.host.events.borrow(),
-            &["prepare", "request_sleep"]
-        );
-        assert!(!fixture.path("managed-wake-ready").exists());
     }
+    Ok(())
+}
+
+#[test]
+fn a_snapshot_reliant_renderer_cannot_resume_without_a_native_output_record() -> Result<()> {
+    let mut fixture = Fixture::new()?;
+    fixture.host.native_base.set(Some(false));
+    fixture.sleep(1)?;
+    fixture.request_wake(1)?;
+    assert!(!fixture.path("managed-native-epdc-mode").exists());
+    assert!(fixture.poll(false, true).is_err());
+    assert_eq!(fixture.host.state.get(), ManagedSleepState::Suspended);
+    assert_eq!(
+        &*fixture.host.events.borrow(),
+        &["prepare", "request_sleep"]
+    );
+    assert!(!fixture.path("managed-wake-ready").exists());
+    Ok(())
+}
+
+#[test]
+fn a_self_observing_renderer_can_resume_without_a_launcher_native_output_snapshot() -> Result<()> {
+    let mut fixture = Fixture::new()?;
+    fixture.host.observes_native_output_on_resume = true;
+    fixture.host.native_base.set(Some(false));
+    fixture.sleep(1)?;
+    fixture.request_wake(1)?;
+    assert!(!fixture.path("managed-native-epdc-mode").exists());
+    assert!(fixture.poll(false, true)?);
+    assert_eq!(fixture.host.state.get(), ManagedSleepState::Resuming);
+    assert_eq!(fixture.host.native_base.get(), Some(false));
+    assert_eq!(
+        &*fixture.host.events.borrow(),
+        &["prepare", "request_sleep", "request_wake"]
+    );
+    assert_eq!(
+        fixture.context().managed_cycle(ManagedMarker::WakeReady)?,
+        None
+    );
+
+    fixture.host.state.set(ManagedSleepState::Running);
+    assert!(!fixture.poll(false, false)?);
+    assert_eq!(
+        fixture.context().managed_cycle(ManagedMarker::WakeReady)?,
+        Some(1)
+    );
+    assert_eq!(
+        &*fixture.host.events.borrow(),
+        &["prepare", "request_sleep", "request_wake", "resume"]
+    );
+    assert!(!fixture.host.events.borrow().contains(&"native_base"));
     Ok(())
 }
 
@@ -731,55 +793,95 @@ fn native_mode_records_require_the_exact_owner_fields_and_reject_an_ordinary_exi
     assert_eq!(fixture.context().managed_native_output_mode(1)?, Some(true));
     fixture.context().write("ordinary-exit")?;
     assert_eq!(fixture.context().native_output_mode()?, None);
-    assert_eq!(fixture.context().managed_native_output_mode(1)?, None);
+    assert!(fixture.context().managed_native_output_mode(1).is_err());
     Ok(())
 }
 
 #[test]
-fn explicit_exit_records_retain_legacy_targets_without_manufacturing_a_new_target() -> Result<()> {
+fn explicit_exit_clears_owned_legacy_targets_without_manufacturing_another_target() -> Result<()> {
     for target in [None, Some(false), Some(true)] {
         let fixture = Fixture::new()?;
-        fixture.context().mark_explicit_exit(target)?;
-        assert_eq!(fixture.context().native_dark_target()?, target);
+        if let Some(target) = target {
+            write_private(
+                &fixture.path("native-dark-target"),
+                &format!("7:0123456789abcdef0123456789abcdef:{}\n", u8::from(target)),
+            )?;
+        }
+        fixture.context().mark_explicit_exit()?;
         assert!(fixture.context().matches("ordinary-exit")?);
-    }
-    let fixture = Fixture::new()?;
-    fixture.context().mark_explicit_exit(None)?;
-    assert!(fixture.context().matches("ordinary-exit")?);
-    assert!(!fixture.path("native-dark-target").exists());
-    fixture.context().clear_explicit_exit()?;
-    for desired in [true, false] {
-        fixture.context().mark_explicit_exit(Some(desired))?;
-        assert_eq!(fixture.context().native_dark_target()?, Some(desired));
-        assert!(fixture.context().matches("ordinary-exit")?);
+        assert!(!fixture.path("native-dark-target").exists());
+        assert!(!fixture.path("native-dark-target.pending").exists());
         fixture.context().clear_explicit_exit()?;
         assert!(!fixture.context().matches("ordinary-exit")?);
         assert!(!fixture.path("native-dark-target").exists());
     }
-    write_private(
-        &fixture.path("native-dark-target"),
-        "7:0123456789abcdef0123456789abcdef:1\n",
-    )?;
-    fixture.context().mark_explicit_exit(None)?;
+    Ok(())
+}
+
+#[test]
+fn explicit_exit_preserves_legacy_targets_from_other_launchers() -> Result<()> {
+    for target in [
+        "6:0123456789abcdef0123456789abcdef:1\n",
+        "7:ffffffffffffffffffffffffffffffff:0\n",
+        "7:0123456789abcdef0123456789abcdef:UNKNOWN\n",
+        "7:0123456789abcdef0123456789abcdef:1:0\n",
+    ] {
+        let fixture = Fixture::new()?;
+        write_private(&fixture.path("native-dark-target"), target)?;
+        fixture.context().mark_explicit_exit()?;
+        assert!(fixture.context().matches("ordinary-exit")?);
+        assert_eq!(
+            fs::read_to_string(fixture.path("native-dark-target"))?,
+            target
+        );
+        fixture.context().clear_explicit_exit()?;
+        assert!(!fixture.context().matches("ordinary-exit")?);
+        assert_eq!(
+            fs::read_to_string(fixture.path("native-dark-target"))?,
+            target
+        );
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn an_unused_legacy_pending_record_cannot_authorize_an_appearance_write() -> Result<()> {
+    use std::os::unix::fs::symlink;
+    let fixture = Fixture::new()?;
+    let unrelated = fixture.path("unrelated-private-data");
+    write_private(&unrelated, "Unrelated synthetic data\n")?;
+    symlink(&unrelated, fixture.path("native-dark-target.pending"))?;
+    fixture.context().mark_explicit_exit()?;
     assert!(fixture.context().matches("ordinary-exit")?);
+    assert!(!fixture.path("native-dark-target").exists());
+    assert_eq!(
+        fs::read_to_string(&unrelated)?,
+        "Unrelated synthetic data\n"
+    );
     assert!(
-        !fixture.path("native-dark-target").exists(),
-        "A failed older attempt cannot lend a stale target to unknown native state"
+        fs::symlink_metadata(fixture.path("native-dark-target.pending"))?
+            .file_type()
+            .is_symlink()
     );
     Ok(())
 }
 
 #[cfg(unix)]
 #[test]
-fn explicit_exit_record_failures_cannot_publish_an_ordinary_native_appearance_acknowledgement()
--> Result<()> {
+fn a_failed_ordinary_exit_write_clears_owned_legacy_targets_without_acknowledgement() -> Result<()>
+{
     use std::os::unix::fs::symlink;
-    for failing in ["native-dark-target.pending", "ordinary-exit.pending"] {
+    for target in [false, true] {
         let fixture = Fixture::new()?;
+        write_private(
+            &fixture.path("native-dark-target"),
+            &format!("7:0123456789abcdef0123456789abcdef:{}\n", u8::from(target)),
+        )?;
         let unrelated = fixture.path("unrelated-private-data");
         write_private(&unrelated, "Unrelated synthetic data\n")?;
-        symlink(&unrelated, fixture.path(failing))?;
-        assert!(fixture.context().mark_explicit_exit(Some(true)).is_err());
+        symlink(&unrelated, fixture.path("ordinary-exit.pending"))?;
+        assert!(fixture.context().mark_explicit_exit().is_err());
         assert!(!fixture.context().matches("ordinary-exit")?);
         assert!(!fixture.path("native-dark-target").exists());
         assert_eq!(fs::read_to_string(unrelated)?, "Unrelated synthetic data\n");
@@ -788,9 +890,23 @@ fn explicit_exit_record_failures_cannot_publish_an_ordinary_native_appearance_ac
 }
 
 #[test]
-fn a_failed_ordinary_exit_cleanup_still_clears_its_owned_native_target() -> Result<()> {
+fn a_failed_legacy_target_cleanup_does_not_publish_an_ordinary_exit() -> Result<()> {
     let fixture = Fixture::new()?;
-    fixture.context().mark_explicit_exit(Some(true))?;
+    fs::create_dir(fixture.path("native-dark-target"))?;
+    assert!(fixture.context().mark_explicit_exit().is_err());
+    assert!(!fixture.context().matches("ordinary-exit")?);
+    assert!(fixture.path("native-dark-target").is_dir());
+    Ok(())
+}
+
+#[test]
+fn a_failed_ordinary_exit_cleanup_still_clears_its_owned_legacy_target() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.context().mark_explicit_exit()?;
+    write_private(
+        &fixture.path("native-dark-target"),
+        "7:0123456789abcdef0123456789abcdef:1\n",
+    )?;
     fs::remove_file(fixture.path("ordinary-exit"))?;
     fs::create_dir(fixture.path("ordinary-exit"))?;
     assert!(fixture.context().clear_explicit_exit().is_err());
@@ -799,6 +915,47 @@ fn a_failed_ordinary_exit_cleanup_still_clears_its_owned_native_target() -> Resu
         fixture.path("ordinary-exit").is_dir(),
         "Unrecognized records cannot be deleted"
     );
+    Ok(())
+}
+
+#[test]
+fn a_failed_legacy_target_cleanup_still_clears_its_ordinary_exit() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.context().mark_explicit_exit()?;
+    fs::create_dir(fixture.path("native-dark-target"))?;
+    assert!(fixture.context().clear_explicit_exit().is_err());
+    assert!(!fixture.context().matches("ordinary-exit")?);
+    assert!(fixture.path("native-dark-target").is_dir());
+    Ok(())
+}
+
+#[test]
+fn explicit_exit_markers_reject_a_changed_launcher_owner() -> Result<()> {
+    for (record, changed) in [
+        ("generation", "8:0123456789abcdef0123456789abcdef\n"),
+        ("nonce", "ffffffffffffffffffffffffffffffff\n"),
+        ("application-pid", "0\n"),
+    ] {
+        let fixture = Fixture::new()?;
+        let target = "7:0123456789abcdef0123456789abcdef:1\n";
+        write_private(&fixture.path("native-dark-target"), target)?;
+        write_private(&fixture.path(record), changed)?;
+        assert!(fixture.context().mark_explicit_exit().is_err());
+        assert!(!fixture.path("ordinary-exit").exists());
+        assert_eq!(
+            fs::read_to_string(fixture.path("native-dark-target"))?,
+            target
+        );
+
+        // A rejected cleanup must preserve the older marker and its target.
+        fixture.context().write("ordinary-exit")?;
+        assert!(fixture.context().clear_explicit_exit().is_err());
+        assert!(fixture.context().matches("ordinary-exit")?);
+        assert_eq!(
+            fs::read_to_string(fixture.path("native-dark-target"))?,
+            target
+        );
+    }
     Ok(())
 }
 

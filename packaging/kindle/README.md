@@ -35,13 +35,16 @@ remains outside the product. The independent application and conditional-server
 decisions remain unchanged; the project license is still unselected.
 
 This helper preserves the displayed reading frame in an owned native window
-while the supervisor temporarily permits native system-theme or screensaver
-work. The window stays below the native screensaver and must not hide a system
-lock or an unrelated dialog. Its process, window, private records, snapshot,
+during real stock screensaver handoff. Ordinary application night-mode toggles
+stay in the renderer and do not invoke it. The window stays below the native
+screensaver and must not hide a system lock or an unrelated dialog. Its process,
+window, private records, snapshot,
 and cleanup are bounded by the owning launcher identity. Unsupported native
-window or pixel formats fail closed. Controlled X11 tests and the read-only
-Scribe 2022 / firmware 5.19.5 layout probe do not establish the final physical
-handoff result; see [Native reading corrections](../../docs/NATIVE_FIX_ACCEPTANCE.md).
+window or pixel formats fail closed. Historical v8/v10 physical handoff results
+remain bound to their own SYSTEM-path artifacts. The renderer-owned candidate
+now has scoped isolated R1 observations, with remaining gates and the immediate
+native-after guard failure retained; see
+[Native reading corrections](../../docs/NATIVE_FIX_ACCEPTANCE.md).
 
 Before a supervised device acceptance run, copy the example profile into `data/device-profile` and create `data/device-allowlist` with the exact configured profile and firmware version. The allowlist is intentionally empty in source control. Adding a local entry enables that experiment; it does not certify the combination. Profiles are `pw5`, `pw6`, `scribe`, and `scribe2025`. The native platform still checks actual framebuffer geometry.
 
@@ -80,10 +83,48 @@ Startup feedback displays the project name, startup stage, and activity dots fro
 
 The current supervisor first requests a durable resident pause, releases application input and display ownership, then stops the verified application process. A confirmed wake continues that same process after fresh native-mode and portrait observations, a complete redraw, and input acknowledgment. Failed or unavailable resident handshakes retain the earlier saved-session cold recovery as a bounded fallback. That fallback must not be reported as same-process acceptance. The backend's optional direct RTC suspend schedule remains disabled. Artifact-specific physical results are recorded separately.
 
-The user now requests immediate system night-mode changes. A supported Kindle, including an explicitly supervised demo or offline session, uses the owning launcher's protected same-process theme transaction while rendering and input are paused. The system setter, readback, and available persisted state must agree before the retained Reader is redrawn and input resumes. Known system mode overrides stale appearance preferences; preference-mirror failure cannot roll back an already committed system change. Sleep, USB, faults, or unknown observations do not independently authorize theme writes. New ordinary exits no longer publish a stale target for a second transaction. The former local-only and explicit-exit policies remain historical results in [Native theme continuity](../../docs/NATIVE_THEME.md). Continuous long-press selection, including cross-line and reverse movement, retains its 80 ms update interval and editing protections.
+The accepted 2026-11-10 (Asia/Shanghai) night-mode decision follows the reviewed
+KOReader framebuffer approach. The application saves its own preference. The
+backend applies hardware grayscale inversion only for the explicit Scribe 2022 /
+firmware 5.19.5 target with actual 8bpp and checked layout, using software
+compensation otherwise. Ordinary toggles retain touch ownership and a checked
+full redraw without SYSTEM/dynconf writes, native WM continuation, application
+suspension, work quiescence, or explicit light setters. The hardware-night MTK
+full-update candidate uses GCK16 (8); day, software-only, and non-MTK paths retain
+their waveform selection. This candidate passed its scoped remote software gates
+and has ARM application `d221d65d`, production launcher `a5fec72f`, and development
+ZIP `dae7dd52`. The initial exit-143 launcher failure and corrected 198-case run
+remain recorded separately. An isolated Scribe 2022 / firmware 5.19.5 R1 trial
+recorded both theme directions, same-process stock sleep/wake, automatic portrait
+orientation, and UI exit. The user estimated both confirmed transitions at at most
+one second with stable illumination; an initial click was inconclusive. The
+immediate native-after guard failure remains recorded despite a later healthy
+sample. A later isolated reopen confirmed the saved light startup and clean
+native-dark UI exit; that scoped preference gate is closed. Normal-entry
+replacement remains pending. See
+[KOReader night-mode alignment](../../docs/KOREADER_NIGHT_ALIGNMENT.md) for the
+exact build-time identities and bounded physical chronology.
+
+Before a real resident sleep acknowledgment, the backend restores the fresh
+native baseline and rewrites compensated RGB for coherent frame-guard capture.
+Wake observes actual kernel state before reapplying the app target and completing
+the full-frame/input acknowledgment. Active ordinary exit restores startup
+hardware state; exit after a completed native yield performs no further mode
+write. Native day/night settings remain unchanged. Continuous long-press
+selection retains its 80 ms update interval and editing protections.
+
+The installed normal-mode private trial still contains the historical v10
+SYSTEM path: launcher `15aab68c`, application `8010a217`, and helper `a235b41c`.
+Its scoped visual, sleep, UI-exit, and normal-entry observations retain their
+full identities in [Native reading corrections](../../docs/NATIVE_FIX_ACCEPTANCE.md).
+They do not verify the current candidate or establish an improved response time.
 
 Automatic brightness is outside the product, design-fidelity, and acceptance
 scope. Manual brightness and device-supported warmth remain available controls.
+Application night mode does not select native illumination presets, copy or
+restore light profiles, or change ambient automatic brightness. R1's stable
+illumination report does not establish absence of every hardware frontlight
+transient.
 
 USB takeover ends application ownership and restores the firmware. The user explicitly skipped USB testing in the current physical round, so this behavior remains unaccepted. Launcher recovery cannot survive `SIGKILL`, kernel failure, or power loss. A stale `/tmp/weread-launcher.lock` must be investigated before a new launch; the script does not delete another process's lock or guess at service restoration. Device acceptance must assess real panel refresh, touch, firmware service behavior, sleep/wake, USB transitions, and exit restoration.
 

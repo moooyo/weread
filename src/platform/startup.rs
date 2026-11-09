@@ -46,8 +46,8 @@ impl StartupScreen {
                         ))?,
                     ],
                 };
-                let software_inverse = startup_output_inverted(platform, dark_mode);
-                Some(StartupSplash::show(images, viewport, software_inverse)?)
+                // The framebuffer owner applies native-polarity compensation.
+                Some(StartupSplash::show(images, viewport, dark_mode)?)
             } else {
                 None
             };
@@ -96,9 +96,4 @@ impl StartupScreen {
         }
         Ok(())
     }
-}
-
-#[cfg(any(all(feature = "kindle", target_os = "linux"), test))]
-pub(super) fn startup_output_inverted(platform: &Platform, desired_dark: bool) -> bool {
-    super::software_output_inverted(desired_dark, platform.native_output_inverted())
 }

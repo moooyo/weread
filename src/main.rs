@@ -379,11 +379,8 @@ fn run(arguments: Arguments) -> Result<()> {
     } else {
         data_dir.clone()
     };
-    let startup_dark_mode = platform
-        .native_output_inverted()
-        .filter(|_| platform.is_kindle)
-        .or_else(|| weread::preferences::startup_dark_mode_hint(&startup_data_dir))
-        .unwrap_or(false);
+    let startup_dark_mode =
+        weread::preferences::startup_dark_mode_hint(&startup_data_dir).unwrap_or(false);
     let mut startup = platform::StartupScreen::show(&platform, startup_dark_mode)
         .context("Show the native startup screen")?;
     startup.set_stage(platform::StartupStage::Fonts);
@@ -406,15 +403,21 @@ fn run(arguments: Arguments) -> Result<()> {
     };
     #[cfg(all(feature = "kindle", target_os = "linux"))]
     if let Some(backend) = _kindle_backend.as_ref() {
+        let render_handle = backend.render_handle();
+        render_handle.configure_night_mode(if platform.allows_framebuffer_night_mode() {
+            slint_backend_kindle::NightModeConfig::HardwareIfSupported
+        } else {
+            slint_backend_kindle::NightModeConfig::SoftwareOnly
+        })?;
         platform.set_refresh_sink(Arc::new(platform::KindleRefreshSink::new(
             backend.refresh_handle(),
         )))?;
         let render_sink = match platform.native_output_inverted() {
             Some(inverted) => platform::KindleRenderSink::new_with_native_inversion(
-                backend.render_handle(),
+                render_handle.clone(),
                 inverted,
             ),
-            None => platform::KindleRenderSink::new(backend.render_handle()),
+            None => platform::KindleRenderSink::new(render_handle),
         };
         platform.set_render_sink(Arc::new(
             render_sink.with_native_orientation(backend.native_orientation_handle()),
@@ -489,13 +492,11 @@ fn run(arguments: Arguments) -> Result<()> {
     let close_application = application.clone();
     ui.window().on_close_requested(move || {
         let mut application = close_application.borrow_mut();
-        if !application.defer_exit_during_native_theme() {
-            match application.request_exit() {
-                Ok(()) => close_quitting.set(true),
-                Err(error) => close_failures
-                    .borrow_mut()
-                    .push(format!("Close the application failed: {error:#}")),
-            }
+        match application.request_exit() {
+            Ok(()) => close_quitting.set(true),
+            Err(error) => close_failures
+                .borrow_mut()
+                .push(format!("Close the application failed: {error:#}")),
         }
         // Keep the window alive until its final capture and persistent writes finish.
         slint::CloseRequestResponse::KeepWindowShown
@@ -525,17 +526,6 @@ fn run(arguments: Arguments) -> Result<()> {
                 return;
             }
             if native {
-                match timer_application.borrow_mut().poll_native_theme() {
-                    Ok(true) => return,
-                    Ok(false) => {}
-                    Err(error) => {
-                        timer_failures
-                            .borrow_mut()
-                            .push(format!("Native theme handoff failed: {error:#}"));
-                        request_quit(&timer_quitting, &timer_failures);
-                        return;
-                    }
-                }
                 match timer_application.borrow_mut().poll_managed_sleep(
                     SUSPEND_REQUESTED.swap(false, Ordering::AcqRel),
                     RESUME_REQUESTED.swap(false, Ordering::AcqRel),

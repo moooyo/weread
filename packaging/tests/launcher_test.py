@@ -16,6 +16,14 @@ import unittest
 
 
 SOURCE = Path(__file__).resolve().parents[1] / "kindle" / "launch.sh"
+LEGACY_NATIVE_THEME_RECORDS = tuple(
+    name + suffix
+    for name in (
+        "native-dark-target", "native-theme-available", "native-theme-request",
+        "native-theme-result", "native-theme-ready", "native-theme-portrait-calibration",
+    )
+    for suffix in ("", ".pending")
+)
 
 
 class LauncherLifecycleTests(unittest.TestCase):
@@ -2143,32 +2151,6 @@ class LauncherLifecycleTests(unittest.TestCase):
         return [event.split(":", 3)[3] if len(event.split(":", 3)) == 4 else ""
                 for event in self.managed_events() if event.startswith(prefix)]
 
-    def assert_native_theme_applied_before_restore(self, mode, preference, error, persisted=True):
-        trace = self.trace()
-        setters = self.native_theme_events("set")
-        self.assertEqual(len(setters), 1)
-        self.assertTrue(setters[0].startswith("theme:set:" + mode + ":"))
-        self.assertNotIn("wm=T", setters[0])
-        changed = trace.index(setters[0])
-        readback = next(index for index, event in enumerate(trace)
-                        if index > changed and event.startswith("theme:get:" + mode + ":"))
-        restored = max(index for index, event in enumerate(trace) if event == "start:statusbar")
-        refreshed = max(index for index, event in enumerate(trace) if event == "xrefresh:")
-        self.assertLess(changed, readback)
-        self.assertLess(readback, restored)
-        self.assertLess(restored, refreshed)
-        if persisted:
-            confirmation = next(index for index, event in enumerate(trace)
-                                if index > readback and event.startswith("theme:pref:" + preference + ":"))
-            self.assertLess(confirmation, restored)
-        self.assertIn("synchronization confirmed", error)
-        self.assertIn("persistence=" + ("confirmed" if persisted else "not_checked"), error)
-        self.assertNotIn("persistence was not confirmed", error)
-        self.assertEqual(Path(self.env["TEST_NATIVE_THEME_MODE"]).read_text().strip(), mode)
-        for event in self.native_theme_events("get"):
-            self.assertNotIn("wm=T", event)
-        self.assert_native_theme_helpers_finished()
-
     def assert_native_theme_failure_is_visible(self, error):
         text = error.lower()
         self.assertTrue(any(word in text for word in ("native", "epdc", "theme")), error)
@@ -2515,6 +2497,117 @@ class LauncherLifecycleTests(unittest.TestCase):
         self.assertFalse(any(":cold-restored:" in event for event in self.managed_events()))
         self.assertFalse((self.root / "lock").exists())
 
+    def managed_ordinary_exit_tail_fixture(self):
+        self.managed_fixture(TEST_MANAGED_PREPARE="ordinary")
+        window = self.root / "ordinary-exit-wait"
+        release = self.root / "ordinary-exit-tail-release"
+        self.env.update(TEST_ORDINARY_EXIT_WAIT=str(window), TEST_ORDINARY_EXIT_RELEASE=str(release))
+        # Preserve the managed tick's real duration so the one-second protocol
+        # budget remains observable while the synthetic exit tail is fenced.
+        self.script(self.bin / "usleep", 'case "$1" in\n'
+                    '    100000) exec sleep 0.1 ;;\n'
+                    '    *) exec sleep 0.01 ;;\n'
+                    'esac')
+        app = self.home / "app" / "weread"
+        source = app.read_text()
+        anchor = '            marker("ordinary-exit", base)\n'
+        self.assertEqual(source.count(anchor), 1)
+        # A controlled default signal disposition makes a late TERM visible
+        # without assuming how any interpreter or native runtime finalizes.
+        source = source.replace(anchor, '            signal.signal(signal.SIGTERM, signal.SIG_DFL)\n' + anchor, 1)
+        anchor = '            record("ordinary-exit")\n            sys.exit(0)\n'
+        self.assertEqual(source.count(anchor), 1)
+        tail = (
+            '            record("ordinary-exit")\n'
+            '            record("exit-tail-ready", base)\n'
+            '            while not Path(os.environ["TEST_ORDINARY_EXIT_RELEASE"]).exists():\n'
+            '                time.sleep(0.01)\n'
+            '            record("exit-tail-complete")\n'
+            '            sys.exit(0)\n'
+        )
+        app.write_text(source.replace(anchor, tail, 1))
+        source = self.launcher.read_text()
+        anchor = "        ordinary_exit_checks=$(managed_wait_budget 1)\n"
+        self.assertEqual(source.count(anchor), 1)
+        witness = (
+            '        printf "%s:%s:%s:%s\\n" "$APP_GENERATION" "$LAUNCH_TOKEN" "$APP_RUNNER_PID" "$APP_RUNNER_BIRTH" >"$TEST_ORDINARY_EXIT_WAIT.pending" &&\n'
+            '            mv -f "$TEST_ORDINARY_EXIT_WAIT.pending" "$TEST_ORDINARY_EXIT_WAIT"\n'
+        )
+        self.launcher.write_text(source.replace(anchor, anchor + witness, 1))
+        return window, release
+
+    def wait_for_ordinary_exit_tail(self, supervisor, pid, window):
+        directory = self.root / "lock"
+        base = (directory / "generation").read_text().strip()
+        self.wait_until(lambda: window.is_file()
+                        and f"managed:exit-tail-ready:{pid}:{base}" in self.managed_events())
+        fields = window.read_text().strip().split(":")
+        self.assertEqual(len(fields), 4)
+        self.assertEqual(":".join(fields[:2]), base)
+        runner = self.observed_identity(int(fields[2]))
+        self.assertEqual(runner["birth"], fields[3])
+        runner_fields = Path(f"/proc/{runner['pid']}/stat").read_text().rsplit(")", 1)[1].split()
+        self.assertEqual(int(runner_fields[1]), supervisor.pid)
+        self.assertNotIn(runner_fields[0], ("Z", "X"))
+        self.assertNotIn(self.process_state(pid), (None, "T", "Z", "X"))
+        self.assertEqual((directory / "ordinary-exit").read_text().strip(), base)
+        self.assertEqual(self.starts(), ["0"])
+        self.assertFalse(any(":wake:" in event or ":cold-restored:" in event for event in self.managed_events()))
+
+    def test_managed_sleep_committed_exit_tail_finishes_without_an_extra_term_or_wake(self):
+        window, release = self.managed_ordinary_exit_tail_fixture()
+        observed = []
+
+        def drive(supervisor):
+            pid = self.wait_for_managed_application()
+            observed.append(pid)
+            self.emit("goingToScreenSaver 2", "outOfScreenSaver 1", "exitingScreenSaver 1")
+            self.wait_for_ordinary_exit_tail(supervisor, pid, window)
+            release.touch()
+
+        status, _, error = self.run_launcher(drive)
+        self.assertEqual(status, 0, error)
+        self.assertEqual(self.starts(), ["0"])
+        self.assertTrue(any(":ordinary-exit:" in event for event in self.managed_events()))
+        self.assertIn(f"managed:exit-tail-complete:{observed[0]}", self.managed_events())
+        self.assertEqual(self.managed_received_signals(observed[0]), {"SIGUSR1"})
+        self.assertFalse(any(":wake:" in event or ":cold-restored:" in event for event in self.managed_events()))
+        self.assertEqual(self.frame_guard_events("capture"), [])
+        self.assertEqual(self.frame_guard_events("align"), [])
+        self.assertFalse((self.root / "lock").exists())
+
+    def test_managed_sleep_committed_exit_tail_timeout_preserves_the_forced_exit_status(self):
+        window, _release = self.managed_ordinary_exit_tail_fixture()
+
+        def drive(supervisor):
+            pid = self.wait_for_managed_application()
+            self.emit("goingToScreenSaver 2", "outOfScreenSaver 1", "exitingScreenSaver 1")
+            self.wait_for_ordinary_exit_tail(supervisor, pid, window)
+
+        status, _, error = self.run_launcher(drive)
+        self.assertEqual(status, 143, error)
+        self.assertEqual(self.starts(), ["0"])
+        self.assertTrue(any(":ordinary-exit:" in event for event in self.managed_events()))
+        self.assertFalse(any(":exit-tail-complete:" in event or ":wake:" in event or ":cold-restored:" in event
+                             for event in self.managed_events()))
+        self.assertFalse((self.root / "lock").exists())
+
+    def test_managed_sleep_external_term_during_committed_exit_wait_keeps_its_status(self):
+        window, _release = self.managed_ordinary_exit_tail_fixture()
+
+        def drive(supervisor):
+            pid = self.wait_for_managed_application()
+            self.emit("goingToScreenSaver 2", "outOfScreenSaver 1", "exitingScreenSaver 1")
+            self.wait_for_ordinary_exit_tail(supervisor, pid, window)
+            supervisor.send_signal(signal.SIGTERM)
+
+        status, _, error = self.run_launcher(drive)
+        self.assertEqual(status, 143, error)
+        self.assertEqual(self.starts(), ["0"])
+        self.assertFalse(any(":exit-tail-complete:" in event or ":wake:" in event or ":cold-restored:" in event
+                             for event in self.managed_events()))
+        self.assertFalse((self.root / "lock").exists())
+
     def test_managed_sleep_rejects_a_replaced_birth_record_before_signaling(self):
         self.managed_fixture()
 
@@ -2745,228 +2838,11 @@ class LauncherLifecycleTests(unittest.TestCase):
                     pass
             supervisor.communicate(timeout=3)
 
-    def native_theme_handoff_fixture(self, mode="Y8", **behavior):
-        awesome = self.native_dark_fixture(
-            mode=mode, TEST_NATIVE_THEME_EXIT="hold", TEST_NATIVE_THEME_TARGET=""
-        )
-        self.env.update(
-            TEST_NATIVE_THEME_HANDOFF="1",
-            TEST_NATIVE_THEME_READY="ready",
-            TEST_NATIVE_THEME_DRIVER=str(self.root / "theme-driver"),
-            TEST_NATIVE_THEME_COMMAND_OBSERVATIONS=str(self.root / "theme-command-observations"),
-            TEST_NATIVE_THEME_RESULT_OBSERVATIONS=str(self.root / "theme-result-observations"),
-        )
-        self.env.update(behavior)
-        app = self.home / "app" / "weread"
-        source = app.read_text()
-        anchor = "while True:\n    if pending.intersection("
-        self.assertEqual(source.count(anchor), 1)
-        driver = textwrap.dedent(r'''
-            theme_driver_seen = ""
-            theme_pending = ""
-
-            def handle_theme_handoff():
-                global theme_driver_seen, theme_pending
-                try:
-                    command = Path(os.environ["TEST_NATIVE_THEME_DRIVER"]).read_text()
-                except OSError:
-                    command = ""
-                if command and command != theme_driver_seen:
-                    theme_driver_seen = command
-                    values = json.loads(command)
-                    sequence = str(values["sequence"])
-                    request = base + ":" + sequence + ":" + values["target"]
-                    # The fixture implements only the App side of the file/FIFO
-                    # protocol. Native changes remain real launcher operations.
-                    record("theme-quiescent", request)
-                    marker("native-theme-request", request)
-                    theme_pending = sequence
-                    record("theme-request", request)
-                    descriptor = os.open(context / "power-events", os.O_WRONLY | os.O_NONBLOCK)
-                    try:
-                        payload = ("_weread_native_theme_request " + generation + " " + sequence + "\n").encode()
-                        deadline = time.monotonic() + 2
-                        while True:
-                            try:
-                                if os.write(descriptor, payload) != len(payload):
-                                    raise SystemExit(77)
-                                break
-                            except (BlockingIOError, InterruptedError):
-                                if time.monotonic() >= deadline:
-                                    raise SystemExit(78)
-                                time.sleep(0.01)
-                    finally:
-                        os.close(descriptor)
-                result = read_marker("native-theme-result")
-                if theme_pending and result.startswith(base + ":" + theme_pending + ":"):
-                    wm = observed_process(int(os.environ["TEST_AWESOME_PID"]))
-                    entry = {
-                        "pid": pid, "birth": birth, "result": result,
-                        "wm_pid": int(os.environ["TEST_AWESOME_PID"]),
-                        "wm_state": wm[0] if wm else "missing",
-                        "wm_birth": wm[1] if wm else "",
-                        "native": read_marker("native-epdc-mode"),
-                        "portrait": read_marker("native-theme-portrait-calibration"),
-                        "interrupt": read_marker("native-theme-interrupt"),
-                    }
-                    append(os.environ["TEST_NATIVE_THEME_RESULT_OBSERVATIONS"], json.dumps(entry))
-                    record("theme-result", result)
-                    ready = base + ":" + theme_pending
-                    mode = os.environ["TEST_NATIVE_THEME_READY"]
-                    if mode == "ready":
-                        marker("native-theme-ready", ready)
-                        record("theme-ready", ready)
-                    elif mode == "stale":
-                        marker("native-theme-ready", base + ":0")
-                        record("theme-stale-ready", base + ":0")
-                    theme_pending = ""
-
-        ''')
-        source = source.replace(anchor, driver + anchor, 1)
-        tick = "    time.sleep(0.01)\n"
-        before, separator, after = source.rpartition(tick)
-        self.assertTrue(separator)
-        source = before + "    handle_theme_handoff()\n" + separator + after
-        shebang, body = source.split("\n", 1)
-        app.write_text(shebang + "\nimport json\n" + body)
-        self.observe_native_theme_dispatch()
-        return awesome
-
-    def observe_native_theme_dispatch(self):
-        source = self.launcher.read_text()
-        anchor = (
-            "                    fail 'Native theme handoff could not complete safely.'\n"
-            "                fi\n"
-        )
-        self.assertEqual(source.count(anchor), 1)
-        self.launcher.write_text(source.replace(
-            anchor, anchor
-            + '                printf "theme:dispatch:%s:%s\\n" "$2" "$3" >>"$TEST_TRACE"\n',
-            1,
-        ))
-
-    def native_theme_continue_gate(self):
-        window = self.root / "theme-continue-window"
-        release = self.root / "theme-continue-release"
-        self.env.update(TEST_THEME_CONTINUE_WINDOW=str(window), TEST_THEME_CONTINUE_RELEASE=str(release))
-        source = self.launcher.read_text()
-        anchor = "    NATIVE_THEME_STAGE=application-continue\n"
-        self.assertEqual(source.count(anchor), 1)
-        gate = textwrap.dedent(r'''
-            printf '%s:%s:%s\n' "$APP_GENERATION" "$LAUNCH_TOKEN" "$NATIVE_THEME_REQUEST_SEQUENCE" >"$TEST_THEME_CONTINUE_WINDOW.pending" || return 1
-            mv -f "$TEST_THEME_CONTINUE_WINDOW.pending" "$TEST_THEME_CONTINUE_WINDOW" || return 1
-            fixture_theme_continue_checks=400
-            while [ ! -f "$TEST_THEME_CONTINUE_RELEASE" ]; do
-                [ "$fixture_theme_continue_checks" -gt 0 ] || return 1
-                usleep 10000 || return 1
-                fixture_theme_continue_checks=$((fixture_theme_continue_checks - 1))
-            done
-        ''')
-        self.launcher.write_text(source.replace(anchor, anchor + gate, 1))
-        self.theme_continue_release = release
-        return window, release
-
-    def native_theme_phase_gate(self, stage):
-        window = self.root / "theme-phase-window"
-        release = self.root / "theme-phase-release"
-        self.env.update(TEST_THEME_PHASE_WINDOW=str(window), TEST_THEME_PHASE_RELEASE=str(release))
-        source = self.launcher.read_text()
-        anchor = "    NATIVE_THEME_STAGE=" + stage + "\n"
-        self.assertEqual(source.count(anchor), 1)
-        gate = textwrap.dedent(r'''
-            : >"$TEST_THEME_PHASE_WINDOW" || return 1
-            fixture_phase_checks=400
-            while [ ! -f "$TEST_THEME_PHASE_RELEASE" ]; do
-                [ "$fixture_phase_checks" -gt 0 ] || return 1
-                usleep 10000 || return 1
-                fixture_phase_checks=$((fixture_phase_checks - 1))
-            done
-        ''')
-        self.launcher.write_text(source.replace(anchor, anchor + gate, 1))
-        return window, release
-
     @staticmethod
     def write_fixture_record(path, value):
         pending = path.with_suffix(".fixture-pending")
         pending.write_text(value + "\n")
         pending.replace(path)
-
-    def wait_for_native_theme_application(self):
-        pid = self.wait_for_managed_application()
-        directory = self.root / "lock"
-        base = (directory / "generation").read_text().strip()
-        self.wait_until(lambda: (directory / "native-theme-available").is_file())
-        self.assertEqual((directory / "native-theme-available").read_text().strip(), base)
-        self.assertEqual((directory / "native-theme-power-epoch").read_text().strip(), base.split(":")[1] + ":0")
-        return pid, base
-
-    def request_native_theme(self, pid, sequence, target):
-        release = getattr(self, "theme_continue_release", None)
-        if release is not None:
-            release.unlink(missing_ok=True)
-        directory = self.root / "lock"
-        base = (directory / "generation").read_text().strip()
-        command = json.dumps({"sequence": str(sequence), "target": target})
-        self.write_fixture_record(self.root / "theme-driver", command)
-        request = base + ":" + str(sequence) + ":" + target
-        self.wait_until(lambda: request in self.native_theme_snapshots("theme-request"))
-        try:
-            self.assertEqual((directory / "native-theme-request").read_text().strip(), request)
-        except FileNotFoundError:
-            self.assertEqual((directory / "native-theme-ready").read_text().strip(), base + ":" + str(sequence))
-        self.assertEqual(self.managed_pids(), [pid])
-        return base + ":" + str(sequence)
-
-    def wait_for_native_theme_ready(self, pid, ready):
-        directory = self.root / "lock"
-        self.wait_until(
-            lambda: (directory / "native-theme-ready").is_file()
-            and (directory / "native-theme-ready").read_text().strip() == ready
-            and ready in self.native_theme_snapshots("theme-ready")
-            and "theme:dispatch:" + ready.split(":")[0] + ":" + ready.split(":")[2] in self.trace()
-            and not (directory / "native-theme-request").exists()
-            and self.process_state(pid) not in (None, "T", "Z", "X")
-        )
-        return (directory / "native-theme-result").read_text().strip()
-
-    def native_theme_command_observations(self):
-        path = self.root / "theme-command-observations"
-        return [json.loads(row) for row in path.read_text().splitlines()] if path.exists() else []
-
-    def native_theme_result_observations(self):
-        path = self.root / "theme-result-observations"
-        return [json.loads(row) for row in path.read_text().splitlines()] if path.exists() else []
-
-    def assert_native_theme_result_before_continue(self, pid, awesome, ready, actual, status, window,
-                                                  prior_results=0):
-        directory = self.root / "lock"
-        self.wait_until(lambda: window.is_file() and window.read_text().strip() == ready)
-        self.assertEqual(self.process_state(pid), "T")
-        self.assertEqual(self.process_state(awesome.pid), "T")
-        self.assertEqual((directory / "native-theme-result").read_text().strip(), ready + ":" + status + ":" + actual)
-        self.assertEqual((directory / "native-epdc-mode").read_text().strip(), ":".join(ready.split(":")[:2]) + ":" + actual)
-        self.assertFalse((directory / "native-theme-ready").exists())
-        self.assertEqual(len(self.native_theme_snapshots("theme-result")), prior_results)
-        trace = self.trace()
-        self.assertGreater(trace.count("stop:statusbar"), trace.count("start:statusbar"))
-
-    def assert_native_theme_command_window(self, original, wm, target, actual, preference):
-        rows = self.native_theme_command_observations()
-        setter = next(index for index, row in enumerate(rows) if row["kind"] == "set" and row["value"] == target)
-        readback = next(index for index, row in enumerate(rows)
-                        if index > setter and row["kind"] == "get" and row["value"] == actual)
-        persisted = next(index for index, row in enumerate(rows)
-                         if index > readback and row["kind"] == "pref" and row["value"] == preference)
-        self.assertLess(setter, readback)
-        self.assertLess(readback, persisted)
-        for row in (rows[setter], rows[readback], rows[persisted]):
-            self.assertEqual(row["app"]["pid"], original["pid"])
-            self.assertEqual(row["app"]["birth"], original["birth"])
-            self.assertEqual(row["app"]["state"], "T")
-            self.assertEqual(row["wm"]["pid"], wm["pid"])
-            self.assertEqual(row["wm"]["birth"], wm["birth"])
-            self.assertNotIn(row["wm"]["state"], ("T", "Z", "X"))
-            self.assertTrue(row["statusbar_stopped"])
 
     def assert_native_theme_resident_cleanup(self, awesome, original):
         self.wait_until(lambda: not self.original_process_exists(original))
@@ -2976,6 +2852,245 @@ class LauncherLifecycleTests(unittest.TestCase):
         self.assertIn(f"managed:term:{original['pid']}", self.managed_events())
         self.assert_native_theme_helpers_finished()
         self.assert_native_theme_restored(awesome)
+
+    def test_legacy_theme_requests_never_authorize_native_ipc_or_resume_the_window_manager(self):
+        awesome = self.native_dark_fixture(TEST_NATIVE_THEME_EXIT="hold", TEST_NATIVE_THEME_TARGET="")
+        barriers = self.observe_wake_probe_barriers()
+        original = []
+
+        def drive(supervisor):
+            pid = self.wait_for_managed_application()
+            original.append(self.observed_identity(pid))
+            directory = self.root / "lock"
+            base = (directory / "generation").read_text().strip()
+            generation, token = base.split(":")
+            changed_token = ("1" if token[0] == "0" else "0") + token[1:]
+            self.assertFalse((directory / "native-theme-available").exists())
+            self.assertFalse((directory / "native-theme-available.pending").exists())
+            self.assertEqual((directory / "native-epdc-mode").read_text().strip(), base + ":Y8")
+            baseline_trace = self.trace()
+            baseline_helpers = self.native_theme_identities()
+            cases = (
+                ("current-night", base + ":1:Y8INV", generation, "1"),
+                ("current-day", base + ":2:Y8", generation, "2"),
+                ("replayed", base + ":1:Y8INV", generation, "1"),
+                ("old-generation", "0:" + token + ":3:Y8INV", "0", "3"),
+                ("wrong-token", generation + ":" + changed_token + ":3:Y8INV", generation, "3"),
+                ("extra-line", base + ":3:Y8INV\n" + base + ":3:Y8INV", generation, "3"),
+                ("unknown-mode", base + ":3:UNKNOWN", generation, "3"),
+                ("overflow", base + ":18446744073709551616:Y8INV", generation, "18446744073709551616"),
+                ("malformed", "forged", generation, "4"),
+            )
+            # Even a complete set of forged former capability/result records
+            # cannot revive a retired protocol or grant native ownership.
+            for name in LEGACY_NATIVE_THEME_RECORDS:
+                self.write_fixture_record(directory / name, base)
+            for label, request, hint_generation, hint in cases:
+                with self.subTest(request=label):
+                    self.write_fixture_record(directory / "native-theme-request", request)
+                    barrier = "_weread_fixture_wake_barrier legacy-" + label
+                    self.emit("_weread_native_theme_request " + hint_generation + " " + hint, barrier)
+                    self.wait_until(lambda: barriers.exists() and barrier in barriers.read_text().splitlines())
+                    self.assertIsNone(supervisor.poll())
+                    self.assertTrue(self.original_process_exists(original[0]))
+                    self.assertNotIn(self.process_state(pid), (None, "T", "Z", "X"))
+                    self.assertEqual(self.process_state(awesome.pid), "T")
+                    self.assertEqual(self.trace(), baseline_trace)
+                    self.assertEqual(self.native_theme_identities(), baseline_helpers)
+                    self.assertEqual((directory / "native-epdc-mode").read_text().strip(), base + ":Y8")
+                    self.assertEqual((directory / "native-theme-result").read_text().strip(), base)
+                    self.assertEqual(self.managed_pids(), [pid])
+            supervisor.send_signal(signal.SIGTERM)
+
+        status, _, error = self.run_launcher(drive)
+        self.assertEqual(status, 143, error)
+        self.assertEqual(self.native_theme_events("set"), [])
+        self.assertEqual(self.native_theme_events("pref"), [])
+        self.assertEqual(Path(self.env["TEST_NATIVE_THEME_MODE"]).read_text().strip(), "Y8")
+        self.assertEqual(Path(self.env["TEST_NATIVE_THEME_PREF"]).read_text().strip(), "Y8")
+        self.assertEqual(self.frame_guard_events("capture"), [])
+        self.assertEqual(self.frame_guard_events("align"), [])
+        self.assertFalse(self.managed_received_signals(original[0]["pid"]).intersection({"SIGUSR1", "SIGUSR2"}))
+        self.assert_native_theme_resident_cleanup(awesome, original[0])
+
+    def test_legacy_theme_request_cannot_authorize_signals_from_replaced_app_records(self):
+        awesome = self.native_dark_fixture(TEST_NATIVE_THEME_EXIT="hold", TEST_NATIVE_THEME_TARGET="")
+        unrelated, foreign, signals = self.unrelated_power_process()
+        barriers = self.observe_wake_probe_barriers()
+        original = []
+
+        def drive(supervisor):
+            pid = self.wait_for_managed_application()
+            original.append(self.observed_identity(pid))
+            directory = self.root / "lock"
+            base = (directory / "generation").read_text().strip()
+            records = {name: (directory / name).read_text() for name in ("application-pid", "application-birth")}
+            self.write_fixture_record(directory / "application-pid", str(foreign["pid"]))
+            self.write_fixture_record(directory / "application-birth", foreign["birth"])
+            self.write_fixture_record(directory / "native-theme-available", base)
+            self.write_fixture_record(directory / "native-theme-request", base + ":1:Y8INV")
+            baseline = self.trace()
+            barrier = "_weread_fixture_wake_barrier legacy-foreign-app"
+            self.emit("_weread_native_theme_request " + base.split(":")[0] + " 1", barrier)
+            self.wait_until(lambda: barriers.exists() and barrier in barriers.read_text().splitlines())
+            self.assertEqual(self.trace(), baseline)
+            self.assertTrue(self.original_process_exists(original[0]))
+            self.assertNotIn(self.process_state(pid), (None, "T", "Z", "X"))
+            self.assertEqual(self.process_state(awesome.pid), "T")
+            self.assertIsNone(unrelated.poll())
+            self.assertFalse(signals.exists(), "A retired request signaled a mutable App record.")
+            for name, value in records.items():
+                (directory / name).write_text(value)
+            supervisor.send_signal(signal.SIGTERM)
+
+        status, _, error = self.run_launcher(drive)
+        self.assertEqual(status, 143, error)
+        self.assertIsNone(unrelated.poll())
+        self.assertFalse(signals.exists())
+        self.assertEqual(self.native_theme_events("set"), [])
+        self.assert_native_theme_resident_cleanup(awesome, original[0])
+
+    def test_legacy_theme_records_are_retired_before_normal_and_cold_application_starts(self):
+        awesome = self.native_dark_fixture(
+            TEST_NATIVE_THEME_EXIT="hold", TEST_NATIVE_THEME_TARGET="", TEST_MANAGED_CAPABILITY="0"
+        )
+        source = self.launcher.read_text()
+        anchor = "start_application() {\n"
+        self.assertEqual(source.count(anchor), 1)
+        seed = "".join("    printf 'stale\\n' >\"$LOCK_DIR/" + name + "\"\n"
+                       for name in LEGACY_NATIVE_THEME_RECORDS)
+        self.launcher.write_text(source.replace(anchor, anchor + seed, 1))
+        app = self.home / "app" / "weread"
+        source = app.read_text()
+        anchor = 'record("start", generation + ":" + resume)\n'
+        self.assertEqual(source.count(anchor), 1)
+        witness = (
+            "for legacy_name in " + repr(LEGACY_NATIVE_THEME_RECORDS) + ":\n"
+            "    if (context / legacy_name).exists():\n"
+            '        record("legacy-leftover", generation + ":" + legacy_name)\n'
+            'record("legacy-records-cleared", generation)\n'
+        )
+        app.write_text(source.replace(anchor, anchor + witness, 1))
+
+        def drive(_supervisor):
+            owner = self.root / "lock" / "application-owned"
+            self.wait_until(lambda: self.starts() == ["0"]
+                            and self.native_theme_snapshots("legacy-records-cleared") == ["1"]
+                            and owner.exists() and len(owner.read_text().strip().split(":")) == 4)
+            self.emit("goingToScreenSaver 2")
+            self.wait_until(lambda: "xrefresh:" in self.trace())
+            self.emit("outOfScreenSaver 1", "exitingScreenSaver 1")
+
+        status, _, error = self.run_launcher(drive)
+        self.assertEqual(status, 0, error)
+        self.assertEqual(self.starts(), ["0", "1"])
+        self.assertEqual(self.native_theme_snapshots("legacy-records-cleared"), ["1", "2"])
+        self.assertEqual(self.native_theme_snapshots("legacy-leftover"), [])
+        self.assertEqual(self.native_theme_events("set"), [])
+        self.assertEqual(self.native_theme_events("pref"), [])
+        self.assert_frame_guards_reaped(2)
+        self.assert_native_theme_helpers_finished()
+        self.assert_native_theme_restored(awesome)
+
+    def resident_wake_epoch_gate(self, after_alignment):
+        window = self.root / "resident-wake-epoch-window"
+        release = self.root / "resident-wake-epoch-release"
+        self.env.update(TEST_WAKE_EPOCH_WINDOW=str(window), TEST_WAKE_EPOCH_RELEASE=str(release))
+        source = self.launcher.read_text()
+        failure = ("Resident wake alignment was superseded" if after_alignment else "Resident wake was superseded")
+        anchor = "    clear_native_theme_power_interrupt || fail '" + failure + " by a power event or an unconfirmed active state.'\n"
+        self.assertEqual(source.count(anchor), 1)
+        gate = textwrap.dedent(r'''
+            : >"$TEST_WAKE_EPOCH_WINDOW" || return 1
+            fixture_wake_epoch_checks=400
+            while [ ! -f "$TEST_WAKE_EPOCH_RELEASE" ]; do
+                [ "$fixture_wake_epoch_checks" -gt 0 ] || return 1
+                usleep 10000 || return 1
+                fixture_wake_epoch_checks=$((fixture_wake_epoch_checks - 1))
+            done
+        ''')
+        self.launcher.write_text(source.replace(anchor, gate + anchor, 1))
+        return window, release, failure
+
+    def assert_resident_wake_rejects_queued_power_epoch(self, event, after_alignment):
+        awesome = self.native_dark_fixture(TEST_NATIVE_THEME_EXIT="hold", TEST_NATIVE_THEME_TARGET="")
+        window, release, failure = self.resident_wake_epoch_gate(after_alignment)
+        original = []
+
+        def drive(_supervisor):
+            pid = self.wait_for_managed_application()
+            original.append(self.observed_identity(pid))
+            directory = self.root / "lock"
+            base = (directory / "generation").read_text().strip()
+            token = base.split(":")[1]
+            self.suspend_managed_application(pid)
+            self.assertEqual((directory / "native-theme-power-epoch").read_text().strip(), token + ":1")
+            self.emit("outOfScreenSaver 1", "exitingScreenSaver 1")
+            self.wait_until(window.exists)
+            self.assertEqual(self.process_state(pid), "T")
+            self.assertEqual(self.process_state(awesome.pid), "T")
+            self.assertFalse((directory / "managed-wake-request").exists())
+            self.assertEqual(len(self.frame_guard_events("align")), int(after_alignment))
+            self.emit(event)
+            self.wait_until(lambda: (directory / "native-theme-power-epoch").read_text().strip() == token + ":2"
+                            and (directory / "native-theme-interrupt").is_file())
+            self.assertEqual((directory / "native-theme-interrupt").read_text().strip(), base)
+            # A concurrently cleared interrupt cannot erase the observer's
+            # newer epoch or authorize USR2/CONT before Main consumes it.
+            (directory / "native-theme-interrupt").unlink()
+            release.touch()
+
+        status, _, error = self.run_launcher(drive)
+        self.assertEqual(status, 1, error)
+        self.assertIn(failure, error)
+        self.assertEqual(self.native_theme_events("set"), [])
+        self.assertEqual(self.native_theme_events("pref"), [])
+        self.assertNotIn("SIGUSR2", self.managed_received_signals(original[0]["pid"]))
+        self.assertFalse(any(":wake:" in event for event in self.managed_events()))
+        self.assertEqual([row["accepted"] for row in self.frame_guard_events("capture")], [True])
+        self.assertEqual(len(self.frame_guard_events("align")), int(after_alignment))
+        self.assert_frame_guards_reaped(1)
+        self.assert_native_theme_resident_cleanup(awesome, original[0])
+
+    def test_resident_wake_rejects_a_queued_screensaver_before_publishing_the_native_snapshot(self):
+        self.assert_resident_wake_rejects_queued_power_epoch("goingToScreenSaver 2", after_alignment=False)
+
+    def test_resident_wake_rejects_a_queued_usb_before_publishing_the_native_snapshot(self):
+        self.assert_resident_wake_rejects_queued_power_epoch("usbConfigured 1", after_alignment=False)
+
+    def test_resident_wake_rejects_a_queued_screensaver_after_frame_alignment(self):
+        self.assert_resident_wake_rejects_queued_power_epoch("goingToScreenSaver 2", after_alignment=True)
+
+    def test_resident_wake_rejects_a_queued_usb_after_frame_alignment(self):
+        self.assert_resident_wake_rejects_queued_power_epoch("usbConfigured 1", after_alignment=True)
+
+    def test_resident_wake_consumes_each_power_epoch_and_clears_the_previous_interrupt(self):
+        awesome = self.native_dark_fixture(TEST_NATIVE_THEME_EXIT="hold", TEST_NATIVE_THEME_TARGET="")
+        original = []
+
+        def drive(supervisor):
+            pid = self.wait_for_managed_application()
+            original.append(self.observed_identity(pid))
+            directory = self.root / "lock"
+            base = (directory / "generation").read_text().strip()
+            token = base.split(":")[1]
+            for cycle in (1, 2):
+                request = self.suspend_managed_application(pid)
+                self.assertEqual((directory / "native-theme-interrupt").read_text().strip(), base)
+                self.assertEqual((directory / "native-theme-power-epoch").read_text().strip(), token + ":" + str(cycle))
+                self.wake_managed_application(pid, request)
+                self.wait_until(lambda: not (directory / "sleep-request").exists())
+                self.assertFalse((directory / "native-theme-interrupt").exists())
+                self.assertFalse((directory / "native-theme-available").exists())
+                self.assertEqual((directory / "generation").read_text().strip(), base)
+            supervisor.send_signal(signal.SIGTERM)
+
+        status, _, error = self.run_launcher(drive)
+        self.assertEqual(status, 143, error)
+        self.assertEqual(self.native_theme_events("set"), [])
+        self.assertEqual(self.managed_received_signals(original[0]["pid"]).intersection(
+            {"SIGUSR1", "SIGUSR2", "SIGCONT"}), {"SIGUSR1", "SIGUSR2", "SIGCONT"})
+        self.assert_native_theme_resident_cleanup(awesome, original[0])
 
     def test_frame_guard_bootstrap_precedes_the_app_and_closes_before_native_restore(self):
         awesome = self.native_dark_fixture(TEST_NATIVE_THEME_EXIT="hold", TEST_NATIVE_THEME_TARGET="")
@@ -3004,92 +3119,45 @@ class LauncherLifecycleTests(unittest.TestCase):
         self.assert_frame_guards_reaped(1)
         self.assert_native_theme_restored(awesome)
 
-    def test_frame_guard_native_theme_capture_and_align_fence_the_original_processes(self):
-        awesome = self.native_theme_handoff_fixture()
-        self.frame_guard_fixture(TEST_FRAME_GUARD_SHARED_TRACE="1")
-        window, release = self.native_theme_continue_gate()
-        original = []
-        wm = self.observed_identity(awesome.pid)
-
-        def drive(supervisor):
-            pid, base = self.wait_for_native_theme_application()
-            original.append(self.observed_identity(pid))
-            created = self.wait_for_frame_guard(supervisor)
-            for cycle, target in ((1, "Y8INV"), (2, "Y8")):
-                ready = self.request_native_theme(pid, str(cycle), target)
-                self.assert_native_theme_result_before_continue(pid, awesome, ready, target, "ok", window,
-                                                                prior_results=cycle - 1)
-                captures = self.frame_guard_events("capture")
-                aligns = self.frame_guard_events("align")
-                self.assertEqual(len(captures), cycle)
-                self.assertEqual(len(aligns), cycle)
-                for row in (captures[-1], aligns[-1]):
-                    self.assertTrue(row["accepted"])
-                    self.assertEqual((row["helper"], row["birth"]),
-                                     (created["helper"], created["birth"]))
-                    self.assertEqual(row["generation"], 1)
-                    self.assertEqual((row["application"]["pid"], row["application"]["birth"],
-                                      row["application"]["state"]),
-                                     (original[0]["pid"], original[0]["birth"], "T"))
-                    self.assertEqual((row["wm"]["pid"], row["wm"]["birth"], row["wm"]["state"]),
-                                     (wm["pid"], wm["birth"], "T"))
-                self.assertEqual(captures[-1]["sequence"], cycle * 2 - 1)
-                self.assertEqual(aligns[-1]["sequence"], cycle * 2)
-                trace = self.trace()
-                capture = trace.index(f"frame-guard:capture:{created['helper']}:{cycle * 2 - 1}")
-                setter = next(index for index, event in enumerate(trace)
-                              if index > capture and event.startswith(f"theme:set:{target}:"))
-                preference = next(index for index, event in enumerate(trace)
-                                  if index > setter and event.startswith(f"theme:pref:{target}:"))
-                align = trace.index(f"frame-guard:align:{created['helper']}:{cycle * 2}")
-                self.assertLess(capture, setter)
-                self.assertLess(preference, align)
-                self.assertEqual(self.frame_guard_events("close"), [])
-                self.assertEqual((self.root / "lock" / "generation").read_text().strip(), base)
-                release.touch()
-                self.assertEqual(self.wait_for_native_theme_ready(pid, ready), ready + ":ok:" + target)
-            supervisor.send_signal(signal.SIGTERM)
-
-        status, _, error = self.run_launcher(drive)
-        self.assertEqual(status, 143, error)
-        self.assert_native_theme_command_window(original[0], wm, "Y8INV", "Y8INV", "Y8INV")
-        self.assert_native_theme_command_window(original[0], wm, "Y8", "Y8", "Y8")
-        self.assert_frame_guards_reaped(1)
-        self.assert_native_theme_resident_cleanup(awesome, original[0])
-
-    def assert_frame_guard_native_theme_rejection(self, **behavior):
-        awesome = self.native_theme_handoff_fixture()
+    def assert_frame_guard_resident_sleep_rejection(self, **behavior):
+        awesome = self.native_dark_fixture(TEST_NATIVE_THEME_EXIT="hold", TEST_NATIVE_THEME_TARGET="")
         gate = self.root / "frame-guard-capture-release"
         self.frame_guard_fixture(TEST_FRAME_GUARD_CAPTURE_GATE=str(gate), **behavior)
         original = []
 
         def drive(supervisor):
-            pid, _base = self.wait_for_native_theme_application()
+            pid = self.wait_for_managed_application()
             original.append(self.observed_identity(pid))
             self.wait_for_frame_guard(supervisor)
-            self.request_native_theme(pid, "1", "Y8INV")
+            self.emit("goingToScreenSaver 2")
             self.wait_until(lambda: bool(self.frame_guard_events("capture-wait")))
             self.assertEqual(self.process_state(pid), "T")
             self.assertEqual(self.process_state(awesome.pid), "T")
-            self.assertEqual(self.native_theme_events("set"), [])
             gate.touch()
+            self.wait_until(lambda: "xrefresh:" in self.trace()
+                            and len(self.frame_guard_events("close")) == 1)
+            self.assertFalse(self.original_process_exists(original[0]))
+            self.assertFalse(any(":wake:" in event for event in self.managed_events()))
+            self.emit("outOfScreenSaver 1", "exitingScreenSaver 1")
 
         status, _, error = self.run_launcher(drive)
-        self.assertEqual(status, 1, error)
-        self.assertIn("Native theme handoff could not complete safely", error)
-        self.assertEqual(self.native_theme_events("set"), [])
-        self.assertEqual(self.native_theme_result_observations(), [])
+        self.assertEqual(status, 0, error)
+        self.assertEqual(self.starts(), ["0", "1"])
         self.assertEqual(self.frame_guard_events("align"), [])
-        self.assert_frame_guards_reaped(1)
-        self.assert_native_theme_resident_cleanup(awesome, original[0])
-        return error
+        self.assertEqual(self.native_theme_events("set"), [])
+        self.assertEqual(self.native_theme_events("pref"), [])
+        self.assertNotIn("SIGUSR2", self.managed_received_signals(original[0]["pid"]))
+        self.assertTrue(any(":cold-restored:" in event for event in self.managed_events()))
+        self.assert_frame_guards_reaped(2)
+        self.assert_native_theme_helpers_finished()
+        self.assert_native_theme_restored(awesome)
 
-    def test_frame_guard_capture_failure_prevents_the_system_theme_setter(self):
-        self.assert_frame_guard_native_theme_rejection(TEST_FRAME_GUARD_FAIL_CAPTURE="1")
+    def test_frame_guard_capture_failure_uses_saved_cold_recovery_before_any_resident_wake(self):
+        self.assert_frame_guard_resident_sleep_rejection(TEST_FRAME_GUARD_FAIL_CAPTURE="1")
         self.assertEqual([row["accepted"] for row in self.frame_guard_events("capture")], [False])
 
-    def test_frame_guard_stale_helper_birth_acknowledgment_prevents_the_theme_setter(self):
-        self.assert_frame_guard_native_theme_rejection(TEST_FRAME_GUARD_READY_MODE="wrong-birth")
+    def test_frame_guard_stale_helper_birth_acknowledgment_cannot_authorize_resident_wake(self):
+        self.assert_frame_guard_resident_sleep_rejection(TEST_FRAME_GUARD_READY_MODE="wrong-birth")
         self.assertEqual([row["mode"] for row in self.frame_guard_events("ready")], ["wrong-birth"])
 
     def test_frame_guard_resident_sleep_and_wake_reuse_one_helper_across_two_cycles(self):
@@ -3267,329 +3335,6 @@ class LauncherLifecycleTests(unittest.TestCase):
     def test_frame_guard_watcher_fork_hup_reaps_both_unpublished_processes(self):
         self.assert_frame_guard_watcher_registration_signal(signal.SIGHUP)
 
-    def test_native_theme_handoff_round_trip_keeps_the_original_app_and_window_manager(self):
-        awesome = self.native_theme_handoff_fixture()
-        window, release = self.native_theme_continue_gate()
-        original = []
-        wm = self.observed_identity(awesome.pid)
-
-        def drive(supervisor):
-            pid, base = self.wait_for_native_theme_application()
-            original.append(self.observed_identity(pid))
-            for sequence, target in (("1", "Y8INV"), ("2", "Y8")):
-                ready = self.request_native_theme(pid, sequence, target)
-                self.wait_until(lambda: window.is_file() and window.read_text().strip() == ready)
-                self.assertEqual(self.process_state(pid), "T")
-                self.assertEqual(self.process_state(awesome.pid), "T")
-                self.assertEqual((self.root / "lock" / "native-theme-result").read_text().strip(), ready + ":ok:" + target)
-                self.assertFalse((self.root / "lock" / "native-theme-ready").exists())
-                self.assertEqual((self.root / "lock" / "generation").read_text().strip(), base)
-                self.assertEqual(self.trace().count("start:statusbar"), 0)
-                release.touch()
-                self.assertEqual(self.wait_for_native_theme_ready(pid, ready), ready + ":ok:" + target)
-                self.assertEqual(self.managed_pids(), [pid])
-            supervisor.send_signal(signal.SIGTERM)
-
-        status, _, error = self.run_launcher(drive)
-        self.assertEqual(status, 143, error)
-        self.assertEqual([row["value"] for row in self.native_theme_command_observations() if row["kind"] == "set"],
-                         ["Y8INV", "Y8"])
-        self.assert_native_theme_command_window(original[0], wm, "Y8INV", "Y8INV", "Y8INV")
-        self.assert_native_theme_command_window(original[0], wm, "Y8", "Y8", "Y8")
-        results = self.native_theme_result_observations()
-        self.assertEqual([row["result"].split(":")[-2:] for row in results], [["ok", "Y8INV"], ["ok", "Y8"]])
-        for row in results:
-            self.assertEqual((row["pid"], row["birth"]), (original[0]["pid"], original[0]["birth"]))
-            self.assertEqual((row["wm_pid"], row["wm_birth"], row["wm_state"]), (wm["pid"], wm["birth"], "T"))
-            self.assertEqual(row["interrupt"], "")
-            self.assertTrue(row["native"].endswith(":" + row["result"].split(":")[-1]))
-        self.assertEqual(error.count("Native theme handoff confirmed result=ok"), 2)
-        self.assert_native_theme_resident_cleanup(awesome, original[0])
-
-    def test_native_theme_handoff_known_readback_mismatch_returns_error_and_actual_mode(self):
-        awesome = self.native_theme_handoff_fixture(TEST_NATIVE_THEME_READBACK_MISMATCH="1")
-        window, release = self.native_theme_continue_gate()
-        original = []
-        wm = self.observed_identity(awesome.pid)
-
-        def drive(supervisor):
-            pid, _base = self.wait_for_native_theme_application()
-            original.append(self.observed_identity(pid))
-            ready = self.request_native_theme(pid, "1", "Y8INV")
-            self.assert_native_theme_result_before_continue(pid, awesome, ready, "Y8", "error", window)
-            release.touch()
-            self.assertEqual(self.wait_for_native_theme_ready(pid, ready), ready + ":error:Y8")
-            supervisor.send_signal(signal.SIGTERM)
-
-        status, _, error = self.run_launcher(drive)
-        self.assertEqual(status, 143, error)
-        self.assertEqual(len(self.native_theme_events("set")), 1)
-        self.assert_native_theme_command_window(original[0], wm, "Y8INV", "Y8", "Y8INV")
-        self.assertEqual(self.native_theme_result_observations()[0]["result"].split(":")[-2:], ["error", "Y8"])
-        self.assertIn("Native theme handoff confirmed result=error mode=Y8", error)
-        self.assert_native_theme_resident_cleanup(awesome, original[0])
-
-    def test_native_theme_handoff_persistence_mismatch_returns_error_with_known_actual(self):
-        awesome = self.native_theme_handoff_fixture(TEST_NATIVE_THEME_PREF_MISMATCH="1")
-        original = []
-        wm = self.observed_identity(awesome.pid)
-
-        def drive(supervisor):
-            pid, _base = self.wait_for_native_theme_application()
-            original.append(self.observed_identity(pid))
-            ready = self.request_native_theme(pid, "1", "Y8INV")
-            self.assertEqual(self.wait_for_native_theme_ready(pid, ready), ready + ":error:Y8INV")
-            supervisor.send_signal(signal.SIGTERM)
-
-        status, _, error = self.run_launcher(drive)
-        self.assertEqual(status, 143, error)
-        self.assert_native_theme_command_window(original[0], wm, "Y8INV", "Y8INV", "Y8")
-        self.assertIn("Native theme handoff confirmed result=error mode=Y8INV", error)
-        self.assert_native_theme_resident_cleanup(awesome, original[0])
-
-    def assert_native_theme_handoff_unconfirmed_cleanup(self, **behavior):
-        awesome = self.native_theme_handoff_fixture(**behavior)
-        original = []
-
-        def drive(_supervisor):
-            pid, _base = self.wait_for_native_theme_application()
-            original.append(self.observed_identity(pid))
-            self.request_native_theme(pid, "1", "Y8INV")
-
-        status, _, error = self.run_launcher(drive)
-        self.assertEqual(status, 1, error)
-        self.assertIn("Native theme handoff could not complete safely", error)
-        self.assertEqual(len(self.native_theme_events("set")), 1)
-        self.assertEqual(self.native_theme_snapshots("theme-ready"), [])
-        if behavior.get("TEST_NATIVE_THEME_READY") not in ("none", "stale"):
-            self.assertEqual(self.native_theme_result_observations(), [])
-        self.assert_native_theme_resident_cleanup(awesome, original[0])
-        return error
-
-    def test_native_theme_handoff_setter_timeout_exits_without_cold_restart(self):
-        error = self.assert_native_theme_handoff_unconfirmed_cleanup(TEST_NATIVE_THEME_SET_TIMEOUT="1")
-        self.assertIn("step=theme-set", error)
-        self.assertEqual(len(self.native_theme_events("get")), 1)
-        self.assertEqual(Path(self.env["TEST_NATIVE_THEME_MODE"]).read_text().strip(), "Y8")
-
-    def test_native_theme_handoff_unknown_readback_exits_without_resuming_the_renderer(self):
-        error = self.assert_native_theme_handoff_unconfirmed_cleanup(TEST_NATIVE_THEME_READBACK_VALUE="UNKNOWN")
-        self.assertIn("stage=system-readback", error)
-        self.assertEqual([event.split(":")[2] for event in self.native_theme_events("get")], ["Y8", "UNKNOWN"])
-        self.assertEqual(self.native_theme_events("pref"), [])
-
-    def test_native_theme_handoff_missing_renderer_acknowledgment_exits_without_cold_restart(self):
-        error = self.assert_native_theme_handoff_unconfirmed_cleanup(TEST_NATIVE_THEME_READY="none")
-        self.assertIn("renderer acknowledgment timed out", error)
-        self.assertEqual(len(self.native_theme_result_observations()), 1)
-
-    def test_native_theme_handoff_stale_renderer_acknowledgment_exits_without_cold_restart(self):
-        error = self.assert_native_theme_handoff_unconfirmed_cleanup(TEST_NATIVE_THEME_READY="stale")
-        self.assertIn("renderer acknowledgment timed out", error)
-        self.assertEqual(len(self.native_theme_result_observations()), 1)
-
-    def test_native_theme_handoff_rejects_stale_replayed_malformed_and_wrong_token_requests(self):
-        awesome = self.native_theme_handoff_fixture()
-        original = []
-
-        def drive(supervisor):
-            pid, base = self.wait_for_native_theme_application()
-            original.append(self.observed_identity(pid))
-            ready = self.request_native_theme(pid, "9", "Y8INV")
-            self.assertEqual(self.wait_for_native_theme_ready(pid, ready), ready + ":ok:Y8INV")
-            self.wait_until(lambda: "theme:dispatch:1:9" in self.trace())
-            generation, token = base.split(":")
-            changed_token = ("1" if token[0] == "0" else "0") + token[1:]
-            cases = [
-                ("replayed", base + ":9:Y8", "9"),
-                ("older", base + ":8:Y8", "8"),
-                ("zero", base + ":0:Y8", "0"),
-                ("empty-sequence", base + "::Y8", "10"),
-                ("leading-zero", base + ":010:Y8", "010"),
-                ("negative", base + ":-1:Y8", "-1"),
-                ("nondigit", base + ":10x:Y8", "10x"),
-                ("u64-overflow", base + ":18446744073709551616:Y8", "18446744073709551616"),
-                ("oversized", base + ":" + "1" * 130 + ":Y8", "1" * 130),
-                ("old-generation", "0:" + token + ":10:Y8", "10"),
-                ("wrong-token", generation + ":" + changed_token + ":10:Y8", "10"),
-                ("unknown-mode", base + ":10:UNKNOWN", "10"),
-                ("extra-field", base + ":10:Y8:extra", "10"),
-                ("hint-mismatch", base + ":10:Y8", "11"),
-            ]
-            expected_setters = len(self.native_theme_events("set"))
-            for label, request, hint in cases:
-                with self.subTest(request=label):
-                    prior = self.trace().count("theme:dispatch:" + generation + ":" + hint)
-                    self.write_fixture_record(self.root / "lock" / "native-theme-request", request)
-                    self.emit("_weread_native_theme_request " + generation + " " + hint)
-                    self.wait_until(lambda: self.trace().count("theme:dispatch:" + generation + ":" + hint) == prior + 1)
-                    self.assertEqual(len(self.native_theme_events("set")), expected_setters)
-                    self.assertIsNone(supervisor.poll())
-                    self.assertEqual(self.managed_pids(), [pid])
-            ready = self.request_native_theme(pid, "10", "Y8")
-            self.assertEqual(self.wait_for_native_theme_ready(pid, ready), ready + ":ok:Y8")
-            supervisor.send_signal(signal.SIGTERM)
-
-        status, _, error = self.run_launcher(drive)
-        self.assertEqual(status, 143, error)
-        self.assertEqual(len(self.native_theme_events("set")), 2)
-        self.assert_native_theme_resident_cleanup(awesome, original[0])
-
-    def test_native_theme_handoff_accepts_adjacent_sequences_at_the_u64_limit(self):
-        awesome = self.native_theme_handoff_fixture()
-        original = []
-
-        def drive(supervisor):
-            pid, _base = self.wait_for_native_theme_application()
-            original.append(self.observed_identity(pid))
-            for sequence, target in (("18446744073709551614", "Y8INV"), ("18446744073709551615", "Y8")):
-                ready = self.request_native_theme(pid, sequence, target)
-                self.assertEqual(self.wait_for_native_theme_ready(pid, ready), ready + ":ok:" + target)
-            supervisor.send_signal(signal.SIGTERM)
-
-        status, _, error = self.run_launcher(drive)
-        self.assertEqual(status, 143, error)
-        self.assertEqual(len(self.native_theme_events("set")), 2)
-        self.assert_native_theme_resident_cleanup(awesome, original[0])
-
-    def assert_native_theme_record_replaced_between_phases(self, stage, record, duplicate):
-        awesome = self.native_theme_handoff_fixture()
-        window, release = self.native_theme_phase_gate(stage)
-        original = []
-
-        def drive(_supervisor):
-            pid, _base = self.wait_for_native_theme_application()
-            original.append(self.observed_identity(pid))
-            self.request_native_theme(pid, "1", "Y8INV")
-            self.wait_until(window.exists)
-            self.assertEqual(self.native_theme_events("set"), [])
-            self.assertEqual(self.process_state(pid), "T")
-            path = self.root / "lock" / record
-            committed = path.read_bytes()
-            self.assertTrue(committed.endswith(b"\n"))
-            replacement = committed + (committed if duplicate else b"\n")
-            if record == "native-theme-request":
-                self.assertLessEqual(len(replacement), 128, "The second line must fail record parsing, not the byte limit.")
-            pending = path.with_suffix(".fixture-pending")
-            pending.write_bytes(replacement)
-            pending.replace(path)
-            release.touch()
-
-        status, _, error = self.run_launcher(drive)
-        self.assertEqual(status, 1, error)
-        self.assertIn("stage=" + stage, error)
-        self.assertEqual(self.native_theme_events("set"), [])
-        self.assertEqual(self.native_theme_result_observations(), [])
-        self.assert_native_theme_resident_cleanup(awesome, original[0])
-
-    def test_native_theme_handoff_rejects_a_second_request_line_after_frame_capture(self):
-        self.assert_native_theme_record_replaced_between_phases(
-            "power-before-native-window", "native-theme-request", duplicate=True
-        )
-
-    def test_native_theme_handoff_rechecks_generation_before_the_system_setter(self):
-        self.assert_native_theme_record_replaced_between_phases(
-            "power-before-set", "generation", duplicate=False
-        )
-
-    def assert_native_theme_queued_power_interrupt(self, event):
-        awesome = self.native_theme_handoff_fixture()
-        armed, blocked, _count = self.install_supervisor_query_fixture("lipc-get-prop", behavior="released", gated=True)
-        release = self.root / "supervisor-query-release"
-        original = []
-
-        def drive(_supervisor):
-            pid, base = self.wait_for_native_theme_application()
-            original.append(self.observed_identity(pid))
-            armed.touch()
-            self.request_native_theme(pid, "1", "Y8INV")
-            self.wait_until(blocked.exists)
-            prior_power_queries = len(self.native_theme_events("power"))
-            self.assertNotEqual(self.process_state(pid), "T")
-            self.assertEqual(self.process_state(awesome.pid), "T")
-            self.emit(event)
-            directory = self.root / "lock"
-            self.wait_until(lambda: (directory / "native-theme-power-epoch").read_text().strip() == base.split(":")[1] + ":1"
-                            and (directory / "native-theme-interrupt").is_file())
-            self.assertEqual((directory / "native-theme-interrupt").read_text().strip(), base)
-            self.assertEqual(self.native_theme_events("set"), [])
-            self.assertFalse((directory / "native-theme-result").exists())
-            # Model the wake-clear race without weakening the real observer:
-            # its epoch remains newer than Main's consumed sleep generation.
-            (directory / "native-theme-interrupt").unlink()
-            self.assertEqual((directory / "native-theme-power-epoch").read_text().strip(), base.split(":")[1] + ":1")
-            release.touch()
-            self.wait_until(lambda: len(self.native_theme_events("power")) > prior_power_queries)
-
-        status, _, error = self.run_launcher(drive)
-        self.assertEqual(status, 1, error)
-        self.assertIn("Native theme handoff could not complete safely", error)
-        self.assertTrue(any(event.startswith("theme:power:active:") for event in self.native_theme_events("power")))
-        self.assertNotIn("step=theme-power-state", error)
-        self.assertEqual(self.native_theme_events("set"), [])
-        self.assertEqual(self.native_theme_result_observations(), [])
-        self.assert_native_theme_resident_cleanup(awesome, original[0])
-
-    def test_native_theme_handoff_queued_screensaver_epoch_prevents_the_setter(self):
-        self.assert_native_theme_queued_power_interrupt("goingToScreenSaver 2")
-
-    def test_native_theme_handoff_queued_usb_epoch_prevents_the_setter(self):
-        self.assert_native_theme_queued_power_interrupt("usbConfigured 1")
-
-    def test_native_theme_handoff_replaced_app_record_cleans_the_original_without_signaling_a_foreign_pid(self):
-        awesome = self.native_theme_handoff_fixture()
-        unrelated, foreign, signals = self.unrelated_power_process()
-        armed, blocked, _count = self.install_supervisor_query_fixture("lipc-get-prop", behavior="released", gated=True)
-        original = []
-
-        def drive(_supervisor):
-            pid, _base = self.wait_for_native_theme_application()
-            original.append(self.observed_identity(pid))
-            armed.touch()
-            self.request_native_theme(pid, "1", "Y8INV")
-            self.wait_until(blocked.exists)
-            directory = self.root / "lock"
-            self.write_fixture_record(directory / "application-pid", str(foreign["pid"]))
-            self.write_fixture_record(directory / "application-birth", foreign["birth"])
-            (self.root / "supervisor-query-release").touch()
-
-        status, _, error = self.run_launcher(drive)
-        self.assertEqual(status, 1, error)
-        self.assertEqual(self.native_theme_events("set"), [])
-        self.assertEqual(self.native_theme_result_observations(), [])
-        self.assertIsNone(unrelated.poll())
-        self.assertFalse(signals.exists(), "A mutable App record authorized a signal to another process.")
-        self.assert_native_theme_resident_cleanup(awesome, original[0])
-
-    def test_native_theme_handoff_after_resident_wake_clears_the_old_power_interrupt(self):
-        awesome = self.native_theme_handoff_fixture()
-        original = []
-
-        def drive(supervisor):
-            pid, base = self.wait_for_native_theme_application()
-            original.append(self.observed_identity(pid))
-            first = self.request_native_theme(pid, "1", "Y8INV")
-            self.assertEqual(self.wait_for_native_theme_ready(pid, first), first + ":ok:Y8INV")
-            request = self.suspend_managed_application(pid)
-            directory = self.root / "lock"
-            self.assertEqual((directory / "native-theme-interrupt").read_text().strip(), base)
-            self.assertEqual((directory / "native-theme-power-epoch").read_text().strip(), base.split(":")[1] + ":1")
-            self.wake_managed_application(pid, request)
-            self.wait_until(lambda: not (directory / "sleep-request").exists())
-            self.assertFalse((directory / "native-theme-interrupt").exists())
-            self.assertEqual((directory / "generation").read_text().strip(), base)
-            second = self.request_native_theme(pid, "2", "Y8")
-            self.assertEqual(self.wait_for_native_theme_ready(pid, second), second + ":ok:Y8")
-            self.assertEqual(self.managed_pids(), [pid])
-            supervisor.send_signal(signal.SIGTERM)
-
-        status, _, error = self.run_launcher(drive)
-        self.assertEqual(status, 143, error)
-        self.assertEqual(len(self.native_theme_events("set")), 2)
-        self.assertEqual(self.managed_received_signals(original[0]["pid"]).intersection(
-            {"SIGUSR1", "SIGUSR2", "SIGCONT"}), {"SIGUSR1", "SIGUSR2", "SIGCONT"})
-        self.assert_native_theme_resident_cleanup(awesome, original[0])
-
     def assert_guarded_native_redraw_display(self, display):
         expected = ":0.0" if display is None else display
         self.env.update(TEST_XREFRESH_RECORD=str(self.root / "xrefresh-record"), TEST_XREFRESH_EXPECTED_DISPLAY=expected)
@@ -3670,12 +3415,18 @@ class LauncherLifecycleTests(unittest.TestCase):
         self.assert_native_theme_helpers_finished()
         self.assert_native_theme_restored(awesome)
 
-    def test_native_theme_ordinary_success_applies_dark_and_verifies_before_statusbar_restore(self):
+    def test_app_night_ordinary_exit_keeps_the_native_light_mode_and_preference(self):
         awesome = self.native_dark_fixture()
         status, _, error = self.run_launcher()
         self.assertEqual(status, 0, error)
         self.assertTrue(self.native_theme_snapshots("native-snapshot")[0].endswith(":Y8"))
-        self.assert_native_theme_applied_before_restore("Y8INV", "Y8INV", error)
+        self.assertEqual([event.split(":")[2] for event in self.native_theme_events("get")], ["Y8"])
+        self.assertEqual(self.native_theme_events("set"), [])
+        self.assertEqual(self.native_theme_events("pref"), [])
+        self.assertEqual(Path(self.env["TEST_NATIVE_THEME_MODE"]).read_text().strip(), "Y8")
+        self.assertEqual(Path(self.env["TEST_NATIVE_THEME_PREF"]).read_text().strip(), "Y8")
+        self.assertNotIn("synchronization confirmed", error)
+        self.assert_native_theme_helpers_finished()
         self.assert_native_theme_restored(awesome)
 
     def test_native_theme_unknown_wake_clears_the_previous_cycle_snapshot(self):
@@ -3703,12 +3454,17 @@ class LauncherLifecycleTests(unittest.TestCase):
         self.assert_native_theme_helpers_finished()
         self.assert_native_theme_restored(awesome)
 
-    def test_native_theme_explicit_zero_clears_the_native_dark_preference(self):
+    def test_app_day_ordinary_exit_keeps_the_native_dark_mode_and_preference(self):
         awesome = self.native_dark_fixture(mode="Y8INV", TEST_NATIVE_THEME_TARGET="0")
         status, _, error = self.run_launcher()
         self.assertEqual(status, 0, error)
-        self.assert_native_theme_applied_before_restore("Y8", "Y8", error)
-        self.assertEqual(Path(self.env["TEST_NATIVE_THEME_PREF"]).read_text().strip(), "Y8")
+        self.assertTrue(self.native_theme_snapshots("native-snapshot")[0].endswith(":Y8INV"))
+        self.assertEqual([event.split(":")[2] for event in self.native_theme_events("get")], ["Y8INV"])
+        self.assertEqual(self.native_theme_events("set"), [])
+        self.assertEqual(self.native_theme_events("pref"), [])
+        self.assertEqual(Path(self.env["TEST_NATIVE_THEME_MODE"]).read_text().strip(), "Y8INV")
+        self.assertEqual(Path(self.env["TEST_NATIVE_THEME_PREF"]).read_text().strip(), "Y8INV")
+        self.assert_native_theme_helpers_finished()
         self.assert_native_theme_restored(awesome)
 
     def test_native_theme_failed_application_exit_cannot_apply_its_target(self):
@@ -3769,7 +3525,7 @@ class LauncherLifecycleTests(unittest.TestCase):
     def test_native_theme_stale_nonce_target_is_rejected(self):
         self.assert_native_theme_target_is_rejected(scope="stale-nonce")
 
-    def test_native_theme_target_must_be_an_exact_boolean_digit(self):
+    def test_legacy_native_theme_invalid_target_is_ignored(self):
         self.assert_native_theme_target_is_rejected(value="2")
 
     def test_native_theme_unknown_mode_never_becomes_a_snapshot_or_a_setter(self):
@@ -4106,38 +3862,6 @@ class LauncherLifecycleTests(unittest.TestCase):
         self.assert_native_theme_restored(awesome)
         self.assertEqual((self.root / "cleanup-descriptor").read_text(), "closed\n")
 
-    def test_native_theme_setter_timeout_reaps_its_group_and_restores_native_control(self):
-        awesome = self.native_dark_fixture(TEST_NATIVE_THEME_SET_TIMEOUT="1")
-        status, _, error = self.run_launcher()
-        self.assertEqual(status, 0, error)
-        self.assertEqual(len(self.native_theme_events("set")), 1)
-        self.assertEqual(Path(self.env["TEST_NATIVE_THEME_MODE"]).read_text().strip(), "Y8")
-        self.assert_native_theme_failure_is_visible(error)
-        self.assert_native_theme_helpers_finished()
-        self.assert_native_theme_restored(awesome)
-
-    def test_native_theme_readback_mismatch_is_reported_without_repeating_the_setter(self):
-        awesome = self.native_dark_fixture(TEST_NATIVE_THEME_READBACK_MISMATCH="1")
-        status, _, error = self.run_launcher()
-        self.assertEqual(status, 0, error)
-        self.assertEqual(len(self.native_theme_events("set")), 1)
-        self.assertEqual(Path(self.env["TEST_NATIVE_THEME_MODE"]).read_text().strip(), "Y8")
-        self.assert_native_theme_failure_is_visible(error)
-        self.assert_native_theme_helpers_finished()
-        self.assert_native_theme_restored(awesome)
-
-    def test_native_theme_persistent_preference_mismatch_is_reported_after_active_readback(self):
-        awesome = self.native_dark_fixture(TEST_NATIVE_THEME_PREF_MISMATCH="1")
-        status, _, error = self.run_launcher()
-        self.assertEqual(status, 0, error)
-        self.assertEqual(len(self.native_theme_events("set")), 1)
-        self.assertEqual(Path(self.env["TEST_NATIVE_THEME_MODE"]).read_text().strip(), "Y8INV")
-        self.assertEqual(Path(self.env["TEST_NATIVE_THEME_PREF"]).read_text().strip(), "Y8")
-        self.assertEqual(len(self.native_theme_events("pref")), 1)
-        self.assert_native_theme_failure_is_visible(error)
-        self.assert_native_theme_helpers_finished()
-        self.assert_native_theme_restored(awesome)
-
     def test_native_theme_previously_stopped_awesome_is_not_sampled_continued_or_changed(self):
         awesome = self.native_dark_fixture(stopped=True)
         original = self.observed_identity(awesome.pid)
@@ -4180,30 +3904,44 @@ class LauncherLifecycleTests(unittest.TestCase):
     def test_native_theme_unreviewed_firmware_does_not_access_the_property(self):
         self.assert_native_theme_unsupported("scribe", "5.18.6")
 
-    def test_native_theme_inactive_power_state_skips_the_setter(self):
+    def test_native_snapshot_with_inactive_power_never_changes_the_native_preference(self):
         awesome = self.native_dark_fixture(TEST_POWER_STATE="screenSaver")
         status, _, error = self.run_launcher()
         self.assertEqual(status, 0, error)
         self.assertTrue(self.native_theme_snapshots("native-snapshot")[0].endswith(":Y8"))
         self.assertEqual(self.native_theme_events("set"), [])
+        self.assertEqual(self.native_theme_events("pref"), [])
         self.assertEqual(Path(self.env["TEST_NATIVE_THEME_MODE"]).read_text().strip(), "Y8")
         self.assert_native_theme_helpers_finished()
         self.assert_native_theme_restored(awesome)
 
-    def test_native_theme_power_change_during_mode_query_prevents_the_setter(self):
-        awesome = self.native_dark_fixture(TEST_NATIVE_THEME_POWER_AFTER_MODE_GET="screenSaver")
-        status, _, error = self.run_launcher()
-        self.assertEqual(status, 0, error)
+    def test_native_wake_mode_query_power_change_cannot_authorize_a_resident_wake(self):
+        awesome = self.native_dark_fixture(
+            TEST_NATIVE_THEME_EXIT="hold", TEST_NATIVE_THEME_TARGET="",
+            TEST_NATIVE_THEME_POWER_AFTER_MODE_GET="screenSaver",
+        )
+        original = []
+
+        def drive(_supervisor):
+            pid = self.wait_for_managed_application()
+            original.append(self.observed_identity(pid))
+            self.suspend_managed_application(pid)
+            self.emit("outOfScreenSaver 1", "exitingScreenSaver 1")
+
+        status, _, error = self.run_launcher(drive)
+        self.assertEqual(status, 1, error)
         self.assertTrue(self.native_theme_snapshots("native-snapshot")[0].endswith(":Y8"))
         self.assertEqual(self.native_theme_events("set"), [])
         power = self.native_theme_events("power")
         self.assertTrue(any(event.startswith("theme:power:active:") for event in power))
         self.assertTrue(power[-1].startswith("theme:power:screenSaver:"))
         self.assertEqual(Path(self.env["TEST_NATIVE_THEME_MODE"]).read_text().strip(), "Y8")
-        self.assert_native_theme_helpers_finished()
-        self.assert_native_theme_restored(awesome)
+        self.assertNotIn("SIGUSR2", self.managed_received_signals(original[0]["pid"]))
+        self.assertFalse(any(":wake:" in event for event in self.managed_events()))
+        self.assertIn("Resident wake was superseded", error)
+        self.assert_native_theme_resident_cleanup(awesome, original[0])
 
-    def test_native_theme_dynconf_helper_is_optional_after_active_readback(self):
+    def test_native_snapshot_does_not_require_a_dynconf_helper(self):
         awesome = self.native_dark_fixture()
         (self.bin / "get-dynconf-value").unlink()
         system = self.root / "without-dynconf"
@@ -4218,8 +3956,12 @@ class LauncherLifecycleTests(unittest.TestCase):
         self.assertIsNone(shutil.which("get-dynconf-value", path=self.env["PATH"]))
         status, _, error = self.run_launcher()
         self.assertEqual(status, 0, error)
-        self.assert_native_theme_applied_before_restore("Y8INV", "Y8INV", error, persisted=False)
+        self.assertTrue(self.native_theme_snapshots("native-snapshot")[0].endswith(":Y8"))
+        self.assertEqual([event.split(":")[2] for event in self.native_theme_events("get")], ["Y8"])
+        self.assertEqual(self.native_theme_events("set"), [])
         self.assertEqual(self.native_theme_events("pref"), [])
+        self.assertEqual(Path(self.env["TEST_NATIVE_THEME_MODE"]).read_text().strip(), "Y8")
+        self.assert_native_theme_helpers_finished()
         self.assert_native_theme_restored(awesome)
 
     def test_unaccepted_firmware_changes_no_services(self):
