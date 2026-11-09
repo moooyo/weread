@@ -172,7 +172,8 @@ The public-file update payload had SHA-256
 It used only the 35 R1-verified public App leaves and the exact production
 launcher, replacing 36 public leaves. Each of the 36 old public files was retained
 for rollback under `/mnt/us/weread-ko-normal-update-20261110-r1`; that backup
-contains no real data directory. Normal `library.sqlite` and WAL/SHM hashes were
+contained no real data directory. These device-side rollback files were later
+removed by the requested cleanup below. Normal `library.sqlite` and WAL/SHM hashes were
 identical before and after the public-file update. Account material and
 downloaded books were not copied.
 
@@ -218,6 +219,70 @@ above. Its SHA-256 is
 `05d7cc34ec43ccefc97d2b4c782b589bec1e9ca67f76ea00802851132af18fcf`;
 the manifest and raw device records are not redistributed with the product.
 
+## Post-acceptance device cleanup
+
+On 2026-11-10, the user requested removal of WeRead testing material from the
+Kindle. A fresh atomic lease covered the inventory, exact-path deletion, and
+post-cleanup checks. Nine old isolated installations or update workspaces, nine
+diagnostic backups, and four private control directories were removed, together
+with the resulting empty backup parent. User-storage free space increased by
+1,300,880 KiB (approximately 1.24 GiB).
+
+The normal launcher, application, frame guard, device configuration, and live
+SQLite/WAL/SHM hashes were identical before and after cleanup. Normal account and
+reading data remained in place. The existing KOReader WeRead plugin, its
+settings, and its reading directory were retained as a separate installation;
+their contents were not opened. No WeRead test processes, display locks, or
+matching private scratch paths remained in the checked locations. Native
+foreground and dark-mode settings remained unchanged.
+
+All device connections were closed before exact lease release at
+2026-11-10 05:05:38.685854 +08:00 (Asia/Shanghai; receipt
+`2026-11-09T21:05:38.685854Z`). Global-lock absence was checked independently and
+the available device window was reported to the other coordinator. Private
+cleanup evidence remains outside the repository. Earlier on-device testing and
+rollback paths in this history are no longer available.
+
+## Subsequent clean normal-mode installation
+
+The user then explicitly requested clearing the normal program, configuration,
+account database, and cache and installing the latest accepted normal runtime
+again. The previous `/mnt/us/weread` tree and document entry were removed without
+creating a new account-data backup for this reset.
+
+The clean-install tar had SHA-256
+`40771d6adabc5c74edf511308ef525194a4766fc3f81486f18855017ffe39f95`,
+with inventory SHA-256
+`a48bfcd7c6e927d74189a225efe1770d8b7b94d18e7bba75d4d45ae64d8a9546`.
+All 38 installed leaves were checked before the old tree was removed and again
+after installation: the 36 accepted public files plus newly generated `scribe`
+profile and `scribe 5.19.5` allowlist files. The launcher, application, and helper
+retain the accepted `a5fec72f` / `d221d65d` / `a235b41c` identities. This package
+uses the completed night-mode build and its accepted inputs recorded above.
+
+The new data directory initially contained only those two configuration files;
+the account database was absent before first launch. Normal launch used the
+exact production arguments and created a new database; its main file was
+4,096 bytes at observation. The user
+confirmed the login page and native display/touch after pressing X. An initial
+post-close check still found the original process family; a later check found
+that it had exited naturally. The prepared managed-stop command observed an
+already-exited launcher and sent no termination signal. All bound original
+processes, the actual guard window, and display locks were then absent. No
+normal launcher exit code was captured.
+
+At the user's additional request, one old KPPMainAppV2 crash-document group was
+removed from `documents`: its `.tgz`, `.txt`, and `.sdr` entries. System programs
+and the native application registry were not modified. The separate existing
+KOReader WeRead plugin and its settings/reading data were retained. Installation
+staging and private verification scratch were removed.
+
+The fresh clean-install lease was released at 2026-11-10 05:29:30.285723 +08:00
+(Asia/Shanghai; receipt `2026-11-09T21:29:30.285723Z`) after native restoration and
+connection closure. Global-lock absence was checked independently and the other
+coordinator was notified. The current normal installation requires a new sign-in;
+the earlier account and downloaded cache were not inherited.
+
 ## Scoped acceptance closeout
 
 | Gate | Status and required evidence |
@@ -228,6 +293,7 @@ the manifest and raw device records are not redistributed with the product.
 | Startup, stock sleep, and exit | **CLOSED** for the observed R1 baseline/cycle: native-dark/app-light startup, same-process stock return to the original page, automatic inverted holding, and UI exit. The immediate native-after failure remains retained with its later independent convergence. |
 | Isolated preference reopen | **CLOSED**, scoped to `ko-r1-manual-restart`: saved light startup/Library, real UI-exit zero, and this run's first native-after check passed. The earlier failed receipt remains retained. |
 | Normal-entry update | **CLOSED**: exact public replacement and rollback backup, unchanged database/WAL/SHM hashes, user-confirmed original Library/books and UI exit, and independent cleanup. No normal launcher exit code is claimed. |
+| Later user-requested reset | **CLOSED**: previous normal data removed, 38-leaf clean installation checked, fresh login page confirmed, crash-document group cleared, and independent native/process/window/lease cleanup recorded. |
 
 The old approximately five-second SYSTEM response remains a separate historical
 measurement; R1's timing is a scoped user estimate, not an instrumented absolute

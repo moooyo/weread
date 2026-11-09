@@ -115,8 +115,13 @@ write. Native day/night settings remain unchanged. Continuous long-press
 selection retains its 80 ms update interval and editing protections.
 
 The installed normal-mode private trial uses launcher `a5fec72f`, application
-`d221d65d`, and helper `a235b41c`. Its public-file rollback backup contains the
-replaced v10 files without real account/book data. The user-started normal launch
+`d221d65d`, and helper `a235b41c`. The temporary device-side rollback backup and
+historical testing workspaces were subsequently removed at the user's request;
+live data were retained during that cleanup. At the user's following request,
+the previous normal program, configuration, account database, and cache were
+also removed, then the accepted runtime was installed with fresh device
+configuration. Its new login page was confirmed; the current installation
+requires a new sign-in. The earlier user-started normal launch
 had no external supervisor or captured launcher exit code; observed UI exit and
 complete cleanup are distinct from the isolated exit-zero results. Full current
 identities and bounded evidence are recorded in

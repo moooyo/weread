@@ -25,6 +25,11 @@ had no external supervisor, so no launcher exit code was captured; its observed
 UI exit and complete cleanup are distinct from the two isolated real exit-zero
 results.
 
+At the user's subsequent request, the normal application, configuration, account
+database, and cache were removed and the accepted runtime was installed clean.
+The current installation has fresh local device configuration and requires a new
+sign-in. Its login page was confirmed without inheriting the earlier account.
+
 The replaced v10 SYSTEM path used launcher `15aab68c` and application `8010a217`.
 Its scoped Scribe 2022 / firmware 5.19.5 visual, sleep, and UI-exit checks remain
 historical evidence.

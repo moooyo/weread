@@ -101,6 +101,20 @@ retains the exact installed hashes, update-payload provenance, and bounded
 cleanup observations. Partial-night and wait tuning are separate future work;
 other devices, USB, and power-loss behavior are not accepted by this closeout.
 
+The subsequent user-requested device cleanup removed historical test
+installations, diagnostic backups, and private control scratch while retaining
+the normal installation and live data. The device-side rollback copies described
+above no longer exist. [Cleanup record](KOREADER_NIGHT_ALIGNMENT.md#post-acceptance-device-cleanup)
+records the protected-file checks, recovered storage, and fresh lease release.
+
+The user next requested removal of the normal program, configuration, account
+database, and cache, followed by a clean normal-mode installation. This later
+reset supersedes the earlier account-retention state: fresh local device
+configuration was installed and the new login page was confirmed. One historical
+KPPMainAppV2 crash-document group was also removed; native system binaries and
+the application registry were not changed. The detailed clean-install record is
+in [KOReader night-mode alignment](KOREADER_NIGHT_ALIGNMENT.md#subsequent-clean-normal-mode-installation).
+
 ## Historical implemented SYSTEM behavior
 
 The Reader TOC download icon and chapter status use the same full-height row,

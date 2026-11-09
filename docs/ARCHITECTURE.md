@@ -108,7 +108,10 @@ uses `a5fec72f` / `d221d65d` / `a235b41c`; the user confirmed the original Libra
 and books, display and touch, and native-dark UI exit. Database/WAL/SHM hashes
 were unchanged across the public-file replacement. The scoped physical, reopen,
 and deployment gates are closed. No launcher exit code was captured for the
-unsupervised normal launch. See
+unsupervised normal launch. A subsequent user-authorized clean installation
+removed the previous normal configuration, account database, and cache before
+reinstalling the same accepted runtime with fresh local device configuration.
+Its new login page was confirmed; no previous account state was inherited. See
 [KOReader night-mode alignment](KOREADER_NIGHT_ALIGNMENT.md) for counts, the
 retained initial launcher failure, and build-time frozen fingerprints.
 

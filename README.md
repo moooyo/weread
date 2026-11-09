@@ -88,6 +88,10 @@ confirmed display and touch, and exited to dark native UI with working touch.
 The public-file update preserved the database and its WAL/SHM hashes. This scoped
 night-mode, reopen, and normal-deployment task is complete; normal-launch cleanup
 was observed without a captured launcher exit code.
+The user subsequently requested a clean installation. The prior normal program,
+configuration, account database, and cache were removed, and the accepted normal
+runtime was reinstalled with fresh device configuration. Its new login page was
+confirmed; the current installation requires a new sign-in.
 [KOReader night-mode alignment](docs/KOREADER_NIGHT_ALIGNMENT.md) preserves these
 limits, the software results, and exact build identities.
 
