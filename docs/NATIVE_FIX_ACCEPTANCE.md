@@ -30,8 +30,8 @@ ancestry, first-signal, and native-restoration guards remain enforced.
 
 ## Remote verification
 
-All execution in this correction was on `test-env`. Local operations were
-source review, file transfer, documentation editing, and Git operations.
+All software verification in this record ran on `test-env`. Local operations
+were source review, file transfer, documentation editing, and Git operations.
 
 The original corrected Rust execution passed 1,484 library tests with zero
 failures and three ignored manual benchmarks in 196.75 seconds, followed by all
@@ -56,7 +56,7 @@ corrected launcher cases then passed in 674.411 seconds. The driver naturally
 exited zero after checking that the frozen launcher sources and all runtime
 leaves remained unchanged; packaging was gated on those passing results.
 
-The final development ZIP has exactly the expected 35 members, passed CRC,
+That correction's development ZIP has exactly the expected 35 members, passed CRC,
 755/644 mode, and ELF/launcher identity checks, and contains no runtime data.
 Its SHA-256 is
 `058f36973794ae94fa81b6deaf4c011190b8277f07e9a9827cd9be4e04930ce9`;
@@ -98,10 +98,11 @@ The frozen manifest and execution receipts are retained under
 `frame-guard-v7-native-final-run.log`, and
 `frame-guard-v7-archive-verification.json`.
 
-The R6 physical visual-handoff gate remains **OPEN**. In particular, these
-results do not prove that native Library is absent during a system-theme
-change or wake. The R3 visual failures below remain recorded, and the isolated
-candidate has not replaced the earlier normal-mode private trial.
+These v7 software results did not close the physical visual-handoff gate.
+The R6 partial trial below retains its own incomplete acceptance scope; the
+later v8/R9 observations are recorded separately. The R3 visual failures remain
+recorded, and the isolated candidate did not replace the earlier normal-mode
+private trial.
 
 ## Native frame-guard v8 software candidate
 
@@ -136,8 +137,36 @@ One equivalent two-way theme fixture, including startup and cleanup, reduced
 observed `cat`/`sed` invocations from 2024 to 98 (about 95.2%). This measures
 external command count, not Kindle latency. The two ptrace-based timing
 attempts were invalidated because tracing introduced process state `t`; they
-provide no performance or product result. The v8 physical visual and
-responsiveness gates remain **OPEN**.
+provide no performance or product result. Software verification alone did not
+close the v8 physical visual or responsiveness gates. The R9 trial below closes
+only the scoped visual gate; the remaining interaction delay stays open.
+
+## Native frame-guard v9 software candidate
+
+The v9 change is confined to the launcher's first reap wait: ten 10 ms checks
+consume one 100 ms tick, followed by nine 100 ms checks. The nominal one-second
+budget and fresh PID, birth, PPid, PGRP, SID, and `wait` gates remain unchanged.
+The launcher test source remains the v8 source identified above.
+
+On `test-env`, nine targeted cases passed, the complete 201-case launcher suite
+passed in 741.963 seconds, and all four packaging-contract cases passed. The
+archive passed its exact 36-member set, CRC, 0755/0644 mode, and all expected
+file-digest checks. The unchanged main application, native helper, Rust and C
+sources, and 30 native/pixel/watch results are reused evidence; those builds
+and tests were not repeated for this launcher-only change.
+
+| Artifact | SHA-256 |
+| --- | --- |
+| v9 development ZIP | `74a92c47350cb714b2508cec80503c87a8493134182b4b8ab02d787705a63ebe` |
+| Production launcher | `ff3b2951a66acea44faf98406542bdf796ab013e7fd7de25bb72a5697de73e43` |
+| Unchanged launcher test source | `282e08e9113e5e6f8c601c7642641190c88ccdcaaca14e8ef5e4ca61e35c9bc0` |
+
+The archive is retained as
+`test-env:/root/weread-native-frame-v9-src/weread-kindle-0.2.0-native-frame-v9-dev.zip`.
+Its frozen manifest is
+`test-env:/root/weread-native-frame-v9-src/frozen/v9-verification-manifest.json`.
+The v9 physical speed and visual gates remain **OPEN**. The v8/R9 physical
+result below is not inherited as v9 acceptance.
 
 ## Physical observations and remaining gates
 
@@ -154,8 +183,8 @@ process, but wake did not retain that process. Native display diagnostics
 confirmed that bare `xrefresh` failed with an absent `DISPLAY`, while
 `DISPLAY=:0.0 xrefresh` succeeded. The unguarded display-release call propagated
 that failure through `set -e` and exited the launcher. The default-display
-correction addresses this observed failure; it has not yet passed a new
-physical sleep cycle.
+correction addresses this observed failure; at that stage it had not yet
+passed a new physical sleep cycle.
 
 After the corrected full run, a fresh exclusive device lease was acquired.
 The SSH attempt failed with `No route to host` before connecting, so the
@@ -202,9 +231,9 @@ the status bar was restored, no test GUI or launcher lock remained, and the user
 confirmed native dark appearance and touch. The exact device lease was released
 and its directory independently confirmed absent before BiliComics resumed.
 
-The current correction therefore still requires elimination of native-Library
-exposure during both theme change and wake, followed by a new artifact-specific
-physical check. Factory-source review confirms that the native `epdcMode`
+At the end of R3, elimination of native-Library exposure during both theme
+change and wake still required a new artifact-specific physical check.
+Factory-source review confirms that the native `epdcMode`
 setter explicitly requests root repaint and a full-screen refresh trigger;
 merely retaining the application process does not suppress that drawing.
 The earlier formal daily-trial installation has not been replaced by these
@@ -253,3 +282,93 @@ confirmation. The exact R6 lease was released at 14:35:14 UTC, followed by an
 independent absent-directory check, and BiliComics was notified. No reverse
 theme, sleep/wake, orientation, or voluntary-exit acceptance is claimed for
 this window; the visual and responsiveness gates remain open.
+
+## R7 v8 bounded profiling trial
+
+This separate automatic profiling run used the v8 candidate and a private
+90-second application timer. It naturally exited zero when that timer expired;
+this is not a voluntary UI-exit result. Three system-theme commits retained
+the same application identity and passed their protocol checks.
+
+The measured request-to-commit intervals were 6.14-6.28, 6.56-6.72, and
+6.03-6.16 seconds. Sampler cadence had a 0.14-second median and a
+0.11-0.22-second range; this was not strict 100 ms sampling. Grouped phase
+observations were:
+
+| Observed interval | Three durations (seconds) |
+| --- | --- |
+| Portrait group `go` to `done` | 0.93, 1.09, 0.95 |
+| Theme result to renderer-ready acknowledgment | 2.32, 2.34, 2.34 |
+| Last power-query completion before alignment to alignment-ready | 0.27, 0.13, 0.14 |
+
+Within the result-to-renderer-ready interval, left-endpoint estimates placed
+approximately 76-82% of the observed time in process state D. These observations
+do not attribute that interval to framebuffer waiting or `fsync`. The short
+tail before alignment-ready does not support a claim that native frame-guard
+uploads caused most of the multi-second delay. Apart from its `usleep` helper,
+the polling loop used built-in record and `/proc` reads rather than `tr` or
+`grep`. A separate approximately 36 ms overhead observation is neither CPU
+time nor a quantity that can simply be subtracted from the total duration.
+
+The operator missed the 90-second window. A later stock-power start was refused
+by the identity gate after the process ended, so this run contains no sleep
+test. Run-owned cleanup restored native presentation with the committed
+`Y8INV` setting. The exact
+lease was released at 15:09:18 UTC and independently confirmed absent.
+
+## R8 unused device window
+
+R8 prepared a lighter RAM sampler and coordinator/wait-channel collection on
+the host only. The device SSH connection timed out before installation or
+startup; neither action executed. The unused lease was exactly released at
+15:28:19 UTC and independently confirmed absent. R8 supplies no device or
+performance evidence.
+
+## R9 v8 physical visual-handoff acceptance
+
+R9 used the ordinary R7 isolated home with private `--demo --offline` arguments
+and the v8 archive and production launcher identified above. The main
+application and native helper retained their `8010a217` and `a235b41c`
+identities. The user confirmed the Library, Reader, dark appearance, and touch.
+
+Both system-theme directions stayed in the application without exposing
+native Library. The user still observed a four-to-five-second interaction
+delay, so responsiveness remains **OPEN**. Machine observations retained the
+same application and helper birth identities: theme sequence 1 completed
+`ok:Y8`, sequence 2 completed `ok:Y8INV`, each had its matching renderer-ready
+acknowledgment and no remaining request, and the guard sequence reached 4.
+
+The operator then performed a real five-second stock power-button cycle,
+observing active to screensaver to active and matched managed cycle 1. The
+same application retained its reading position and dark mode. The user
+confirmed working touch and page turns, with no native Library or startup
+page. The user subsequently held the device upside down with USB at the top,
+confirmed automatic rotation and a right-side page turn, and manually performed
+another five-second sleep/wake. That observed inverted cycle also retained the
+page, dark appearance, and touch without native Library or a startup page.
+
+The final live sample retained application generation 1 and the original
+application/helper identities. All four sleep/wake request and acknowledgment
+records matched the latest managed cycle 3, and guard sequence was 10. The
+intervening cycle 2 was not independently observed by the user and is not
+counted as an additional accepted physical case.
+
+The user returned USB to the bottom and voluntarily exited through the UI.
+The launcher returned zero without a supervised TERM. All original launcher,
+supervisor, application, runner, helper, watcher, and power-sampler identities
+had ended, completion markers were present, and both display locks were
+absent. The former guard XID had been reused by a native `JunoStatusBar`
+window, distinguished by its native identity rather than treated as a leaked
+guard or destroyed.
+
+The original window manager birth identity was running, the status bar was
+restored, and native mode remained `Y8INV`. The user confirmed a dark native
+Library with working touch. The final read-only power observation was already
+screensaver, not active. The exact R9 lease was released at 15:39:47 UTC and
+its directory independently confirmed absent.
+
+This closes the v8 visual-handoff gate only for the identified Scribe 2022,
+firmware 5.19.5, and accepted automatic 0/180-degree path. It does not close
+the remaining theme-change delay, establish other device support, or accept
+v9 presentation or speed. USB remains deferred. The earlier `2fd3/799d`
+normal-mode private trial has not been replaced by these isolated runs.

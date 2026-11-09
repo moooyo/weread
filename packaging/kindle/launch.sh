@@ -692,17 +692,27 @@ stop_native_theme_command() {
             signal_owned_process "$NATIVE_THEME_COMMAND_PID" "$NATIVE_THEME_COMMAND_BIRTH" "$$" KILL || :
     fi
     native_theme_reap_checks=10
-    while process_matches "$NATIVE_THEME_COMMAND_PID" "$NATIVE_THEME_COMMAND_BIRTH" "$$" &&
+    native_theme_reap_fast_checks=10
+    while native_theme_group_is_owned &&
         [ "$native_theme_reap_checks" -gt 0 ]; do
         case "$PROCESS_STATE" in
             Z|X|x|'') break ;;
         esac
-        usleep 100000 || native_theme_stop_status=1
-        native_theme_reap_checks=$((native_theme_reap_checks - 1))
+        if [ "$native_theme_reap_fast_checks" -gt 0 ]; then
+            native_theme_reap_fast_checks=$((native_theme_reap_fast_checks - 1))
+            # Ten short polls consume only the first original 100 ms tick.
+            if [ "$native_theme_reap_fast_checks" -eq 0 ]; then
+                native_theme_reap_checks=$((native_theme_reap_checks - 1))
+            fi
+            usleep 10000 || native_theme_stop_status=1
+        else
+            native_theme_reap_checks=$((native_theme_reap_checks - 1))
+            usleep 100000 || native_theme_stop_status=1
+        fi
     done
     if [ -n "$NATIVE_THEME_COMMAND_PID" ]; then
         if [ ! -d "/proc/$NATIVE_THEME_COMMAND_PID" ] ||
-            { process_matches "$NATIVE_THEME_COMMAND_PID" "$NATIVE_THEME_COMMAND_BIRTH" "$$" &&
+            { native_theme_group_is_owned &&
               [ "$PROCESS_STATE" = Z ]; }; then
             wait "$NATIVE_THEME_COMMAND_PID" 2>/dev/null || :
         fi
