@@ -74,9 +74,20 @@ class LauncherLifecycleTests(unittest.TestCase):
             TEST_NATIVE_SET_FAIL_AFTER_MAP="0",
             TEST_NATIVE_MAP_ON_OPEN="1",
             TEST_NATIVE_APP_EXIT="0",
+            TEST_FRAME_GUARD_EVENTS=str(self.root / "frame-guard-events"),
+            TEST_FRAME_GUARD_SHARED_TRACE="0",
+            TEST_FRAME_GUARD_FAIL_CAPTURE="0",
+            TEST_FRAME_GUARD_FAIL_ALIGN="0",
+            TEST_FRAME_GUARD_READY_MODE="ready",
+            TEST_FRAME_GUARD_EARLY_EXIT="0",
+            TEST_FRAME_GUARD_STARTUP_ADMISSION="ready",
+            TEST_FRAME_GUARD_WINDOW_ID="0x900",
+            TEST_FRAME_GUARD_FOREIGN_VISIBLE=str(self.root / "frame-guard-foreign-visible"),
+            TEST_FRAME_GUARD_WINDOW_POLLS=str(self.root / "frame-guard-window-polls"),
         )
         (self.root / "native-visible").write_text("none\n")
         (self.root / "native-view").write_text("KPP_HOME\n")
+        (self.root / "frame-guard-foreign-visible").write_text("0\n")
         self.script(self.bin / "status", 'printf "statusbar %s\\n" "$TEST_STATUSBAR"')
         for name in ("stop", "start", "xrefresh"):
             self.script(
@@ -109,6 +120,18 @@ class LauncherLifecycleTests(unittest.TestCase):
             '[ "$visible" != error ] || exit 1\n'
             'printf "%s\\n" "Root window id: 0x50"\n'
             'printf "%s\\n" \'0x100 "L:A_N:application_ID:com.lab126.KPPMainApp" MapState=IsViewable\'\n'
+            'guard_window=none\n'
+            'if [ -r "$WEREAD_HOME/../lock/frame-guard-window" ]; then\n'
+            '    IFS=: read -r guard_token guard_pid guard_birth guard_window guard_extra <"$WEREAD_HOME/../lock/frame-guard-window"\n'
+            '    if [ -z "${guard_extra:-}" ]; then\n'
+            '        printf \'%s "L:D_N:wereadGuard_ID:system_BS:true_O:UD" MapState=IsViewable\\n\' "$guard_window"\n'
+            '    fi\n'
+            'fi\n'
+            'foreign_guard=$(cat "$TEST_FRAME_GUARD_FOREIGN_VISIBLE")\n'
+            'printf "%s|%s\\n" "$guard_window" "$foreign_guard" >>"$TEST_FRAME_GUARD_WINDOW_POLLS"\n'
+            'if [ "$foreign_guard" = 1 ]; then\n'
+            '    printf "%s\\n" \'0x901 "L:D_N:wereadGuard_ID:system_BS:true_O:UD" MapState=IsViewable\'\n'
+            'fi\n'
             'if [ "$visible" = quick ]; then\n'
             '    printf "%s\\n" \'0x200 "L:D_N:dialog_ID:com.lab126.kppQuickSettings" MapState=IsViewable\'\n'
             'fi\n'
@@ -208,6 +231,285 @@ class LauncherLifecycleTests(unittest.TestCase):
             'fi\n'
             'exit "$TEST_APP_EXIT"',
         )
+        self.frame_guard_fixture()
+
+    def frame_guard_fixture(self, **behavior):
+        self.env.update(behavior)
+        # The stub shares the C helper's IPC and actual process fencing. It
+        # models no X11 pixels or Kindle layer policy and creates no children.
+        body = textwrap.dedent(r'''
+            import json
+            import os
+            from pathlib import Path
+            import re
+            import select
+            import signal
+            import stat
+            import sys
+            import time
+
+            watching = len(sys.argv) == 15 and sys.argv[9] == "--watch-helper"
+            expected_flags = ["--context", "--token", "--owner", "--owner-birth"]
+            expected_flags += (["--watch-helper", "--helper-birth", "--lifetime-fd"]
+                               if watching else ["--profile", "--command-fd"])
+            if len(sys.argv) != 1 + len(expected_flags) * 2 or sys.argv[1::2] != expected_flags:
+                raise SystemExit(1)
+            options = dict(zip(expected_flags, sys.argv[2::2]))
+            context = Path(options["--context"])
+            token = options["--token"]
+            owner = int(options["--owner"])
+            owner_birth = options["--owner-birth"]
+            descriptor = int(options["--lifetime-fd"] if watching else options["--command-fd"])
+            helper = os.getpid()
+            stopping = False
+            sequence = 0
+            status = 0
+
+            def process(number):
+                try:
+                    fields = Path("/proc/" + str(number) + "/stat").read_text().rsplit(")", 1)[1].split()
+                    return {"pid": int(number), "state": fields[0], "parent": int(fields[1]),
+                            "birth": fields[19]}
+                except (OSError, ValueError, IndexError):
+                    return None
+
+            identity = process(helper)
+            if identity is None:
+                raise SystemExit(1)
+            birth = identity["birth"]
+            window_id = os.environ["TEST_FRAME_GUARD_WINDOW_ID"]
+
+            def read_marker(name):
+                try:
+                    file_descriptor = os.open(context / name, os.O_RDONLY | os.O_NOFOLLOW)
+                    try:
+                        info = os.fstat(file_descriptor)
+                        value = os.read(file_descriptor, 256)
+                    finally:
+                        os.close(file_descriptor)
+                    if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                            or not 0 < info.st_size < 256 or not value.endswith(b"\n")
+                            or b"\n" in value[:-1] or b"\0" in value):
+                        return ""
+                    return value[:-1].decode("ascii")
+                except (OSError, UnicodeError):
+                    return ""
+
+            def owner_current():
+                current = process(owner)
+                return (os.getppid() == owner and current is not None
+                        and current["birth"] == owner_birth and current["state"] not in ("Z", "X")
+                        and read_marker("pid") == str(owner) and read_marker("nonce") == token)
+
+            def record(kind, request=None, **details):
+                entry = {"kind": kind, "helper": helper, "birth": birth,
+                         "owner": owner, "owner_birth": owner_birth,
+                         "sequence": sequence, "window_id": window_id,
+                         "wm": process(os.environ.get("TEST_AWESOME_PID", "0"))}
+                if request is not None:
+                    entry.update(request)
+                entry.update(details)
+                with Path(os.environ["TEST_FRAME_GUARD_EVENTS"]).open("a") as output:
+                    output.write(json.dumps(entry, sort_keys=True) + "\n")
+                if os.environ["TEST_FRAME_GUARD_SHARED_TRACE"] == "1":
+                    with Path(os.environ["TEST_TRACE"]).open("a") as output:
+                        output.write("frame-guard:" + kind + ":" + str(helper) + ":"
+                                     + str(entry["sequence"]) + "\n")
+
+            def marker(name, value):
+                temporary = context / (name + ".pending")
+                temporary.write_text(value + "\n")
+                temporary.chmod(0o600)
+                temporary.replace(context / name)
+
+            def ready(request_sequence, generation, mode="ready"):
+                values = [str(request_sequence), str(generation), token, str(helper), birth]
+                if mode == "stale-sequence":
+                    values[0] = str(request_sequence - 1)
+                elif mode == "stale-generation":
+                    values[1] = str(generation - 1)
+                elif mode == "wrong-token":
+                    values[2] = ("1" if token[0] == "0" else "0") + token[1:]
+                elif mode == "wrong-pid":
+                    values[3] = str(helper + 1)
+                elif mode == "wrong-birth":
+                    values[4] = str(int(birth) + 1)
+                if mode != "none":
+                    marker("frame-guard-ready", ":".join(values))
+
+            def notify_exit():
+                if not owner_current():
+                    return
+                try:
+                    event_descriptor = os.open(context / "power-events",
+                        os.O_WRONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+                    try:
+                        info = os.fstat(event_descriptor)
+                        if stat.S_ISFIFO(info.st_mode) and info.st_uid == os.getuid():
+                            value = ("_weread_frame_guard_exit " + token + " " + str(helper)
+                                     + " " + birth + " " + str(status) + "\n")
+                            os.write(event_descriptor, value.encode("ascii"))
+                    finally:
+                        os.close(event_descriptor)
+                except OSError:
+                    pass
+
+            def stopped(_number, _frame):
+                global stopping
+                if watching:
+                    raise SystemExit(0)
+                stopping = True
+
+            for number in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+                signal.signal(number, stopped)
+            signal.signal(signal.SIGPIPE, signal.SIG_IGN)
+
+            if watching:
+                import ctypes
+                channel = os.fstat(descriptor)
+                directory = context.lstat()
+                if (descriptor != 0 or not stat.S_ISFIFO(channel.st_mode)
+                        or channel.st_uid != os.getuid() or not stat.S_ISDIR(directory.st_mode)
+                        or directory.st_mode & 0o077 or directory.st_uid != os.getuid()
+                        or ctypes.CDLL(None).prctl(1, signal.SIGTERM, 0, 0, 0) != 0
+                        or not owner_current()):
+                    raise SystemExit(1)
+                while os.read(descriptor, 128):
+                    if not owner_current():
+                        raise SystemExit(1)
+                helper = int(options["--watch-helper"])
+                birth = options["--helper-birth"]
+                status = 1
+                notify_exit()
+                raise SystemExit(0)
+
+            def wait_gate(name, kind, request=None):
+                gate = os.environ.get(name, "")
+                if not gate:
+                    return True
+                record(kind, request)
+                deadline = time.monotonic() + 4
+                while not Path(gate).exists():
+                    if stopping or not owner_current() or time.monotonic() >= deadline:
+                        return False
+                    time.sleep(0.01)
+                return True
+
+            def frozen_request(values):
+                if (len(values) != 7 or values[2] != token or values[6] not in ("capture", "align")
+                        or not all(re.fullmatch(r"[1-9][0-9]*", values[index])
+                                   for index in (0, 1, 3, 4, 5))
+                        or int(values[0]) != sequence + 1 or int(values[0]) > 2147483647):
+                    return None
+                application = process(values[3])
+                if (not owner_current() or application is None
+                        or application["state"] not in ("T", "t")
+                        or application["birth"] != values[4] or application["parent"] != int(values[5])
+                        or read_marker("generation") != values[1] + ":" + token
+                        or read_marker("application-pid") != values[3]
+                        or read_marker("application-birth") != values[4]):
+                    return None
+                return {"sequence": int(values[0]), "generation": int(values[1]),
+                        "application": application}
+
+            try:
+                directory = context.lstat()
+                channel = os.fstat(descriptor)
+                if (not re.fullmatch(r"[0-9a-f]{32}", token) or owner < 2 or descriptor < 3
+                        or options["--profile"] not in ("pw6", "scribe")
+                        or not stat.S_ISDIR(directory.st_mode) or directory.st_mode & 0o077
+                        or directory.st_uid != os.getuid() or not stat.S_ISFIFO(channel.st_mode)
+                        or channel.st_uid != os.getuid() or not owner_current()
+                        or not re.fullmatch(r"0x[0-9a-f]+", window_id)):
+                    raise SystemExit(1)
+                admission = os.environ["TEST_FRAME_GUARD_STARTUP_ADMISSION"]
+                if admission == "stopped-window-manager":
+                    manager = process(os.environ.get("TEST_AWESOME_PID", "0"))
+                    if manager is None or manager["state"] not in ("T", "t"):
+                        raise SystemExit(1)
+                    # A stopped foreign WM cannot process a managed MapRequest.
+                    record("admission-failed", application=None)
+                    status = 1
+                elif os.environ["TEST_FRAME_GUARD_EARLY_EXIT"] == "before-startup":
+                    status = 1
+                else:
+                    marker("frame-guard-window", token + ":" + str(helper) + ":" + birth + ":" + window_id)
+                    record("create", application=None)
+                    previous_creates = sum(json.loads(row)["kind"] == "create" for row in
+                        Path(os.environ["TEST_FRAME_GUARD_EVENTS"]).read_text().splitlines())
+                    if (previous_creates == 2
+                            and not wait_gate("TEST_FRAME_GUARD_SECOND_CREATE_GATE", "create-wait")):
+                        status = 1
+                    else:
+                        ready(0, 0)
+                        if os.environ["TEST_FRAME_GUARD_EARLY_EXIT"] == "after-startup":
+                            status = 1
+                        else:
+                            pending = bytearray()
+                            while not stopping:
+                                exit_gate = os.environ.get("TEST_FRAME_GUARD_EXIT_GATE", "")
+                                if exit_gate and Path(exit_gate).exists():
+                                    status = 1
+                                    break
+                                if not owner_current():
+                                    status = 1
+                                    break
+                                readable, _, _ = select.select([descriptor], [], [], 0.02)
+                                if not readable:
+                                    continue
+                                data = os.read(descriptor, 256)
+                                if not data:
+                                    status = 1
+                                    break
+                                pending.extend(data)
+                                if b"\0" in pending or len(pending) >= 256 and b"\n" not in pending:
+                                    status = 1
+                                    break
+                                while b"\n" in pending:
+                                    line, _, remainder = pending.partition(b"\n")
+                                    pending = bytearray(remainder)
+                                    values = line.decode("ascii").split(":")
+                                    request = frozen_request(values)
+                                    if len(line) >= 255 or request is None:
+                                        record("rejected")
+                                        status = 1
+                                        stopping = True
+                                        break
+                                    operation = values[6]
+                                    if not wait_gate("TEST_FRAME_GUARD_" + operation.upper() + "_GATE",
+                                                     operation + "-wait", request):
+                                        status = 1
+                                        stopping = True
+                                        break
+                                    if frozen_request(values) is None:
+                                        record("rejected", request)
+                                        status = 1
+                                        stopping = True
+                                        break
+                                    failure = os.environ["TEST_FRAME_GUARD_FAIL_" + operation.upper()] == "1"
+                                    record(operation, request, accepted=not failure)
+                                    if failure:
+                                        status = 1
+                                        stopping = True
+                                        break
+                                    mode = os.environ["TEST_FRAME_GUARD_READY_MODE"]
+                                    ready(request["sequence"], request["generation"], mode)
+                                    record("ready", request, mode=mode)
+                                    sequence = request["sequence"]
+            except (OSError, ValueError, UnicodeError):
+                status = 1
+                record("fixture-error")
+            finally:
+                notify_exit()
+                owned_window = token + ":" + str(helper) + ":" + birth + ":" + window_id
+                if read_marker("frame-guard-window") == owned_window:
+                    (context / "frame-guard-window").unlink(missing_ok=True)
+                record("close", status=status)
+            raise SystemExit(status)
+        ''').lstrip()
+        path = self.home / "app" / "weread-frame-guard"
+        path.write_text("#!" + sys.executable + "\n" + body)
+        path.chmod(0o755)
 
     @staticmethod
     def script(path, body):
@@ -325,6 +627,38 @@ class LauncherLifecycleTests(unittest.TestCase):
     def trace(self):
         path = self.root / "trace"
         return path.read_text().splitlines() if path.exists() else []
+
+    def frame_guard_events(self, kind=None):
+        path = self.root / "frame-guard-events"
+        if not path.exists():
+            return []
+        rows = [json.loads(row) for row in path.read_text().splitlines()]
+        return rows if kind is None else [row for row in rows if row["kind"] == kind]
+
+    def wait_for_frame_guard(self, supervisor, create_count=1):
+        directory = self.root / "lock"
+        self.wait_until(lambda: len(self.frame_guard_events("create")) >= create_count
+                        and (directory / "frame-guard-window").is_file()
+                        and (directory / "frame-guard-ready").is_file())
+        created = self.frame_guard_events("create")[create_count - 1]
+        self.assertEqual(created["owner"], supervisor.pid)
+        self.assertEqual(created["owner_birth"], self.observed_identity(supervisor.pid)["birth"])
+        self.assertIsNone(created["application"], "Bootstrap must precede application launch.")
+        self.assertTrue(self.original_process_exists({"pid": created["helper"], "birth": created["birth"]}))
+        token = (directory / "nonce").read_text().strip()
+        self.assertEqual((directory / "frame-guard-window").read_text().strip(),
+                         f"{token}:{created['helper']}:{created['birth']}:{created['window_id']}")
+        return created
+
+    def assert_frame_guards_reaped(self, create_count=None, close_count=None):
+        created = self.frame_guard_events("create")
+        if create_count is not None:
+            self.assertEqual(len(created), create_count)
+        self.assertEqual(len(self.frame_guard_events("close")), len(created) if close_count is None else close_count)
+        identities = [{"pid": row["helper"], "birth": row["birth"]} for row in created]
+        self.wait_until(lambda: all(not self.original_process_exists(identity) for identity in identities))
+        self.assertEqual(self.frame_guard_events("fixture-error"), [])
+        self.assertFalse((self.root / "lock").exists())
 
     def install_path_failure(self, command, record, remove_before_failure=False):
         original = shutil.which(command, path=self.env["PATH"])
@@ -646,7 +980,7 @@ class LauncherLifecycleTests(unittest.TestCase):
         self.wake_probe_sleep_arguments = {b"2", b"10"} if preserve_delay else {b"30"}
         self.addCleanup(self.cleanup_wake_probe_fixture)
         source = self.launcher.read_text()
-        anchor = '    sleep "$2" 3>&- &\n'
+        anchor = '    sleep "$2" 3>&- 6>&- &\n'
         self.assertEqual(source.count(anchor), 1)
         if term_ignoring:
             helper = self.root / "wake-sleep.py"
@@ -673,8 +1007,14 @@ class LauncherLifecycleTests(unittest.TestCase):
                     fifo_open = True
                 except FileNotFoundError:
                     fifo_open = False
+                try:
+                    os.readlink("/proc/self/fd/6")
+                    frame_guard_fifo_open = True
+                except FileNotFoundError:
+                    frame_guard_fifo_open = False
                 identity = {"pid": pid, "birth": fields[19], "parent": parent,
-                            "wrapper_birth": parent_fields[19], "fifo_open": fifo_open}
+                            "wrapper_birth": parent_fields[19], "fifo_open": fifo_open,
+                            "frame_guard_fifo_open": frame_guard_fifo_open}
                 pending = identity_path.with_suffix(".pending")
                 pending.write_text(json.dumps(identity))
                 pending.replace(identity_path)
@@ -683,7 +1023,7 @@ class LauncherLifecycleTests(unittest.TestCase):
                     time.sleep(0.02)
             ''').lstrip())
             replacement = (
-                f'    {shlex.quote(sys.executable)} {shlex.quote(str(helper))} 3>&- &\n'
+                f'    {shlex.quote(sys.executable)} {shlex.quote(str(helper))} 3>&- 6>&- &\n'
             )
             self.wake_probe_started_arguments = [os.fsencode(sys.executable), os.fsencode(helper)]
         else:
@@ -797,6 +1137,7 @@ class LauncherLifecycleTests(unittest.TestCase):
         self.wait_until(self.wake_probe_identity_path.exists)
         record = json.loads(self.wake_probe_identity_path.read_text())
         self.assertFalse(record["fifo_open"], "The wake delay inherited the power FIFO descriptor.")
+        self.assertFalse(record["frame_guard_fifo_open"], "The wake delay inherited the frame guard command descriptor.")
         self.wake_probe_observed.extend([
             {"pid": record["parent"], "birth": record["wrapper_birth"]},
             {"pid": record["pid"], "birth": record["birth"]},
@@ -1084,6 +1425,7 @@ class LauncherLifecycleTests(unittest.TestCase):
             self.wait_until(lambda: self.process_state(awesome.pid) == "T")
         self.script(self.bin / "pidof", '[ "${1:-}" = awesome ] || exit 1\nprintf "%s\\n" "$TEST_AWESOME_PID"')
         mock = textwrap.dedent(r'''
+            import hashlib
             import json
             import os
             from pathlib import Path
@@ -1094,6 +1436,25 @@ class LauncherLifecycleTests(unittest.TestCase):
 
             command = Path(sys.argv[0]).name
             arguments = sys.argv[1:]
+            diagnostics = os.environ.get("TEST_NATIVE_THEME_DIAGNOSTICS", "")
+            if diagnostics:
+                import resource
+                import traceback
+                def report_mock_exception(exception_type, exception, stack):
+                    destination = Path(diagnostics)
+                    with destination.open("a") as output:
+                        output.write(json.dumps({"command": command, "arguments": arguments,
+                            "file_size_limit": resource.getrlimit(resource.RLIMIT_FSIZE)}) + "\n")
+                        output.write("".join(traceback.format_exception(exception_type, exception, stack)))
+                    # Preserve only these synthetic fixture witnesses before
+                    # unittest removes its temporary lifecycle directory.
+                    for variable in ("TEST_NATIVE_THEME_IDENTITIES", "TEST_TRACE",
+                                     "TEST_NATIVE_THEME_COMMAND_OBSERVATIONS", "TEST_FRAME_GUARD_EVENTS"):
+                        source = os.environ.get(variable, "")
+                        if source and Path(source).is_file():
+                            destination.with_name(destination.name + "." + variable).write_bytes(Path(source).read_bytes())
+                    sys.__excepthook__(exception_type, exception, stack)
+                sys.excepthook = report_mock_exception
             mode = Path(os.environ["TEST_NATIVE_THEME_MODE"])
             preference = Path(os.environ["TEST_NATIVE_THEME_PREF"])
             power = Path(os.environ["TEST_NATIVE_THEME_POWER"])
@@ -1103,10 +1464,19 @@ class LauncherLifecycleTests(unittest.TestCase):
             def identity(pid, role):
                 try:
                     fields = Path("/proc/" + str(pid) + "/stat").read_text().rsplit(")", 1)[1].split()
-                    values = Path("/proc/" + str(pid) + "/cmdline").read_bytes().split(b"\0")
-                    return {"pid":pid, "role":role, "birth":fields[19],
-                            "group":int(fields[2]), "master":int((context / "pid").read_text()),
-                            "arguments":[os.fsdecode(value) for value in values if value]}
+                    raw_arguments = Path("/proc/" + str(pid) + "/cmdline").read_bytes()
+                    values = [value for value in raw_arguments.split(b"\0") if value]
+                    entry = {"pid":pid, "role":role, "birth":fields[19],
+                             "group":int(fields[2]), "master":int((context / "pid").read_text()),
+                             "arguments":[os.fsdecode(value) for value in values]}
+                    if role == "group":
+                        # Group cleanup pins the original birth and process
+                        # group across exec. Retain the large shell argv by
+                        # digest so fixture witnesses cannot exhaust RLIMIT_FSIZE.
+                        entry.update(arguments_sha256=hashlib.sha256(raw_arguments).hexdigest(),
+                                     argument_bytes=len(raw_arguments), argument_count=len(values))
+                        entry["arguments"] = entry["arguments"][:2]
+                    return entry
                 except (OSError, ValueError, IndexError):
                     return None
 
@@ -1527,6 +1897,12 @@ class LauncherLifecycleTests(unittest.TestCase):
             if entry["role"] == "group":
                 self.assertEqual(entry["pid"], entry["group"])
                 self.assertNotEqual(entry["group"], entry["master"])
+                if "arguments_sha256" in entry:
+                    self.assertEqual(len(entry["arguments_sha256"]), 64)
+                    self.assertTrue(all(value in "0123456789abcdef" for value in entry["arguments_sha256"]))
+                    self.assertGreater(entry["argument_bytes"], 0)
+                    self.assertGreaterEqual(entry["argument_count"], len(entry["arguments"]))
+                    self.assertLessEqual(len(entry["arguments"]), 2)
 
     def install_supervisor_query_fixture(self, command, behavior="blocked", gated=False, apply_before_block=False):
         self.assertIn(command, ("xwininfo", "lipc-get-prop", "status", "pidof", "start", "stop", "xrefresh"))
@@ -2542,7 +2918,8 @@ class LauncherLifecycleTests(unittest.TestCase):
         path = self.root / "theme-result-observations"
         return [json.loads(row) for row in path.read_text().splitlines()] if path.exists() else []
 
-    def assert_native_theme_result_before_continue(self, pid, awesome, ready, actual, status, window):
+    def assert_native_theme_result_before_continue(self, pid, awesome, ready, actual, status, window,
+                                                  prior_results=0):
         directory = self.root / "lock"
         self.wait_until(lambda: window.is_file() and window.read_text().strip() == ready)
         self.assertEqual(self.process_state(pid), "T")
@@ -2550,7 +2927,7 @@ class LauncherLifecycleTests(unittest.TestCase):
         self.assertEqual((directory / "native-theme-result").read_text().strip(), ready + ":" + status + ":" + actual)
         self.assertEqual((directory / "native-epdc-mode").read_text().strip(), ":".join(ready.split(":")[:2]) + ":" + actual)
         self.assertFalse((directory / "native-theme-ready").exists())
-        self.assertEqual(self.native_theme_snapshots("theme-result"), [])
+        self.assertEqual(len(self.native_theme_snapshots("theme-result")), prior_results)
         trace = self.trace()
         self.assertGreater(trace.count("stop:statusbar"), trace.count("start:statusbar"))
 
@@ -2580,6 +2957,296 @@ class LauncherLifecycleTests(unittest.TestCase):
         self.assertIn(f"managed:term:{original['pid']}", self.managed_events())
         self.assert_native_theme_helpers_finished()
         self.assert_native_theme_restored(awesome)
+
+    def test_frame_guard_bootstrap_precedes_the_app_and_closes_before_native_restore(self):
+        awesome = self.native_dark_fixture(TEST_NATIVE_THEME_EXIT="hold", TEST_NATIVE_THEME_TARGET="")
+        self.frame_guard_fixture(TEST_FRAME_GUARD_SHARED_TRACE="1")
+        observed = []
+
+        def drive(supervisor):
+            pid = self.wait_for_managed_application()
+            observed.append(self.wait_for_frame_guard(supervisor))
+            trace = self.trace()
+            created = next(index for index, event in enumerate(trace)
+                           if event.startswith("frame-guard:create:"))
+            started = next(index for index, event in enumerate(trace)
+                           if event.startswith(f"managed:start:{pid}:"))
+            self.assertLess(created, started)
+            supervisor.send_signal(signal.SIGTERM)
+
+        status, _, error = self.run_launcher(drive)
+        self.assertEqual(status, 143, error)
+        trace = self.trace()
+        closed = next(index for index, event in enumerate(trace)
+                      if event.startswith("frame-guard:close:"))
+        continued = next(index for index, event in enumerate(trace) if event == "wm:CONT")
+        self.assertLess(closed, continued)
+        self.assertEqual(self.frame_guard_events("capture"), [])
+        self.assert_frame_guards_reaped(1)
+        self.assert_native_theme_restored(awesome)
+
+    def test_frame_guard_native_theme_capture_and_align_fence_the_original_processes(self):
+        awesome = self.native_theme_handoff_fixture()
+        self.frame_guard_fixture(TEST_FRAME_GUARD_SHARED_TRACE="1")
+        window, release = self.native_theme_continue_gate()
+        original = []
+        wm = self.observed_identity(awesome.pid)
+
+        def drive(supervisor):
+            pid, base = self.wait_for_native_theme_application()
+            original.append(self.observed_identity(pid))
+            created = self.wait_for_frame_guard(supervisor)
+            for cycle, target in ((1, "Y8INV"), (2, "Y8")):
+                ready = self.request_native_theme(pid, str(cycle), target)
+                self.assert_native_theme_result_before_continue(pid, awesome, ready, target, "ok", window,
+                                                                prior_results=cycle - 1)
+                captures = self.frame_guard_events("capture")
+                aligns = self.frame_guard_events("align")
+                self.assertEqual(len(captures), cycle)
+                self.assertEqual(len(aligns), cycle)
+                for row in (captures[-1], aligns[-1]):
+                    self.assertTrue(row["accepted"])
+                    self.assertEqual((row["helper"], row["birth"]),
+                                     (created["helper"], created["birth"]))
+                    self.assertEqual(row["generation"], 1)
+                    self.assertEqual((row["application"]["pid"], row["application"]["birth"],
+                                      row["application"]["state"]),
+                                     (original[0]["pid"], original[0]["birth"], "T"))
+                    self.assertEqual((row["wm"]["pid"], row["wm"]["birth"], row["wm"]["state"]),
+                                     (wm["pid"], wm["birth"], "T"))
+                self.assertEqual(captures[-1]["sequence"], cycle * 2 - 1)
+                self.assertEqual(aligns[-1]["sequence"], cycle * 2)
+                trace = self.trace()
+                capture = trace.index(f"frame-guard:capture:{created['helper']}:{cycle * 2 - 1}")
+                setter = next(index for index, event in enumerate(trace)
+                              if index > capture and event.startswith(f"theme:set:{target}:"))
+                preference = next(index for index, event in enumerate(trace)
+                                  if index > setter and event.startswith(f"theme:pref:{target}:"))
+                align = trace.index(f"frame-guard:align:{created['helper']}:{cycle * 2}")
+                self.assertLess(capture, setter)
+                self.assertLess(preference, align)
+                self.assertEqual(self.frame_guard_events("close"), [])
+                self.assertEqual((self.root / "lock" / "generation").read_text().strip(), base)
+                release.touch()
+                self.assertEqual(self.wait_for_native_theme_ready(pid, ready), ready + ":ok:" + target)
+            supervisor.send_signal(signal.SIGTERM)
+
+        status, _, error = self.run_launcher(drive)
+        self.assertEqual(status, 143, error)
+        self.assert_native_theme_command_window(original[0], wm, "Y8INV", "Y8INV", "Y8INV")
+        self.assert_native_theme_command_window(original[0], wm, "Y8", "Y8", "Y8")
+        self.assert_frame_guards_reaped(1)
+        self.assert_native_theme_resident_cleanup(awesome, original[0])
+
+    def assert_frame_guard_native_theme_rejection(self, **behavior):
+        awesome = self.native_theme_handoff_fixture()
+        gate = self.root / "frame-guard-capture-release"
+        self.frame_guard_fixture(TEST_FRAME_GUARD_CAPTURE_GATE=str(gate), **behavior)
+        original = []
+
+        def drive(supervisor):
+            pid, _base = self.wait_for_native_theme_application()
+            original.append(self.observed_identity(pid))
+            self.wait_for_frame_guard(supervisor)
+            self.request_native_theme(pid, "1", "Y8INV")
+            self.wait_until(lambda: bool(self.frame_guard_events("capture-wait")))
+            self.assertEqual(self.process_state(pid), "T")
+            self.assertEqual(self.process_state(awesome.pid), "T")
+            self.assertEqual(self.native_theme_events("set"), [])
+            gate.touch()
+
+        status, _, error = self.run_launcher(drive)
+        self.assertEqual(status, 1, error)
+        self.assertIn("Native theme handoff could not complete safely", error)
+        self.assertEqual(self.native_theme_events("set"), [])
+        self.assertEqual(self.native_theme_result_observations(), [])
+        self.assertEqual(self.frame_guard_events("align"), [])
+        self.assert_frame_guards_reaped(1)
+        self.assert_native_theme_resident_cleanup(awesome, original[0])
+        return error
+
+    def test_frame_guard_capture_failure_prevents_the_system_theme_setter(self):
+        self.assert_frame_guard_native_theme_rejection(TEST_FRAME_GUARD_FAIL_CAPTURE="1")
+        self.assertEqual([row["accepted"] for row in self.frame_guard_events("capture")], [False])
+
+    def test_frame_guard_stale_helper_birth_acknowledgment_prevents_the_theme_setter(self):
+        self.assert_frame_guard_native_theme_rejection(TEST_FRAME_GUARD_READY_MODE="wrong-birth")
+        self.assertEqual([row["mode"] for row in self.frame_guard_events("ready")], ["wrong-birth"])
+
+    def test_frame_guard_resident_sleep_and_wake_reuse_one_helper_across_two_cycles(self):
+        self.managed_fixture()
+
+        def drive(supervisor):
+            pid = self.wait_for_managed_application()
+            created = self.wait_for_frame_guard(supervisor)
+            for cycle in (1, 2):
+                request = self.suspend_managed_application(pid)
+                self.assertEqual(len(self.frame_guard_events("capture")), cycle)
+                self.assertEqual(self.frame_guard_events("close"), [])
+                self.assertTrue(self.original_process_exists({"pid": created["helper"], "birth": created["birth"]}))
+                self.wake_managed_application(pid, request)
+                self.assertEqual(len(self.frame_guard_events("create")), 1)
+                self.assertEqual(len(self.frame_guard_events("align")), cycle)
+                self.assertEqual(self.frame_guard_events("close"), [])
+            operations = [row for row in self.frame_guard_events() if row["kind"] in ("capture", "align")]
+            self.assertEqual([row["sequence"] for row in operations], [1, 2, 3, 4])
+            self.assertEqual([row["kind"] for row in operations], ["capture", "align", "capture", "align"])
+            for row in operations:
+                self.assertEqual((row["helper"], row["birth"]), (created["helper"], created["birth"]))
+                self.assertEqual(row["generation"], 1)
+                self.assertEqual(row["application"]["state"], "T")
+                self.assertEqual(row["application"]["pid"], pid)
+            self.emit("usbConfigured 1")
+
+        status, _, error = self.run_launcher(drive)
+        self.assertEqual(status, 143, error)
+        self.assertEqual(len(self.managed_pids()), 1)
+        self.assertEqual(self.starts(), ["0"])
+        self.assert_frame_guards_reaped(1)
+
+    def test_frame_guard_cold_recovery_closes_the_old_helper_and_creates_a_new_one(self):
+        self.managed_fixture(TEST_MANAGED_CAPABILITY="0")
+        self.frame_guard_fixture(TEST_FRAME_GUARD_SHARED_TRACE="1")
+
+        def drive(supervisor):
+            self.wait_until(lambda: self.starts() == ["0"])
+            self.wait_for_frame_guard(supervisor)
+            self.emit("goingToScreenSaver 2")
+            self.wait_until(lambda: "xrefresh:" in self.trace()
+                            and len(self.frame_guard_events("close")) == 1)
+            self.emit("outOfScreenSaver 1", "exitingScreenSaver 1")
+
+        status, _, error = self.run_launcher(drive)
+        self.assertEqual(status, 0, error)
+        self.assertEqual(self.starts(), ["0", "1"])
+        created = self.frame_guard_events("create")
+        self.assertEqual(len({row["helper"] for row in created}), 2)
+        events = self.frame_guard_events()
+        first_close = next(index for index, row in enumerate(events) if row["kind"] == "close")
+        second_create = next(index for index, row in enumerate(events)
+                             if row["kind"] == "create" and row["helper"] == created[1]["helper"])
+        self.assertLess(first_close, second_create)
+        self.assert_frame_guards_reaped(2)
+
+    def test_frame_guard_native_settings_removes_the_guard_and_returns_past_its_own_window(self):
+        self.native_fixture("quick")
+        self.frame_guard_fixture(TEST_FRAME_GUARD_SHARED_TRACE="1")
+
+        def drive(_supervisor):
+            self.wait_for_native_open("quick")
+            self.assertEqual(len(self.frame_guard_events("create")), 1)
+            self.assertEqual(len(self.frame_guard_events("close")), 1)
+            self.assertFalse((self.root / "lock" / "frame-guard-window").exists())
+            trace = self.trace()
+            closed = next(index for index, event in enumerate(trace)
+                          if event.startswith("frame-guard:close:"))
+            opened = next(index for index, event in enumerate(trace)
+                          if event.startswith("native:") and "openedByTap" in event)
+            self.assertLess(closed, opened)
+            self.close_native()
+
+        status, _, error = self.run_launcher(drive)
+        self.assertEqual(status, 0, error)
+        self.assertEqual(self.native_starts(), ["0|0|closed", "1|1|closed"])
+        polls = Path(self.env["TEST_FRAME_GUARD_WINDOW_POLLS"]).read_text().splitlines()
+        self.assertIn("0x900|0", polls, "The second close check must actually see the owned guard window.")
+        self.assert_frame_guards_reaped(2)
+
+    def test_frame_guard_native_return_filters_only_the_proven_window_id(self):
+        self.native_fixture("quick")
+        gate = self.root / "frame-guard-second-create-release"
+        self.frame_guard_fixture(TEST_FRAME_GUARD_SECOND_CREATE_GATE=str(gate))
+        foreign = Path(self.env["TEST_FRAME_GUARD_FOREIGN_VISIBLE"])
+
+        def drive(_supervisor):
+            self.wait_for_native_open("quick")
+            self.close_native()
+            self.wait_until(lambda: bool(self.frame_guard_events("create-wait")))
+            self.write_fixture_record(foreign, "1")
+            gate.touch()
+            polls = Path(self.env["TEST_FRAME_GUARD_WINDOW_POLLS"])
+            self.wait_until(lambda: polls.exists()
+                            and len([row for row in polls.read_text().splitlines() if row.endswith("|1")]) >= 8)
+            self.assertEqual(self.starts(), ["0"], "An unrelated window with the same title was hidden by filtering.")
+            self.assertEqual(len(self.frame_guard_events("close")), 2)
+            self.write_fixture_record(foreign, "0")
+
+        status, _, error = self.run_launcher(drive)
+        self.assertEqual(status, 0, error)
+        self.assertEqual(self.native_starts(), ["0|0|closed", "1|1|closed"])
+        self.assert_frame_guards_reaped(3)
+
+    def test_frame_guard_early_exit_restores_native_ownership_without_a_cold_restart(self):
+        self.managed_fixture()
+        gate = self.root / "frame-guard-runtime-exit"
+        self.frame_guard_fixture(TEST_FRAME_GUARD_EXIT_GATE=str(gate))
+        original = []
+
+        def drive(supervisor):
+            pid = self.wait_for_managed_application()
+            original.append(self.observed_identity(pid))
+            self.wait_for_frame_guard(supervisor)
+            gate.touch()
+
+        status, _, error = self.run_launcher(drive)
+        self.assertEqual(status, 1, error)
+        self.assertEqual(self.starts(), ["0"])
+        self.assertEqual(self.managed_pids(), [original[0]["pid"]])
+        self.assertIn("start:statusbar", self.trace())
+        self.assertIn("xrefresh:", self.trace())
+        self.assert_frame_guards_reaped(1)
+
+    def test_frame_guard_uncatchable_exit_is_detected_while_the_app_is_idle(self):
+        self.managed_fixture()
+        original = []
+        watchers = []
+
+        def drive(supervisor):
+            pid = self.wait_for_managed_application()
+            original.append(self.observed_identity(pid))
+            created = self.wait_for_frame_guard(supervisor)
+            children = Path(f"/proc/{supervisor.pid}/task/{supervisor.pid}/children").read_text().split()
+            for child in children:
+                identity = self.observed_identity(int(child))
+                try:
+                    arguments = Path(f"/proc/{child}/cmdline").read_bytes().split(b"\0")
+                except FileNotFoundError:
+                    continue
+                if identity is not None and b"--watch-helper" in arguments:
+                    watchers.append(identity)
+            self.assertEqual(len(watchers), 1)
+            self.assertEqual(os.readlink(f"/proc/{created['helper']}/fd/1"),
+                             str(self.root / "lock" / "frame-guard-lifetime"))
+            os.kill(created["helper"], signal.SIGKILL)
+            # No power event or application request is sent after the kill.
+
+        status, _, error = self.run_launcher(drive)
+        self.assertEqual(status, 1, error)
+        self.assertIn("The retained frame helper exited", error)
+        self.assertEqual(self.managed_pids(), [original[0]["pid"]])
+        self.assertEqual(self.starts(), ["0"])
+        self.assertIn("start:statusbar", self.trace())
+        self.assertIn("xrefresh:", self.trace())
+        self.assertTrue(all(not self.original_process_exists(identity) for identity in watchers))
+        self.assert_frame_guards_reaped(1, close_count=0)
+
+    def assert_frame_guard_watcher_registration_signal(self, number):
+        source = self.launcher.read_text()
+        anchor = "    FRAME_GUARD_RELAY_PID=$!\n"
+        self.assertEqual(source.count(anchor), 1)
+        source = source.replace(anchor, f"    kill -{number} \"$$\"\n" + anchor, 1)
+        self.launcher.write_text(source)
+        status, _, error = self.run_launcher()
+        self.assertEqual(status, 128 + number, error)
+        self.assertEqual(self.starts(), [])
+        self.assertFalse((self.root / "lock").exists())
+        self.assertNotIn("stop:statusbar", self.trace())
+
+    def test_frame_guard_watcher_fork_term_reaps_both_unpublished_processes(self):
+        self.assert_frame_guard_watcher_registration_signal(signal.SIGTERM)
+
+    def test_frame_guard_watcher_fork_hup_reaps_both_unpublished_processes(self):
+        self.assert_frame_guard_watcher_registration_signal(signal.SIGHUP)
 
     def test_native_theme_handoff_round_trip_keeps_the_original_app_and_window_manager(self):
         awesome = self.native_theme_handoff_fixture()
@@ -3414,14 +4081,29 @@ class LauncherLifecycleTests(unittest.TestCase):
 
     def test_native_theme_previously_stopped_awesome_is_not_sampled_continued_or_changed(self):
         awesome = self.native_dark_fixture(stopped=True)
+        original = self.observed_identity(awesome.pid)
+        self.frame_guard_fixture(TEST_FRAME_GUARD_STARTUP_ADMISSION="stopped-window-manager")
         status, _, error = self.run_launcher()
-        self.assertEqual(status, 0, error)
-        self.assertEqual(self.native_theme_snapshots("native-snapshot"), [""])
+        self.assertEqual(status, 1, error)
+        self.assertEqual(self.starts(), [])
+        self.assertEqual(self.native_theme_snapshots("native-snapshot"), [])
         self.assertEqual(self.native_theme_events("get"), [])
         self.assertEqual(self.native_theme_events("set"), [])
         self.assertEqual(self.native_theme_identities(), [])
         self.assertNotIn("wm:CONT", self.trace())
-        self.assert_native_theme_restored(awesome, stopped=True)
+        # Admission fails before native services change, so their original
+        # state and the foreign WM's original stopped identity stay untouched.
+        self.assertEqual(self.trace(), [])
+        self.assertEqual(self.process_state(awesome.pid), "T")
+        self.assertIsNone(awesome.poll())
+        self.assertTrue(self.original_process_exists(original))
+        self.assertFalse((self.root / "lock").exists())
+        failed = self.frame_guard_events("admission-failed")
+        self.assertEqual(len(failed), 1)
+        self.assertEqual((failed[0]["wm"]["pid"], failed[0]["wm"]["birth"], failed[0]["wm"]["state"]),
+                         (original["pid"], original["birth"], "T"))
+        self.assertEqual(self.frame_guard_events("create"), [])
+        self.assertFalse(self.original_process_exists({"pid": failed[0]["helper"], "birth": failed[0]["birth"]}))
 
     def assert_native_theme_unsupported(self, profile, firmware):
         awesome = self.native_dark_fixture(profile=profile, firmware=firmware)
@@ -4614,6 +5296,8 @@ class LauncherLifecycleTests(unittest.TestCase):
         self.wait_until(timer_started)
         with self.assertRaises(FileNotFoundError):
             os.readlink(f"/proc/{record['child']['pid']}/fd/3")
+        with self.assertRaises(FileNotFoundError):
+            os.readlink(f"/proc/{record['child']['pid']}/fd/6")
         self.assertTrue(self.original_process_exists(record["child"]))
 
     def assert_wake_probe_registration_followup(self, awesome):

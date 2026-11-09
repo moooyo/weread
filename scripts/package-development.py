@@ -13,6 +13,7 @@ import zipfile
 REQUIRED = (
     "documents/weread.sh",
     "weread/app/weread",
+    "weread/app/weread-frame-guard",
     "weread/app/README.md",
     "weread/app/THIRD_PARTY_NOTICES.md",
     "weread/app/config/device-profile.example",
@@ -23,6 +24,7 @@ REQUIRED = (
 EXECUTABLE_INPUTS = frozenset((
     "documents/weread.sh",
     "weread/app/weread",
+    "weread/app/weread-frame-guard",
 ))
 
 
@@ -56,6 +58,7 @@ def archive(staged: Path, output: Path) -> dict[str, str]:
     checksums = {
         output.name: hashlib.sha256(output.read_bytes()).hexdigest(),
         "weread/app/weread": hashlib.sha256((staged / "weread/app/weread").read_bytes()).hexdigest(),
+        "weread/app/weread-frame-guard": hashlib.sha256((staged / "weread/app/weread-frame-guard").read_bytes()).hexdigest(),
     }
     output.with_suffix(".sha256").write_text(
         "".join(f"{checksum}  {name}\n" for name, checksum in checksums.items()),

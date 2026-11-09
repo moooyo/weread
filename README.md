@@ -58,6 +58,7 @@ The [Kindle development bundle instructions](packaging/kindle/README.md) describ
 - Target Paperwhite 5 / 11th generation, Paperwhite 6 / 12th generation, and Kindle Scribe. The initial physical test target is the first-generation Scribe released in 2022 on firmware 5.19.5; the supported model/firmware matrix remains open.
 - Support Chinese text and search input, book browsing, cover display, search, details, and local caching.
 - Retain Reader brightness, system night-mode control on a supported Kindle, startup feedback, continuous selection, and managed sleep recovery in product scope. Desktop night mode remains local.
+- Automatic brightness is outside the accepted product and acceptance scope. Retain manual brightness and device-supported warmth controls; ambient-light automation is not an outstanding delivery gate.
 - Keep content acquisition dependent on inspected source contracts and configured credentials. The current implementation downloads validated chapter text and provides its own paginated reader; it does not infer a downloadable EPUB or PDF from a cover URL.
 - Use WeChat Read as the confirmed source of cover images. Cover availability is a user-provided requirement, not evidence that the upstream exposes downloadable book files.
 
@@ -104,7 +105,7 @@ Source adapters <--> Application use cases <--> Slint UI
                       Kindle platform layer
 ```
 
-The client uses Rust, Slint, Tokio, reqwest with rustls, SQLite, and local files. The Kindle platform layer is isolated behind interfaces maintained by this project. KPM is the initial distribution mechanism. Product packaging contains the main Rust ELF, launcher, and notices; the removed Wi-Fi helper is no longer required or packaged.
+The client uses Rust, Slint, Tokio, reqwest with rustls, SQLite, and local files. The Kindle platform layer is isolated behind interfaces maintained by this project. KPM is the initial distribution mechanism. Product packaging contains the main Rust ELF, the independent native frame guard, launcher, and notices; the removed Wi-Fi helper is no longer required or packaged.
 
 Cover images flow from the upstream URL to the client, then to a local thumbnail/cache pipeline. S3 is not part of this architecture.
 

@@ -20,11 +20,13 @@ PACKAGE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PACKAGE)
 
 APPLICATION = "weread/app/weread"
+FRAME_GUARD = "weread/app/weread-frame-guard"
 LAUNCHER = "documents/weread.sh"
 
 BUILD_INPUTS = {
     LAUNCHER: b"#!/bin/sh\n# Synthetic archive fixture; never executed.\n",
     APPLICATION: b"\x7fELF synthetic static application\x00\x02",
+    FRAME_GUARD: b"\x7fELF synthetic independent native frame guard\x00\x01",
     "weread/app/README.md": b"# Fixture application\n",
     "weread/app/THIRD_PARTY_NOTICES.md": b"# Fixture dependency notices\n",
     "weread/app/config/device-profile.example": b"scribe\n",
@@ -70,7 +72,8 @@ class DevelopmentArchiveTests(unittest.TestCase):
         with zipfile.ZipFile(self.output) as archive:
             self.assertEqual(archive.read(APPLICATION), BUILD_INPUTS[APPLICATION])
             self.assertEqual(archive.read(LAUNCHER), BUILD_INPUTS[LAUNCHER])
-            for name in (APPLICATION, LAUNCHER):
+            self.assertEqual(archive.read(FRAME_GUARD), BUILD_INPUTS[FRAME_GUARD])
+            for name in (APPLICATION, FRAME_GUARD, LAUNCHER):
                 with self.subTest(executable=name):
                     information = archive.getinfo(name)
                     archived_mode = information.external_attr >> 16
@@ -85,6 +88,9 @@ class DevelopmentArchiveTests(unittest.TestCase):
             checksums[APPLICATION], hashlib.sha256(BUILD_INPUTS[APPLICATION]).hexdigest()
         )
         self.assertEqual(
+            checksums[FRAME_GUARD], hashlib.sha256(BUILD_INPUTS[FRAME_GUARD]).hexdigest()
+        )
+        self.assertEqual(
             checksums[self.output.name], hashlib.sha256(self.output.read_bytes()).hexdigest()
         )
         sidecar = {}
@@ -92,9 +98,17 @@ class DevelopmentArchiveTests(unittest.TestCase):
             digest, separator, name = line.partition("  ")
             self.assertEqual(separator, "  ")
             sidecar[name] = digest
-        self.assertEqual(set(sidecar), {APPLICATION, self.output.name})
+        self.assertEqual(set(sidecar), {APPLICATION, FRAME_GUARD, self.output.name})
         self.assertEqual(sidecar[APPLICATION], checksums[APPLICATION])
+        self.assertEqual(sidecar[FRAME_GUARD], checksums[FRAME_GUARD])
         self.assertEqual(sidecar[self.output.name], checksums[self.output.name])
+
+    def test_missing_frame_guard_refuses_before_creating_archive(self) -> None:
+        (self.staged / FRAME_GUARD).unlink()
+        with self.assertRaisesRegex(ValueError, "weread/app/weread-frame-guard"):
+            PACKAGE.archive(self.staged, self.output)
+        self.assertFalse(self.output.exists())
+        self.assertFalse(self.output.with_suffix(".sha256").exists())
 
     def test_runtime_private_and_unlisted_files_never_enter_archive(self) -> None:
         excluded = (

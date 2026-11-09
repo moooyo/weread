@@ -154,6 +154,14 @@ WM_STOP_PENDING_IDENTITY=''
 STATUSBAR_STOPPED=0
 STATUSBAR_RESTORE_REQUIRED=0
 DISPLAY_OWNED=0
+FRAME_GUARD_PID=''
+FRAME_GUARD_BIRTH=''
+FRAME_GUARD_WINDOW=''
+FRAME_GUARD_SEQUENCE=0
+FRAME_GUARD_FD_OPEN=0
+FRAME_GUARD_LIFETIME_FD_OPEN=0
+FRAME_GUARD_RELAY_PID=''
+FRAME_GUARD_RELAY_BIRTH=''
 NATIVE_EPDC_MODE=''
 NATIVE_PORTRAIT_CALIBRATION=''
 NATIVE_THEME_CAPTURE_STATUS=unknown
@@ -429,6 +437,178 @@ cleanup_wrapper_child() {
     return 1
 }
 
+frame_guard_command_matches() {
+    [ -r "/proc/$1/cmdline" ] &&
+        tr '\000' '\n' <"/proc/$1/cmdline" |
+        grep -F -x -- "$APP_DIR/weread-frame-guard" >/dev/null
+}
+
+frame_guard_is_current() {
+    [ -n "$FRAME_GUARD_PID" ] && [ -n "$FRAME_GUARD_BIRTH" ] &&
+        [ "$FRAME_GUARD_FD_OPEN" -eq 1 ] &&
+        owned_child_is_running "$FRAME_GUARD_PID" "$FRAME_GUARD_BIRTH" "$$" &&
+        frame_guard_command_matches "$FRAME_GUARD_PID" &&
+        [ -n "$FRAME_GUARD_RELAY_PID" ] && [ -n "$FRAME_GUARD_RELAY_BIRTH" ] &&
+        owned_child_is_running "$FRAME_GUARD_RELAY_PID" "$FRAME_GUARD_RELAY_BIRTH" "$$" &&
+        [ "$(cat "$LOCK_DIR/pid" 2>/dev/null || :)" = "$$" ] &&
+        [ "$(cat "$LOCK_DIR/nonce" 2>/dev/null || :)" = "$LAUNCH_TOKEN" ] || return 1
+    case "$(sed -n 's/^State:[[:space:]]*//p' "/proc/$FRAME_GUARD_PID/status" 2>/dev/null || :)" in
+        T*|t*|Z*|X*|'') return 1 ;;
+    esac
+}
+
+frame_guard_ready_matches() {
+    [ -f "$LOCK_DIR/frame-guard-ready" ] && [ ! -L "$LOCK_DIR/frame-guard-ready" ] || return 1
+    guard_ready_bytes=$(wc -c <"$LOCK_DIR/frame-guard-ready" 2>/dev/null) || return 1
+    guard_ready_bytes=${guard_ready_bytes#"${guard_ready_bytes%%[![:space:]]*}"}
+    guard_ready_bytes=${guard_ready_bytes%"${guard_ready_bytes##*[![:space:]]}"}
+    case "$guard_ready_bytes" in *[!0-9]*|'') return 1 ;; esac
+    [ "$guard_ready_bytes" -gt 0 ] && [ "$guard_ready_bytes" -le 128 ] || return 1
+    guard_ready_record=$(cat "$LOCK_DIR/frame-guard-ready" 2>/dev/null) || return 1
+    [ "$guard_ready_record" = "$1:$2:$LAUNCH_TOKEN:$FRAME_GUARD_PID:$FRAME_GUARD_BIRTH" ]
+}
+
+capture_frame_guard_window() {
+    frame_guard_is_current || return 1
+    [ -f "$LOCK_DIR/frame-guard-window" ] && [ ! -L "$LOCK_DIR/frame-guard-window" ] || return 1
+    guard_window_bytes=$(wc -c <"$LOCK_DIR/frame-guard-window" 2>/dev/null) || return 1
+    guard_window_bytes=${guard_window_bytes#"${guard_window_bytes%%[![:space:]]*}"}
+    guard_window_bytes=${guard_window_bytes%"${guard_window_bytes##*[![:space:]]}"}
+    case "$guard_window_bytes" in *[!0-9]*|'') return 1 ;; esac
+    [ "$guard_window_bytes" -gt 0 ] && [ "$guard_window_bytes" -le 128 ] || return 1
+    IFS=: read -r guard_window_token guard_window_pid guard_window_birth guard_window_id guard_window_extra <"$LOCK_DIR/frame-guard-window" || return 1
+    [ "$guard_window_token:$guard_window_pid:$guard_window_birth" = "$LAUNCH_TOKEN:$FRAME_GUARD_PID:$FRAME_GUARD_BIRTH" ] &&
+        [ -z "$guard_window_extra" ] || return 1
+    case "$guard_window_id" in 0x*) ;; *) return 1 ;; esac
+    guard_window_hex=${guard_window_id#0x}
+    case "$guard_window_hex" in *[!0-9a-f]*|'') return 1 ;; esac
+    [ "${#guard_window_hex}" -le 8 ] && [ "$guard_window_hex" != 0 ] || return 1
+    FRAME_GUARD_WINDOW=$guard_window_id
+}
+
+register_frame_guard() {
+    [ -x "$APP_DIR/weread-frame-guard" ] && [ -n "$POWER_OWNER_BIRTH" ] || return 1
+    rm -f "$LOCK_DIR/frame-guard-ready" "$LOCK_DIR/frame-guard-ready.pending" "$LOCK_DIR/frame-guard-window" "$LOCK_DIR/frame-guard-window.pending" || return 1
+    mkfifo "$LOCK_DIR/frame-guard-commands" || return 1
+    mkfifo "$LOCK_DIR/frame-guard-lifetime" || return 1
+    { exec 6<>"$LOCK_DIR/frame-guard-commands"; } || return 1
+    FRAME_GUARD_FD_OPEN=1
+    # Inherit an already open descriptor into both children: neither can be
+    # stranded in a FIFO open if this supervisor dies before registration.
+    { exec 7<>"$LOCK_DIR/frame-guard-lifetime"; } || return 1
+    FRAME_GUARD_LIFETIME_FD_OPEN=1
+    FRAME_GUARD_SEQUENCE=0
+    "$APP_DIR/weread-frame-guard" --context "$LOCK_DIR" --token "$LAUNCH_TOKEN" \
+        --owner "$$" --owner-birth "$POWER_OWNER_BIRTH" --profile "$PROFILE" \
+        --command-fd 6 >&7 7>&- 2>"$DATA_DIR/logs/frame-guard-bootstrap.log" </dev/null 3>&- &
+    FRAME_GUARD_PID=$!
+    FRAME_GUARD_BIRTH=''
+    capture_wrapper_child_birth "$FRAME_GUARD_PID" "$$" 2>/dev/null || return 1
+    FRAME_GUARD_BIRTH=$WRAPPER_CHILD_BIRTH
+    # A passive, parent-protected reader reports even an uncatchable helper
+    # exit. Redirection opens the read side before closing the inherited anchor.
+    "$APP_DIR/weread-frame-guard" --context "$LOCK_DIR" --token "$LAUNCH_TOKEN" \
+        --owner "$$" --owner-birth "$POWER_OWNER_BIRTH" --watch-helper "$FRAME_GUARD_PID" \
+        --helper-birth "$FRAME_GUARD_BIRTH" --lifetime-fd 0 <"$LOCK_DIR/frame-guard-lifetime" 7>&- 6>&- 3>&- >/dev/null 2>"$DATA_DIR/logs/frame-guard-watcher.log" &
+    FRAME_GUARD_RELAY_PID=$!
+    FRAME_GUARD_RELAY_BIRTH=''
+    capture_wrapper_child_birth "$FRAME_GUARD_RELAY_PID" "$$" 2>/dev/null || return 1
+    FRAME_GUARD_RELAY_BIRTH=$WRAPPER_CHILD_BIRTH
+    { exec 7>&-; } || return 1
+    FRAME_GUARD_LIFETIME_FD_OPEN=0
+    guard_start_checks=$(managed_wait_budget 5)
+    while [ "$guard_start_checks" -gt 0 ]; do
+        owned_child_is_running "$FRAME_GUARD_PID" "$FRAME_GUARD_BIRTH" "$$" || return 1
+        if ! frame_guard_command_matches "$FRAME_GUARD_PID"; then
+            managed_wait_tick || return 1
+            guard_start_checks=$((guard_start_checks - 1))
+            continue
+        fi
+        frame_guard_is_current || return 1
+        if frame_guard_ready_matches 0 0; then
+            capture_frame_guard_window || return 1
+            return 0
+        fi
+        managed_wait_tick || return 1
+        guard_start_checks=$((guard_start_checks - 1))
+    done
+    launcher_log '%s\n' 'weread: Native frame guard admission was not acknowledged.'
+    return 1
+}
+
+start_frame_guard() {
+    if [ -n "$FRAME_GUARD_PID" ]; then frame_guard_is_current; return $?; fi
+    begin_owned_registration
+    guard_start_status=0
+    if register_frame_guard; then :; else guard_start_status=$?; fi
+    finish_owned_registration
+    return "$guard_start_status"
+}
+
+frame_guard_application_is_frozen() {
+    managed_application_is_current && frame_guard_is_current &&
+        [ "$DISPLAY_OWNED" -eq 1 ] && [ -z "$WM_STOP_PENDING_IDENTITY" ] || return 1
+    case "$(sed -n 's/^State:[[:space:]]*//p' "/proc/$APP_CHILD_PID/status" 2>/dev/null || :)" in
+        T*|t*) ;; *) return 1 ;;
+    esac
+    for guard_wm_identity in $PAUSED_WM_IDENTITIES; do
+        guard_wm_pid=${guard_wm_identity%%:*}
+        guard_wm_birth=${guard_wm_identity#*:}
+        [ "$(process_birth "$guard_wm_pid" 2>/dev/null || :)" = "$guard_wm_birth" ] || return 1
+        case "$(sed -n 's/^State:[[:space:]]*//p' "/proc/$guard_wm_pid/status" 2>/dev/null || :)" in
+            T*|t*) ;; *) return 1 ;;
+        esac
+    done
+    if [ "$NATIVE_THEME_IN_PROGRESS" -eq 1 ]; then native_theme_request_is_current || return 1; fi
+}
+
+request_frame_guard() {
+    case "$1" in capture|align) ;; *) return 1 ;; esac
+    frame_guard_application_is_frozen || return 1
+    [ "$FRAME_GUARD_SEQUENCE" -lt 2147483647 ] || return 1
+    FRAME_GUARD_SEQUENCE=$((FRAME_GUARD_SEQUENCE + 1))
+    printf '%s:%s:%s:%s:%s:%s:%s\n' "$FRAME_GUARD_SEQUENCE" "$APP_GENERATION" "$LAUNCH_TOKEN" "$APP_CHILD_PID" "$APP_CHILD_BIRTH" "$APP_RUNNER_PID" "$1" >&6 || return 1
+    guard_frame_checks=$(managed_wait_budget 5)
+    while [ "$guard_frame_checks" -gt 0 ]; do
+        frame_guard_application_is_frozen || return 1
+        if frame_guard_ready_matches "$FRAME_GUARD_SEQUENCE" "$APP_GENERATION"; then return 0; fi
+        managed_wait_tick || return 1
+        guard_frame_checks=$((guard_frame_checks - 1))
+    done
+    launcher_log '%s\n' 'weread: Native frame guard update was not acknowledged.'
+    return 1
+}
+
+stop_frame_guard() {
+    guard_stop_status=0
+    if [ "$FRAME_GUARD_LIFETIME_FD_OPEN" -eq 1 ]; then
+        if { exec 7>&-; }; then FRAME_GUARD_LIFETIME_FD_OPEN=0; else guard_stop_status=1; fi
+    fi
+    if [ -n "$FRAME_GUARD_PID" ]; then
+        if cleanup_wrapper_child "$FRAME_GUARD_PID" "$FRAME_GUARD_BIRTH" "$$"; then
+            FRAME_GUARD_PID=''
+            FRAME_GUARD_BIRTH=''
+            FRAME_GUARD_WINDOW=''
+            FRAME_GUARD_SEQUENCE=0
+        else
+            guard_stop_status=1
+        fi
+    fi
+    if [ -n "$FRAME_GUARD_RELAY_PID" ]; then
+        if cleanup_wrapper_child "$FRAME_GUARD_RELAY_PID" "$FRAME_GUARD_RELAY_BIRTH" "$$"; then
+            FRAME_GUARD_RELAY_PID=''
+            FRAME_GUARD_RELAY_BIRTH=''
+        else
+            guard_stop_status=1
+        fi
+    fi
+    if [ "$FRAME_GUARD_FD_OPEN" -eq 1 ]; then
+        if { exec 6>&-; }; then FRAME_GUARD_FD_OPEN=0; else guard_stop_status=1; fi
+    fi
+    rm -f "$LOCK_DIR/frame-guard-commands" "$LOCK_DIR/frame-guard-lifetime" "$LOCK_DIR/frame-guard-ready" "$LOCK_DIR/frame-guard-ready.pending" "$LOCK_DIR/frame-guard-window" "$LOCK_DIR/frame-guard-window.pending" || guard_stop_status=1
+    return "$guard_stop_status"
+}
+
 signal_recorded_child() {
     child_record=$1
     child_signal=$2
@@ -556,7 +736,7 @@ owned_native_command() {
         mv -f "$completed.pending" "$completed"
         # Retain this private group anchor until its supervisor reaps it.
         while :; do sleep 1; done
-    ' sh "$LOCK_DIR/native-theme-done" "$LOCK_DIR/native-theme-go" "$NATIVE_THEME_COMMAND_SEQUENCE" "$LAUNCH_TOKEN" "$NATIVE_COMMAND_FILE_BLOCKS" "$@" >"$LOCK_DIR/native-theme-output" 2>/dev/null </dev/null 3>&- &
+    ' sh "$LOCK_DIR/native-theme-done" "$LOCK_DIR/native-theme-go" "$NATIVE_THEME_COMMAND_SEQUENCE" "$LAUNCH_TOKEN" "$NATIVE_COMMAND_FILE_BLOCKS" "$@" >"$LOCK_DIR/native-theme-output" 2>/dev/null </dev/null 3>&- 6>&- &
     NATIVE_THEME_COMMAND_PID=$!
     NATIVE_THEME_COMMAND_BIRTH=$(process_birth "$NATIVE_THEME_COMMAND_PID" 2>/dev/null || :)
     native_theme_checks=$NATIVE_THEME_TIMEOUT_TICKS
@@ -881,12 +1061,17 @@ synchronize_native_dark_mode() {
 }
 
 release_display() {
+    display_release_status=0
+    case "${1:-native}" in
+        retain-frame) frame_guard_is_current || return 1 ;;
+        native) stop_frame_guard || display_release_status=1 ;;
+        *) return 1 ;;
+    esac
     # A failed stop request may have reached Upstart before its caller timed out.
     # Restore its observed running baseline without claiming App ownership.
     [ "$DISPLAY_OWNED" -eq 1 ] || [ "$STATUSBAR_RESTORE_REQUIRED" -eq 1 ] ||
         [ "$STATUSBAR_STOPPED" -eq 1 ] || [ -n "$PAUSED_WM_IDENTITIES" ] ||
-        [ -n "$WM_STOP_PENDING_IDENTITY" ] || return 0
-    display_release_status=0
+        [ -n "$WM_STOP_PENDING_IDENTITY" ] || return "$display_release_status"
     native_theme_wm_resumed=0
     native_theme_wm_failed=0
     restore_wm_identities=$PAUSED_WM_IDENTITIES
@@ -980,6 +1165,7 @@ take_display() {
         take_wm_pids=$NATIVE_PROCESS_IDS
     fi
     # Finish all baseline queries before changing either native service.
+    start_frame_guard || return 1
     if [ "$take_statusbar_running" -eq 1 ]; then
         STATUSBAR_RESTORE_REQUIRED=1
         if ! owned_native_command "$NATIVE_QUERY_OUTPUT_LIMIT" stop statusbar; then
@@ -1168,6 +1354,10 @@ perform_native_theme_request() {
         theme_app_checks=$((theme_app_checks - 1))
     done
     [ "$theme_app_stopped" -eq 1 ] || return 1
+    NATIVE_THEME_STAGE=frame-guard-capture
+    request_frame_guard capture || return 1
+    NATIVE_THEME_STAGE=power-before-native-window
+    native_theme_transaction_power_is_active || return 1
     NATIVE_THEME_STAGE=window-manager-continue
     continue_theme_window_managers || return 1
     NATIVE_THEME_STAGE=power-before-set
@@ -1208,6 +1398,8 @@ perform_native_theme_request() {
     native_theme_transaction_power_is_active || return 1
     NATIVE_THEME_STAGE=window-manager-pause
     pause_theme_window_managers || return 1
+    NATIVE_THEME_STAGE=frame-guard-alignment
+    request_frame_guard align || return 1
     NATIVE_THEME_STAGE=power-before-result
     native_theme_transaction_power_is_active || return 1
     NATIVE_EPDC_MODE=$theme_confirmed_mode
@@ -1311,7 +1503,7 @@ run_application() {
     capture_wrapper_identity || exit 1
     # Do not let an inherited resume variable turn an ordinary start into a
     # recovery. Only this supervisor's completed sleep cycle can request one.
-    WEREAD_LAUNCH_CONTEXT_DIR=$LOCK_DIR WEREAD_LAUNCH_GENERATION=$1 WEREAD_LAUNCH_TOKEN=$LAUNCH_TOKEN WEREAD_RESUME_SESSION=$2 WEREAD_NATIVE_RETURN=$3 WEREAD_NATIVE_RETURN_RESULT=$4 "$APP_DIR/weread" --kindle --device "$PROFILE" --data-dir "$DATA_DIR" >"$DATA_DIR/logs/application-bootstrap.log" 2>&1 3>&- &
+    WEREAD_LAUNCH_CONTEXT_DIR=$LOCK_DIR WEREAD_LAUNCH_GENERATION=$1 WEREAD_LAUNCH_TOKEN=$LAUNCH_TOKEN WEREAD_RESUME_SESSION=$2 WEREAD_NATIVE_RETURN=$3 WEREAD_NATIVE_RETURN_RESULT=$4 "$APP_DIR/weread" --kindle --device "$PROFILE" --data-dir "$DATA_DIR" >"$DATA_DIR/logs/application-bootstrap.log" 2>&1 3>&- 6>&- &
     runner_child=$!
     runner_child_parent=$WRAPPER_PID
     if capture_wrapper_child_birth "$runner_child" 2>/dev/null; then
@@ -1378,7 +1570,7 @@ start_application() {
         printf '%s:%s\n' "$APP_GENERATION" "$LAUNCH_TOKEN" >"$LOCK_DIR/native-return"
     fi
     begin_owned_registration
-    run_application "$APP_GENERATION" "$1" "$APP_NATIVE_RETURN_INTENT" "$APP_NATIVE_RETURN_RESULT" &
+    run_application "$APP_GENERATION" "$1" "$APP_NATIVE_RETURN_INTENT" "$APP_NATIVE_RETURN_RESULT" 6>&- &
     APP_RUNNER_PID=$!
     APP_RUNNER_BIRTH=$(process_birth "$APP_RUNNER_PID" 2>/dev/null || :)
     if [ -z "$APP_RUNNER_BIRTH" ]; then capture_runner_identity || :; fi
@@ -1829,7 +2021,7 @@ probe_wake_later() {
     # keep the power FIFO's read/write descriptor alive after supervisor exit.
     # The signal handler latches stop until this fork's PID and birth are
     # captured, so the EXIT cleanup still owns an unpublished timer child.
-    sleep "$2" 3>&- &
+    sleep "$2" 3>&- 6>&- &
     probe_child=$!
     if capture_wrapper_child_birth "$probe_child" 2>/dev/null; then
         probe_child_birth=$WRAPPER_CHILD_BIRTH
@@ -1926,7 +2118,7 @@ start_wake_probe() {
 
 register_wake_probe() {
     WAKE_PROBE_CYCLE=$1
-    probe_wake_later "$1" "$2" &
+    probe_wake_later "$1" "$2" 6>&- &
     WAKE_PROBE_PID=$!
     WAKE_PROBE_BIRTH=''
     WAKE_PROBE_REAPED=0
@@ -2082,6 +2274,7 @@ attempt_managed_sleep() {
                         SLEEP_RESUME_INTENT=1
                         SLEEP_NATIVE_RETURN_INTENT=0
                         SLEEP_NATIVE_RETURN_RESULT=closed
+                        request_frame_guard capture || return 1
                         return 0
                         ;;
                 esac
@@ -2106,6 +2299,8 @@ resume_managed_application() {
     if ! publish_native_portrait_calibration managed-native-portrait-calibration; then
         launcher_log '%s\n' 'weread: Native wake portrait record publication failed; keeping the previous calibration.'
     fi
+    request_frame_guard align || return 1
+    clear_native_theme_power_interrupt || fail 'Resident wake alignment was superseded by a power event or an unconfirmed active state.'
     write_managed_request managed-wake-request || return 1
     # SIGUSR2 is queued while the process is stopped and becomes visible
     # before its next application timer can perform ordinary work.
@@ -2240,7 +2435,7 @@ observe_native_settings() {
     trap stop_native_child HUP INT TERM
     capture_wrapper_identity || exit 1
     native_command() {
-        "$@" 3>&- &
+        "$@" 3>&- 6>&- &
         native_child=$!
         if capture_wrapper_child_birth "$native_child" 2>/dev/null; then
             native_child_birth=$WRAPPER_CHILD_BIRTH
@@ -2379,7 +2574,10 @@ observe_native_settings() {
 }
 
 native_windows_are_closed() {
-    awk '
+    guard_owned_window=''
+    if frame_guard_is_current; then guard_owned_window=$FRAME_GUARD_WINDOW; fi
+    awk -v owned_guard="$guard_owned_window" '
+        owned_guard != "" && $1 == owned_guard { next }
         NR == FNR { if (/MapState=IsViewable/) baseline[$1] = 1; next }
         /MapState=IsViewable/ {
             if (index($0, "pillow-wifi-wizard-dialog") || index($0, "com.lab126.kppQuickSettings")) busy = 1
@@ -2418,7 +2616,7 @@ monitor_native_settings() {
     NATIVE_GENERATION=$((NATIVE_GENERATION + 1))
     NATIVE_RETURN_PENDING=''
     rm -f "$LOCK_DIR/native-observer-finished" "$LOCK_DIR/native-child-pid"
-    observe_native_settings "$NATIVE_KIND" "$NATIVE_GENERATION" "$NATIVE_BASELINE_APP" "$NATIVE_BASELINE_VIEW" monitor "$native_monitor_result" &
+    observe_native_settings "$NATIVE_KIND" "$NATIVE_GENERATION" "$NATIVE_BASELINE_APP" "$NATIVE_BASELINE_VIEW" monitor "$native_monitor_result" 6>&- &
     NATIVE_OBSERVER_PID=$!
 }
 
@@ -2445,6 +2643,7 @@ resume_from_native() {
 begin_native_settings() {
     native_open_kind=$1
     [ "$NATIVE_SETTINGS_SUPPORTED" -eq 1 ] || fail 'Native settings have no supported window-observation interface.'
+    release_display || return 1
     native_baseline_app=''
     native_baseline_view=''
     if query_native_property com.lab126.appmgrd activeApp; then native_baseline_app=$NATIVE_PROPERTY_VALUE; fi
@@ -2452,8 +2651,9 @@ begin_native_settings() {
     if [ -z "$native_baseline_app" ] || [ -z "$native_baseline_view" ] ||
         ! native_window_tree >"$LOCK_DIR/native-baseline" ||
         ! grep -q 'MapState=' "$LOCK_DIR/native-baseline"; then
-        # Native UI was never opened, so the existing display ownership can
-        # safely start a new App generation with its saved return context.
+        # Native UI was never opened. Reacquire a fresh guard before starting
+        # the saved App generation after this intentional native handback.
+        take_display || return 1
         start_application 1 1 failed
         return 0
     fi
@@ -2466,8 +2666,7 @@ begin_native_settings() {
     NATIVE_RETURN_PENDING=''
     NATIVE_POWER_FAILURES=0
     rm -f "$LOCK_DIR/native-observer-finished" "$LOCK_DIR/native-child-pid"
-    release_display
-    observe_native_settings "$native_open_kind" "$NATIVE_GENERATION" "$native_baseline_app" "$native_baseline_view" &
+    observe_native_settings "$native_open_kind" "$NATIVE_GENERATION" "$native_baseline_app" "$native_baseline_view" 6>&- &
     NATIVE_OBSERVER_PID=$!
 }
 
@@ -2599,6 +2798,11 @@ take_display
 start_application 0
 
 while IFS= read -r power_event <&3; do
+    # A full event FIFO can reject the watcher's nonblocking notification;
+    # any already queued event must still detect the retired original helper.
+    if [ -n "$FRAME_GUARD_PID" ]; then
+        frame_guard_is_current || fail 'The retained frame helper exited; restoring native ownership.'
+    fi
     case "$power_event" in
         goingToScreenSaver*)
             SLEEP_GENERATION=$((SLEEP_GENERATION + 1))
@@ -2612,7 +2816,7 @@ while IFS= read -r power_event <&3; do
                 rm -f "$LOCK_DIR/resume-ready" "$LOCK_DIR/resume-ready.pending" "$LOCK_DIR/managed-sleep-request" "$LOCK_DIR/managed-sleep-request.pending" "$LOCK_DIR/managed-sleep-ready" "$LOCK_DIR/managed-sleep-ready.pending" "$LOCK_DIR/managed-wake-request" "$LOCK_DIR/managed-wake-request.pending" "$LOCK_DIR/managed-wake-ready" "$LOCK_DIR/managed-wake-ready.pending" "$LOCK_DIR/managed-native-epdc-mode" "$LOCK_DIR/managed-native-epdc-mode.pending" "$LOCK_DIR/managed-native-portrait-calibration" "$LOCK_DIR/managed-native-portrait-calibration.pending"
                 printf '%s:%s\n' "$APP_GENERATION" "$LAUNCH_TOKEN" >"$LOCK_DIR/sleep-request"
                 if attempt_managed_sleep; then
-                    release_display
+                    release_display retain-frame
                 else
                     cold_sleep_application
                 fi
@@ -2635,6 +2839,13 @@ while IFS= read -r power_event <&3; do
         usbConfigured*)
             # USB ownership ends this launch, including a pending wake.
             exit 143
+            ;;
+        '_weread_frame_guard_exit '*)
+            set -- $power_event
+            if [ "$#" -eq 5 ] && [ "$2" = "$LAUNCH_TOKEN" ] &&
+                [ "$3:$4" = "$FRAME_GUARD_PID:$FRAME_GUARD_BIRTH" ]; then
+                fail 'The retained frame helper exited; restoring native ownership.'
+            fi
             ;;
         '_weread_app_started '*)
             set -- $power_event

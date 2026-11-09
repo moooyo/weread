@@ -66,6 +66,43 @@ The [development ZIP](../dist/native-fixes-20261109/weread-kindle-0.2.0-native-f
 and sanitized remote receipts are retained locally under
 `dist/native-fixes-20261109/`.
 
+## Native frame-guard v7 software candidate
+
+The later visual-handoff candidate retains the verified Rust runtime source
+and reuses the static ARM ELF identified above. It adds the independently owned
+native frame guard and its matching launcher; it does not report a second Rust
+test execution or ARM application build.
+
+On `test-env`, all 195 launcher cases passed in 754.577 seconds. All 30
+native-helper, pixel, and lifecycle-watch cases and four packaging-contract
+cases also passed: 229 passing cases in total. Controlled X11 fixtures include exact
+StaticGray pixel mapping and helper lifetime failures. These are software
+results, not physical presentation acceptance.
+
+The archive `weread-kindle-0.2.0-native-frame-v7-dev.zip` contains exactly the
+expected 36 members and passed CRC, 755/644 mode, and executable-identity checks.
+It contains no runtime state or private data. Its frozen artifact identities
+are:
+
+| Artifact | SHA-256 |
+| --- | --- |
+| Development ZIP | `057306376adabec34dea2e02dbf82a80e560f9d08d6506283d34a64b8a6af403` |
+| Reused static ARM application | `8010a21786b0b68dce67baeb00452e85f217daaef08293d6c25959d9f81fbc7b` |
+| Native frame guard | `a235b41c80a21a35c99f8798f366a4f2e921b971a606c83f3f8d69d576676806` |
+| Production launcher | `d890fbfbe0c90c729f1bce95b7d77f46f1a683779eb015ccf947db2308128d84` |
+
+The frozen manifest and execution receipts are retained under
+`test-env:/root/weread-physical-native-fixes-20261109-r3/tools/` as
+`frame-guard-v7-verification-manifest.json`,
+`frame-guard-launcher-v7-full-run.log`,
+`frame-guard-v7-native-final-run.log`, and
+`frame-guard-v7-archive-verification.json`.
+
+The R6 physical visual-handoff gate remains **OPEN**. In particular, these
+results do not prove that native Library is absent during a system-theme
+change or wake. The R3 visual failures below remain recorded, and the isolated
+candidate has not replaced the earlier normal-mode private trial.
+
 ## Physical observations and remaining gates
 
 The identified device is a first-generation Kindle Scribe (2022), firmware

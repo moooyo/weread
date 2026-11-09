@@ -2,7 +2,7 @@
 
 This directory is a packaging scaffold, not an accepted device-support matrix or a published KPM package. `manifest.draft.json` follows the inspected KPM manifest shape; `kindlehf` is a package platform label, not a compatibility result. The application version and package identity remain provisional. No project license has been selected.
 
-Implementation and device acceptance are still in progress. The user removed the application drop-down Quick panel and application Wi-Fi, including the project-owned C helper, from product scope. Historical checks apply only to their identified executable and environment. The recorded ARM candidate has SHA-256 `2b39140b11d3ac717953a01e38fc00d32434d30d18e3c7f9221e01d121f23609` and ran with launcher SHA-256 `0226f613b834862c229bf72e987ef441a2f523c84081d6cab46ee5bc39465ed4` in the Scribe 2022 firmware 5.20.1 guest. Current physical evidence belongs in [Physical testing](../../docs/PHYSICAL_TESTING.md), and overall acceptance remains open.
+Implementation and device acceptance are still in progress. The user removed the application drop-down Quick panel and application Wi-Fi, including the project-owned C Wi-Fi helper, from product scope. Historical checks apply only to their identified executable and environment. The recorded ARM candidate has SHA-256 `2b39140b11d3ac717953a01e38fc00d32434d30d18e3c7f9221e01d121f23609` and ran with launcher SHA-256 `0226f613b834862c229bf72e987ef441a2f523c84081d6cab46ee5bc39465ed4` in the Scribe 2022 firmware 5.20.1 guest. Current physical evidence belongs in [Physical testing](../../docs/PHYSICAL_TESTING.md), and overall acceptance remains open.
 
 ## Layout
 
@@ -11,6 +11,7 @@ The build script stages this layout under `dist/kindle/`:
 ```text
 documents/weread.sh
 weread/app/weread
+weread/app/weread-frame-guard
 weread/app/licenses/
 weread/app/THIRD_PARTY_NOTICES.md
 weread/app/README.md
@@ -25,7 +26,22 @@ The resource-review candidate retains application diagnostics in `data/logs/appl
 
 Keep the matching executable and launcher together. New report snapshots retain compact confirmed ranges and cause older readers to fail closed rather than ignore those ranges and repeat delivery. Preserve the existing database; do not remove report evidence to force an older binary to accept it. [Resource lifetime review](../../docs/RESOURCE_LEAK_REVIEW.md) records the current candidate's review rounds and verification scope.
 
-The product runtime payload is the static musl Rust/Slint application and launcher, with configuration examples and notices. No Wi-Fi helper, `liblipc`, loader, or other OS library is required or bundled. The independent application and conditional-server decisions remain unchanged; the project license is still unselected. The former glibc helper ABI experiment is retained only as historical evidence in [Platform implementation](../../docs/PLATFORM.md) and [Verification](../../docs/VERIFICATION.md).
+The main application remains a static musl Rust/Slint executable. The visual
+handoff candidate additionally stages the small `weread-frame-guard` native
+helper, which runs in its own glibc process and dynamically opens the Kindle's
+existing X11 runtime. It does not load glibc libraries into the musl application.
+No firmware libraries or loader are redistributed. The removed Wi-Fi helper
+remains outside the product. The independent application and conditional-server
+decisions remain unchanged; the project license is still unselected.
+
+This helper preserves the displayed reading frame in an owned native window
+while the supervisor temporarily permits native system-theme or screensaver
+work. The window stays below the native screensaver and must not hide a system
+lock or an unrelated dialog. Its process, window, private records, snapshot,
+and cleanup are bounded by the owning launcher identity. Unsupported native
+window or pixel formats fail closed. Controlled X11 tests and the read-only
+Scribe 2022 / firmware 5.19.5 layout probe do not establish the final physical
+handoff result; see [Native reading corrections](../../docs/NATIVE_FIX_ACCEPTANCE.md).
 
 Before a supervised device acceptance run, copy the example profile into `data/device-profile` and create `data/device-allowlist` with the exact configured profile and firmware version. The allowlist is intentionally empty in source control. Adding a local entry enables that experiment; it does not certify the combination. Profiles are `pw5`, `pw6`, `scribe`, and `scribe2025`. The native platform still checks actual framebuffer geometry.
 
@@ -66,6 +82,9 @@ The current supervisor first requests a durable resident pause, releases applica
 
 The user now requests immediate system night-mode changes. A supported Kindle, including an explicitly supervised demo or offline session, uses the owning launcher's protected same-process theme transaction while rendering and input are paused. The system setter, readback, and available persisted state must agree before the retained Reader is redrawn and input resumes. Known system mode overrides stale appearance preferences; preference-mirror failure cannot roll back an already committed system change. Sleep, USB, faults, or unknown observations do not independently authorize theme writes. New ordinary exits no longer publish a stale target for a second transaction. The former local-only and explicit-exit policies remain historical results in [Native theme continuity](../../docs/NATIVE_THEME.md). Continuous long-press selection, including cross-line and reverse movement, retains its 80 ms update interval and editing protections.
 
+Automatic brightness is outside the product, design-fidelity, and acceptance
+scope. Manual brightness and device-supported warmth remain available controls.
+
 USB takeover ends application ownership and restores the firmware. The user explicitly skipped USB testing in the current physical round, so this behavior remains unaccepted. Launcher recovery cannot survive `SIGKILL`, kernel failure, or power loss. A stale `/tmp/weread-launcher.lock` must be investigated before a new launch; the script does not delete another process's lock or guess at service restoration. Device acceptance must assess real panel refresh, touch, firmware service behavior, sleep/wake, USB transitions, and exit restoration.
 
 ## Source references
@@ -78,7 +97,13 @@ These are static source references. This project's launcher has not been accepte
 
 ## Development archive
 
-After staging, `python3 scripts/package-development.py` creates `dist/weread-kindle-0.2.0-dev.zip` and a SHA-256 sidecar. This is a private development handoff containing the ARM application, launcher, configuration examples, and third-party notices. It is not a published KPM release package. The removed helper is not a required input, archive entry, or digest-sidecar target. The archiver uses an explicit input list and does not collect `data/`, runtime state, credentials, downloaded books, or private research directories.
+After staging, `python3 scripts/package-development.py` creates
+`dist/weread-kindle-0.2.0-dev.zip` and a SHA-256 sidecar. This private development
+handoff contains the ARM application, native frame guard, launcher, configuration
+examples, and notices. It is not a published KPM release package. The frame
+guard is an explicit executable input and digest target; the removed Wi-Fi
+helper is not. The archiver never collects `data/`, runtime state, credentials,
+downloaded books, or private research directories.
 
 ## Verification
 
@@ -110,4 +135,4 @@ The recorded reports are `quick-return-report.json`, `wake-anchor-report.json`, 
 
 Guest boot recovery appended `|| :` only to the final `platformmetricsd-send-notification reboot reboot` command in `/etc/upstart/system_setup.conf`. With Minerva disabled, the 65,584-byte notification queue exceeded its 65,536-byte limit, making the original command return 255 and block boot. The queue was not cleared, no application or boot events were fabricated, and the guest root filesystem is read-only again. The earlier six-case Scribe run did not contain this guest patch and retains its original environment record. See [Scribe 2022 emulator](../../docs/SCRIBE_EMULATOR.md) for the environment delta and recovery report under `test-env:/root/weread-emulator/artifacts/scribe1-system-setup-recovery-20261103T195754Z`.
 
-Current Reader and hardware acceptance is recorded per executable in [Physical testing](../../docs/PHYSICAL_TESTING.md) and [Verification](../../docs/VERIFICATION.md). Reader brightness, night mode, startup feedback, continuous selection, and sleep behavior remain in scope. USB remains explicitly skipped. Quick/Wi-Fi/helper records are history, not outstanding product deliverables, and do not complete overall acceptance.
+Current Reader and hardware acceptance is recorded per executable in [Physical testing](../../docs/PHYSICAL_TESTING.md) and [Verification](../../docs/VERIFICATION.md). Reader brightness, night mode, startup feedback, continuous selection, and sleep behavior remain in scope. USB remains explicitly skipped. Quick and Wi-Fi-helper records are history, not outstanding product deliverables, and do not complete overall acceptance.

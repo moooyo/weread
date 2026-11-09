@@ -88,6 +88,18 @@ Managed sleep uses a resident application handoff by default. The application pe
 
 The user's subsequent night-mode requirement changes the reviewed native system setting immediately through a resident transaction. Application rendering and input pause before the owning supervisor briefly resumes its captured native window manager, performs the guarded setter/readback/persistence check, pauses that same manager, and resumes the retained application frame. Confirmed system mode is authoritative at startup, wake, and commit; software output compensates for actual native inversion. A failed preference mirror cannot revert a committed system change, and an ordinary exit does not republish stale preferences. An explicitly supervised demo or offline session may exercise this control. Sleep, USB, faults, and unknown native modes do not independently authorize a theme write. The login close action uses ordinary exit. [Native theme continuity](NATIVE_THEME.md) separates the new transaction's acceptance gates from historical explicit-exit results.
 
+The R3 physical trial exposed native Library during the native compositor's
+theme and wake work, although the process, reading anchor, and system setting
+were retained. The next visual-handoff candidate adds a project-owned native
+frame guard within the Kindle platform boundary. It retains an exact reading
+frame in a separately owned native window above application content and below
+the native screensaver. This is not a replacement for the SYSTEM transaction,
+fresh wake observations, full-frame/input acknowledgment, or restoration gates.
+The main application remains static musl; the small separate helper uses the
+existing device X11/glibc runtime, with no firmware libraries redistributed.
+Its actual firmware-window acceptance and physical presentation remain explicit
+gates in [Native reading corrections](NATIVE_FIX_ACCEPTANCE.md).
+
 Report settlement validates the measured run's account, book, and start time
 before trusting its durable allocation cursor, including a zero-demand return.
 Catalog SQL commit installs the corresponding active or retained Reader before
@@ -161,7 +173,7 @@ Musl-based builds may reduce user-space library dependencies, but still depend o
 
 #### Removed Quick and Wi-Fi experiments
 
-The user removed the pull-down Quick panel and in-app Wi-Fi feature. Their UI/controller work and the project-owned C Wi-Fi helper are user-removed experiments, not current product capabilities or pending deliverables. The product build and package require the main Rust ELF, launcher, and notices; they no longer require or package the helper or firmware libraries.
+The user removed the pull-down Quick panel and in-app Wi-Fi feature. Their UI/controller work and the project-owned C Wi-Fi helper are user-removed experiments, not current product capabilities or pending deliverables. The product build and package require the main Rust ELF, the independent native frame guard, launcher, and notices; they no longer require or package the Wi-Fi helper or firmware libraries.
 
 The `582b` and `3ec60` candidate records, 17 synthetic helper checks, and probe/mock/VM records remain historical experiment evidence in [Verification](VERIFICATION.md). Their ABI findings and results are preserved without making the helper a Jobman or KOReader runtime dependency. The Rust/Slint application, conditional-server decision, and unselected project license remain unchanged.
 
@@ -219,6 +231,11 @@ The development candidate uses Slint 1.17.1 and a reviewed vendored copy of the 
 The WeRead adapter follows the source revision recorded in `API_REFERENCE.md`. Its credential-dependent capabilities and local tests are source-derived implementation evidence; they do not establish live-account access or a portable upstream book-export format. Local imports support unencrypted EPUB text and UTF-8 TXT, with explicit archive limits and character anchors. Full EPUB/CSS rendering and a system-reader handoff are separate capabilities.
 
 ## Current implementation and acceptance
+
+Automatic brightness was explicitly removed from the product, design-fidelity,
+and acceptance scope. Manual brightness and device-supported warmth remain
+accepted controls. Do not treat ambient-light automation as unfinished work or
+an acceptance blocker.
 
 Implementation is still being iterated and has not completed acceptance. The accepted architecture above remains in force. Source behavior, remote checks, firmware-emulator observations, and physical-device observations are separate evidence classes; none establishes a released support matrix.
 
