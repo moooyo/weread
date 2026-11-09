@@ -36,15 +36,14 @@ claimed.
 ARM application `d221d65d`, development ZIP `dae7dd52`, and production launcher
 `a5fec72f` now have recorded identities in
 [KOReader night-mode alignment](KOREADER_NIGHT_ALIGNMENT.md#remote-software-and-artifacts).
-The isolated R1 physical continuation below has its own observations. Its isolated
-preference-reopen gate is now closed; the normal-entry update and remaining
-physical gates are **OPEN**. The
-historical sections keep every earlier test count, hash, measurement, and device
-result bound to its named artifact.
-The installed normal trial remains the historical v10 SYSTEM implementation:
-launcher `15aab68c`, application `8010a217`, and helper `a235b41c`. Its full
-identities and normal-mode observations are retained at the end of this record.
-Overall acceptance remains incomplete.
+The R1 physical, isolated preference-reopen, and normal-entry deployment gates
+are closed for this scoped task. The installed normal trial now uses launcher
+`a5fec72f`, application `d221d65d`, and helper `a235b41c`; the user confirmed the
+original Library/books, display and touch, and dark native UI after voluntary
+exit. The normal launch has no captured launcher exit code. The historical
+sections retain every earlier test count, hash, measurement, and device result,
+including the replaced v10 `15aab68c` / `8010a217` installation. Overall product
+release acceptance remains separate.
 
 ### R1 isolated physical continuation
 
@@ -76,8 +75,31 @@ A subsequent isolated reopen confirmed the saved light startup and Library,
 followed by real UI-exit status zero and dark native appearance with working
 touch. Its first native-after check succeeded and all owned processes, locks,
 and the guard window had ended. The earlier failed receipt is retained; the new
-result closes only the isolated preference-reopen gate. The normal entry remains
-the old v10 installation pending its separate update.
+result closes the isolated preference-reopen gate without erasing the earlier
+failed check.
+
+### R1 normal-entry update and closeout
+
+Implementation commit `f154c9e` records the change.
+The normal update replaced only the 35 R1-verified public App leaves and exact
+production launcher, retaining all 36 prior public files for rollback. Database
+and WAL/SHM hashes matched before and after the replacement; account and book
+data were not copied. The user opened **WeRead for Kindle**, confirmed the
+original Library/books and working display/touch, then exited to dark native UI
+with working touch. Every original owner, runner, application, guard, and watcher
+identity had ended; both display locks and the actual guard window were absent.
+No external supervisor captured a launcher exit code for this normal launch.
+
+Fresh native observations retained the original native manager in state S,
+active `KPPMainApp`, native `Y8INV`, grayscale 2, rotation 3, and a running status
+bar. Private logs were archived outside the repository, the isolated home was
+removed, and the normal executable identities were reconfirmed unchanged. The
+R1 lease was exactly released at 2026-11-10 04:45:25.056069 +08:00
+(Asia/Shanghai), with independent global-lock absence and all Kindle connections
+closed. [KOReader night-mode alignment](KOREADER_NIGHT_ALIGNMENT.md#r1-normal-entry-update-and-closeout)
+retains the exact installed hashes, update-payload provenance, and bounded
+cleanup observations. Partial-night and wait tuning are separate future work;
+other devices, USB, and power-loss behavior are not accepted by this closeout.
 
 ## Historical implemented SYSTEM behavior
 
@@ -592,7 +614,7 @@ evidence. The approximately five-second response remains a known **OPEN**
 issue, without a claimed optimization. Overall product acceptance, USB,
 other models, and other firmware combinations are unchanged.
 
-## Matching v10 normal-mode deployment
+## Historical matching v10 normal-mode deployment
 
 The existing normal entry was subsequently updated on the same Scribe 2022 /
 5.19.5 device. Read-only preflight independently matched the old `2fd3d6ab`

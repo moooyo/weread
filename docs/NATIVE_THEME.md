@@ -11,15 +11,23 @@ same-process stock sleep/wake, automatic portrait orientation, and UI exit. The
 user estimated both transitions at at most one second with stable illumination.
 The inconclusive first click and immediate native-restoration guard failure
 remain recorded. An isolated reopen confirmed the saved light startup and clean
-native-dark UI exit, closing the isolated preference-reopen gate. The normal-entry
-update and broader physical gates remain **OPEN**.
+native-dark UI exit. The normal entry is now updated and user-confirmed; this
+scoped physical, reopen, and deployment task is complete.
 [KOReader night-mode alignment](KOREADER_NIGHT_ALIGNMENT.md) records the current
 contract, pinned source comparison, software failures, exact build identities,
 and the bounded R1 physical observations.
 
-The installed normal-mode private trial remains the earlier v10 SYSTEM path:
-launcher `15aab68c`, application `8010a217`, and native frame guard `a235b41c`.
-Its scoped Scribe 2022 / firmware 5.19.5 visual, sleep, and UI-exit checks passed.
+The installed normal-mode private trial uses launcher `a5fec72f`, application
+`d221d65d`, and native frame guard `a235b41c`. The user confirmed the original
+Library/books, display and touch, and dark native UI after voluntary exit.
+Database/WAL/SHM hashes matched across the public-file update. The normal launch
+had no external supervisor, so no launcher exit code was captured; its observed
+UI exit and complete cleanup are distinct from the two isolated real exit-zero
+results.
+
+The replaced v10 SYSTEM path used launcher `15aab68c` and application `8010a217`.
+Its scoped Scribe 2022 / firmware 5.19.5 visual, sleep, and UI-exit checks remain
+historical evidence.
 The earlier R3 native-Library exposure was subsequently closed by v8/R9 and v10
 observations; the approximately five-second SYSTEM response remains historical
 open evidence. [Native reading corrections](NATIVE_FIX_ACCEPTANCE.md) preserves
@@ -110,15 +118,16 @@ their own identities in [Native reading corrections](NATIVE_FIX_ACCEPTANCE.md).
 None of these results verifies the new renderer-owned implementation.
 
 The remote software and ARM/package gates have passed for their recorded frozen
-inputs. R1 used an isolated installation, leaving the normal v10 entry unchanged.
+inputs. R1 first used an isolated installation, then updated the normal entry.
 It observed native dark restoration after UI exit, but an immediate operator
 guard reported `native-awesome-not-running` without a process state. A later
 read-only observation found the same original native manager running normally;
 the initial failure and its unproven cause are preserved. A subsequent isolated
 reopen passed its first native-after check and closed the scoped preference-reopen
-gate; it does not erase the earlier failure. The normal-entry update and remaining
-physical scope stay open. Reading a
-persisted setting is not a full-device-reboot test.
+gate; it does not erase the earlier failure. The normal update, user-started
+Library launch, voluntary exit, and independent cleanup are now recorded.
+Reading a persisted setting is not a full-device-reboot test.
 Automatic 0/180-degree orientation remains the accepted scope; manual rotation
 is disabled, USB is deferred, and no new model or firmware compatibility is
-claimed. Overall acceptance remains incomplete.
+claimed. This scoped night-mode task is complete; overall product-release
+acceptance remains separate.

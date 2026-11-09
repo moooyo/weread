@@ -103,9 +103,12 @@ directions, same-process stock sleep/wake, automatic portrait orientation, and U
 exit. The user estimated each confirmed theme transition at at most one second
 with stable illumination. An inconclusive first click and the immediate native
 restoration guard failure retain their separate evidence. An isolated reopen
-confirmed the saved light startup and native-dark UI exit, closing that scoped
-preference gate. The normal-entry update remains pending; the existing installation is
-unchanged. See
+confirmed the saved light startup and native-dark UI exit. The normal entry now
+uses `a5fec72f` / `d221d65d` / `a235b41c`; the user confirmed the original Library
+and books, display and touch, and native-dark UI exit. Database/WAL/SHM hashes
+were unchanged across the public-file replacement. The scoped physical, reopen,
+and deployment gates are closed. No launcher exit code was captured for the
+unsupervised normal launch. See
 [KOReader night-mode alignment](KOREADER_NIGHT_ALIGNMENT.md) for counts, the
 retained initial launcher failure, and build-time frozen fingerprints.
 
@@ -121,8 +124,9 @@ unchanged. The small helper uses the existing device X11/glibc runtime, with no
 firmware libraries redistributed.
 
 The earlier R3 SYSTEM path exposed native Library. Later v8/R9 and v10 trials
-closed their scoped visual-handoff gates, and the matching v10 normal entry is
-installed with launcher `15aab68c`, application `8010a217`, and helper `a235b41c`.
+closed their scoped visual-handoff gates. Their former normal installation used
+launcher `15aab68c`, application `8010a217`, and helper `a235b41c` before the R1
+renderer-owned update.
 Their approximately five-second SYSTEM response and accepted native illumination
 presets are historical evidence and policy for that superseded path. They do not
 verify the new renderer-owned candidate. [Native reading corrections](NATIVE_FIX_ACCEPTANCE.md)

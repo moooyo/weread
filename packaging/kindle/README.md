@@ -42,8 +42,8 @@ window, private records, snapshot,
 and cleanup are bounded by the owning launcher identity. Unsupported native
 window or pixel formats fail closed. Historical v8/v10 physical handoff results
 remain bound to their own SYSTEM-path artifacts. The renderer-owned candidate
-now has scoped isolated R1 observations, with remaining gates and the immediate
-native-after guard failure retained; see
+now has completed scoped R1 and normal-entry observations, with the initial
+native-after guard failure and later independent convergence retained; see
 [Native reading corrections](../../docs/NATIVE_FIX_ACCEPTANCE.md).
 
 Before a supervised device acceptance run, copy the example profile into `data/device-profile` and create `data/device-allowlist` with the exact configured profile and firmware version. The allowlist is intentionally empty in source control. Adding a local entry enables that experiment; it does not certify the combination. Profiles are `pw5`, `pw6`, `scribe`, and `scribe2025`. The native platform still checks actual framebuffer geometry.
@@ -100,8 +100,9 @@ orientation, and UI exit. The user estimated both confirmed transitions at at mo
 one second with stable illumination; an initial click was inconclusive. The
 immediate native-after guard failure remains recorded despite a later healthy
 sample. A later isolated reopen confirmed the saved light startup and clean
-native-dark UI exit; that scoped preference gate is closed. Normal-entry
-replacement remains pending. See
+native-dark UI exit. The normal-entry replacement is complete, with unchanged
+database/WAL/SHM hashes and the user's original Library/books, display/touch, and
+native-dark UI-exit confirmation. This scoped task is complete. See
 [KOReader night-mode alignment](../../docs/KOREADER_NIGHT_ALIGNMENT.md) for the
 exact build-time identities and bounded physical chronology.
 
@@ -113,11 +114,15 @@ hardware state; exit after a completed native yield performs no further mode
 write. Native day/night settings remain unchanged. Continuous long-press
 selection retains its 80 ms update interval and editing protections.
 
-The installed normal-mode private trial still contains the historical v10
-SYSTEM path: launcher `15aab68c`, application `8010a217`, and helper `a235b41c`.
-Its scoped visual, sleep, UI-exit, and normal-entry observations retain their
-full identities in [Native reading corrections](../../docs/NATIVE_FIX_ACCEPTANCE.md).
-They do not verify the current candidate or establish an improved response time.
+The installed normal-mode private trial uses launcher `a5fec72f`, application
+`d221d65d`, and helper `a235b41c`. Its public-file rollback backup contains the
+replaced v10 files without real account/book data. The user-started normal launch
+had no external supervisor or captured launcher exit code; observed UI exit and
+complete cleanup are distinct from the isolated exit-zero results. Full current
+identities and bounded evidence are recorded in
+[KOReader night-mode alignment](../../docs/KOREADER_NIGHT_ALIGNMENT.md#r1-normal-entry-update-and-closeout).
+The old `15aab68c` / `8010a217` SYSTEM-path results remain historical in
+[Native reading corrections](../../docs/NATIVE_FIX_ACCEPTANCE.md).
 
 Automatic brightness is outside the product, design-fidelity, and acceptance
 scope. Manual brightness and device-supported warmth remain available controls.

@@ -82,13 +82,18 @@ same-process stock sleep/wake, automatic portrait orientation, and UI
 exit. The first click was inconclusive and is not counted; an immediate native
 restoration guard failure remains recorded despite a later healthy readback.
 An isolated reopen confirmed the saved light startup and clean native-dark
-restoration; the normal-entry update remains pending.
+restoration. The normal entry is now updated to launcher `a5fec72f`, application
+`d221d65d`, and helper `a235b41c`. The user opened the original Library and books,
+confirmed display and touch, and exited to dark native UI with working touch.
+The public-file update preserved the database and its WAL/SHM hashes. This scoped
+night-mode, reopen, and normal-deployment task is complete; normal-launch cleanup
+was observed without a captured launcher exit code.
 [KOReader night-mode alignment](docs/KOREADER_NIGHT_ALIGNMENT.md) preserves these
 limits, the software results, and exact build identities.
 
-The existing normal-mode private trial still contains the earlier v10 SYSTEM
-implementation: launcher `15aab68c`, application `8010a217`, and native frame
-guard `a235b41c`. Its scoped visual, sleep, and UI-exit acceptance on Scribe
+The replaced v10 SYSTEM installation used launcher `15aab68c`, application
+`8010a217`, and native frame guard `a235b41c`. Its scoped visual, sleep, and
+UI-exit acceptance on Scribe
 2022 / firmware 5.19.5, retained account data and books, and normal native
 restoration remain historical facts. The approximately five-second response
 belongs to that implementation and is not a measurement of the new candidate.

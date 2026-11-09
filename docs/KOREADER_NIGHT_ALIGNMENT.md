@@ -13,10 +13,11 @@ and a separate C frame guard for real stock sleep.
 The renderer-owned candidate passed the scoped remote software gates and has a
 matching ARM build and development package, recorded below. It subsequently ran
 in the isolated R1 physical window on Scribe 2022 / firmware 5.19.5. Those scoped
-observations and a subsequent isolated reopen close the scoped preference-reopen
-gate. The normal-entry update remains pending.
-The installed v10 normal trial still uses launcher `15aab68c`, application `8010a217`, and helper
-`a235b41c`; its SYSTEM-path evidence is historical and remains in
+observations, isolated preference reopen, and the subsequent normal-entry update
+close this task's scoped gates. The implementation is recorded in commit
+`f154c9e`. The normal trial now uses launcher `a5fec72f`,
+application `d221d65d`, and helper `a235b41c`. The replaced v10 `15aab68c` /
+`8010a217` SYSTEM-path evidence remains historical in
 [Native reading corrections](NATIVE_FIX_ACCEPTANCE.md).
 
 ## Pinned implementation comparison
@@ -37,7 +38,7 @@ They establish source behavior, not this project's device or performance result.
 The Rust backend adds fresh GETVAR/GETFIX layout and readback checks around a
 grayscale-only write. It preserves framebuffer rotation and mapping. An uncertain
 write fails rather than being reported as applied. The model/firmware opt-in is
-an implementation boundary pending acceptance, not a support declaration.
+an implementation boundary with scoped R1 evidence, not a general support declaration.
 
 ## Current candidate behavior
 
@@ -162,22 +163,76 @@ This run's first native-after check succeeded: original native manager PID 3495,
 birth 1888, state S, `Y8INV`, grayscale 2, rotation 3, and status bar PID 869.
 All owned process-family identities, locks, and the actual guard window were
 absent. The isolated preference-reopen gate is closed; the earlier failed check
-and its unproven cause remain retained. The normal-entry update is still pending,
-and that entry contains the v10 SYSTEM artifacts identified above.
+and its unproven cause remain retained.
 
-## Candidate acceptance gates
+## R1 normal-entry update and closeout
+
+The public-file update payload had SHA-256
+`7143023ea8bf8b768d2980752840f4118764a75292caa135c22c8173007e914e`.
+It used only the 35 R1-verified public App leaves and the exact production
+launcher, replacing 36 public leaves. Each of the 36 old public files was retained
+for rollback under `/mnt/us/weread-ko-normal-update-20261110-r1`; that backup
+contains no real data directory. Normal `library.sqlite` and WAL/SHM hashes were
+identical before and after the public-file update. Account material and
+downloaded books were not copied.
+
+| Installed component | SHA-256 |
+| --- | --- |
+| Normal document launcher | `a5fec72fc23a4527333af76a6b524391d8be40923e9c48d50c4319e6f75ff256` |
+| Static ARM application | `d221d65d823a9171757e3f97dc6eee2636574ded28a6e4c6b6805ded9ab0679a` |
+| Native frame guard | `a235b41c80a21a35c99f8798f366a4f2e921b971a606c83f3f8d69d576676806` |
+
+The user opened **WeRead for Kindle** from native Library and confirmed the
+original Library and books, normal display, and working touch. Live arguments
+were exactly:
+
+```text
+/mnt/us/weread/app/weread --kindle --device scribe --data-dir /mnt/us/weread/data
+```
+
+There was no demo/offline option or product exit timer. The user exited through
+the UI and confirmed dark native presentation with working touch. This normal
+launch had no external supervisor and no observed launcher exit code; its UI
+exit and cleanup are not restamped as exit zero. The two isolated UI exits retain
+their real zero results.
+
+All original normal-launch identities had ended: owner `1938/738534301`,
+application `2334/738534798`, runner `2329/738534797`, guard `2273/738534739`, and
+watcher `2275/738534739` (PID/birth). The actual guard XID `0x4a00003` and both
+display locks were absent. Fresh native observation found original manager
+`3495/1888` in state S, `KPPMainApp` foreground, active power, native `Y8INV`,
+grayscale 2, rotation 3, and status bar PID 2469.
+
+The private device-log archive contains 77 entries, is 84,480 bytes, and has
+SHA-256 `c2de0a80919b2f7e406ae26f523deb0731af2ecc4b41b918848badd30cbac99d`.
+It and the private R1 envelope remain outside the repository. After archival,
+the isolated home was removed and the normal launcher/application/helper hashes
+were reconfirmed unchanged. The R1 lease was exactly released at
+2026-11-10 04:45:25.056069 +08:00 (Asia/Shanghai; receipt
+`2026-11-09T20:45:25.056069Z`), and independent checks confirmed that the global
+lock path was absent and was not a symlink. All Kindle transports were closed
+before the coordinator was told that a fresh window was available.
+
+A private physical manifest binds 26 output receipts and the scoped observations
+above. Its SHA-256 is
+`05d7cc34ec43ccefc97d2b4c782b589bec1e9ca67f76ea00802851132af18fcf`;
+the manifest and raw device records are not redistributed with the product.
+
+## Scoped acceptance closeout
 
 | Gate | Status and required evidence |
 | --- | --- |
 | Remote software verification | **PASS**, scoped to the frozen inputs and executions above, including the corrected launcher run. |
 | ARM and development package | **PASS**, scoped to the recorded ARM application, production launcher, development ZIP, and package-contract results. |
-| Physical night transitions | **PARTIAL**: R1 confirmed both directions, matching saved preference and kernel state, native-setting stability, no native-UI detour, and user-estimated at-most-one-second response with stable illumination. Broader text/image/overlay and waveform coverage remains open. |
-| Startup, stock sleep, and exit | **PARTIAL**: R1 covered a native-dark/app-light baseline, one same-process light-page stock cycle, automatic inverted holding, and UI exit. Additional baseline/pose combinations remain open; the immediate native-after guard failure retains its unproven cause. |
+| Physical night transitions | **CLOSED** for the R1 scope: both directions, matching saved preference/kernel state, native-setting stability, no native-UI detour, and user-estimated at-most-one-second response with stable illumination. The initial inconclusive click remains excluded. |
+| Startup, stock sleep, and exit | **CLOSED** for the observed R1 baseline/cycle: native-dark/app-light startup, same-process stock return to the original page, automatic inverted holding, and UI exit. The immediate native-after failure remains retained with its later independent convergence. |
 | Isolated preference reopen | **CLOSED**, scoped to `ko-r1-manual-restart`: saved light startup/Library, real UI-exit zero, and this run's first native-after check passed. The earlier failed receipt remains retained. |
-| Normal-entry update | **OPEN**: replacement of the v10 normal entry has not yet been recorded. |
+| Normal-entry update | **CLOSED**: exact public replacement and rollback backup, unchanged database/WAL/SHM hashes, user-confirmed original Library/books and UI exit, and independent cleanup. No normal launcher exit code is claimed. |
 
 The old approximately five-second SYSTEM response remains a separate historical
-measurement; R1's timing is a scoped user estimate. Partial-night GLKW16 (9), broader waveform
-tuning, and update-wait changes remain separate proposals requiring bounded
-measurement; they are not implemented or accepted in this decision. Overall
-product acceptance remains incomplete.
+measurement; R1's timing is a scoped user estimate, not an instrumented absolute
+performance guarantee. Partial-night GLKW16 (9), broader waveform tuning, and
+update-wait changes remain **OPEN** as separate future proposals; they are not
+completion gates for this finished task. Other device/firmware combinations,
+USB, and power-loss behavior were not tested by R1. This closeout does not
+declare general compatibility or complete overall product-release acceptance.
