@@ -2866,6 +2866,25 @@ class LauncherLifecycleTests(unittest.TestCase):
         self.theme_continue_release = release
         return window, release
 
+    def native_theme_phase_gate(self, stage):
+        window = self.root / "theme-phase-window"
+        release = self.root / "theme-phase-release"
+        self.env.update(TEST_THEME_PHASE_WINDOW=str(window), TEST_THEME_PHASE_RELEASE=str(release))
+        source = self.launcher.read_text()
+        anchor = "    NATIVE_THEME_STAGE=" + stage + "\n"
+        self.assertEqual(source.count(anchor), 1)
+        gate = textwrap.dedent(r'''
+            : >"$TEST_THEME_PHASE_WINDOW" || return 1
+            fixture_phase_checks=400
+            while [ ! -f "$TEST_THEME_PHASE_RELEASE" ]; do
+                [ "$fixture_phase_checks" -gt 0 ] || return 1
+                usleep 10000 || return 1
+                fixture_phase_checks=$((fixture_phase_checks - 1))
+            done
+        ''')
+        self.launcher.write_text(source.replace(anchor, anchor + gate, 1))
+        return window, release
+
     @staticmethod
     def write_fixture_record(path, value):
         pending = path.with_suffix(".fixture-pending")
@@ -3432,6 +3451,46 @@ class LauncherLifecycleTests(unittest.TestCase):
         self.assertEqual(status, 143, error)
         self.assertEqual(len(self.native_theme_events("set")), 2)
         self.assert_native_theme_resident_cleanup(awesome, original[0])
+
+    def assert_native_theme_record_replaced_between_phases(self, stage, record, duplicate):
+        awesome = self.native_theme_handoff_fixture()
+        window, release = self.native_theme_phase_gate(stage)
+        original = []
+
+        def drive(_supervisor):
+            pid, _base = self.wait_for_native_theme_application()
+            original.append(self.observed_identity(pid))
+            self.request_native_theme(pid, "1", "Y8INV")
+            self.wait_until(window.exists)
+            self.assertEqual(self.native_theme_events("set"), [])
+            self.assertEqual(self.process_state(pid), "T")
+            path = self.root / "lock" / record
+            committed = path.read_bytes()
+            self.assertTrue(committed.endswith(b"\n"))
+            replacement = committed + (committed if duplicate else b"\n")
+            if record == "native-theme-request":
+                self.assertLessEqual(len(replacement), 128, "The second line must fail record parsing, not the byte limit.")
+            pending = path.with_suffix(".fixture-pending")
+            pending.write_bytes(replacement)
+            pending.replace(path)
+            release.touch()
+
+        status, _, error = self.run_launcher(drive)
+        self.assertEqual(status, 1, error)
+        self.assertIn("stage=" + stage, error)
+        self.assertEqual(self.native_theme_events("set"), [])
+        self.assertEqual(self.native_theme_result_observations(), [])
+        self.assert_native_theme_resident_cleanup(awesome, original[0])
+
+    def test_native_theme_handoff_rejects_a_second_request_line_after_frame_capture(self):
+        self.assert_native_theme_record_replaced_between_phases(
+            "power-before-native-window", "native-theme-request", duplicate=True
+        )
+
+    def test_native_theme_handoff_rechecks_generation_before_the_system_setter(self):
+        self.assert_native_theme_record_replaced_between_phases(
+            "power-before-set", "generation", duplicate=False
+        )
 
     def assert_native_theme_queued_power_interrupt(self, event):
         awesome = self.native_theme_handoff_fixture()
@@ -6802,6 +6861,173 @@ class LauncherLifecycleTests(unittest.TestCase):
         self.assertEqual(status, 0, error)
         self.assertEqual(self.trace(), ["stop:statusbar", "start:statusbar", "xrefresh:"])
         self.assertFalse((self.root / "lock").exists())
+
+
+class LauncherIdentityRecordTests(unittest.TestCase):
+    RECORD_HELPERS = ("read_single_record", "single_record_matches")
+    IDENTITY_HELPERS = ("read_single_record", "read_process_identity", "process_birth", "process_parent", "process_matches")
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix="weread-launcher-helper-test-")
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.helper_sequence = 0
+
+    def helper_script(self, names, body):
+        source = SOURCE.read_text()
+        definitions = []
+        for name in names:
+            anchor = name + "() {\n"
+            self.assertEqual(source.count(anchor), 1, "The helper fixture must use the real launcher definition.")
+            definition, closing, _tail = source.split(anchor, 1)[1].partition("\n}\n")
+            self.assertTrue(closing, "The launcher helper definition is incomplete.")
+            definitions.append(anchor + definition + closing)
+        self.helper_sequence += 1
+        path = self.root / ("helper-" + str(self.helper_sequence) + ".sh")
+        path.write_text("set -eu\n" + "\n".join(definitions) + "\n" + textwrap.dedent(body))
+        return path
+
+    def run_helper(self, names, body, *arguments):
+        script = self.helper_script(names, body)
+        return subprocess.run(["sh", str(script), *map(str, arguments)], capture_output=True, text=True, timeout=5)
+
+    def test_single_record_requires_one_complete_regular_record_and_preserves_its_value(self):
+        value = "  fixture:nonce\\value\t  "
+        payloads = {
+            "valid": (value + "\n").encode(),
+            "empty-record": b"\n",
+            "empty-file": b"",
+            "unterminated": value.encode(),
+            "second-line": (value + "\nnext\n").encode(),
+            "blank-second-line": (value + "\n\n").encode(),
+            "unterminated-tail": (value + "\nextra").encode(),
+        }
+        for name, payload in payloads.items():
+            (self.root / name).write_bytes(payload)
+        (self.root / "symlink").symlink_to(self.root / "valid")
+        (self.root / "directory").mkdir()
+        os.mkfifo(self.root / "fifo")
+        for name in (*payloads, "missing", "symlink", "directory", "fifo"):
+            with self.subTest(record=name):
+                result = self.run_helper(self.RECORD_HELPERS, r'''
+                    if read_single_record "$1"; then
+                        printf '%s' "$SINGLE_RECORD"
+                    else
+                        exit 71
+                    fi
+                ''', self.root / name)
+                valid = name in ("valid", "empty-record")
+                self.assertEqual(result.returncode, 0 if valid else 71, result.stderr)
+                self.assertEqual(result.stdout, value if name == "valid" else "")
+
+    def test_single_record_matches_rejects_missing_extra_fields_and_wrong_nonce(self):
+        expected = "7:fixture-token:3"
+        payloads = {
+            "valid": expected + "\n",
+            "wrong-nonce": "7:other-token:3\n",
+            "extra-field": expected + ":extra\n",
+            "duplicate-line": expected + "\n" + expected + "\n",
+            "extra-newline": expected + "\n\n",
+            "unterminated": expected,
+        }
+        for name, payload in payloads.items():
+            (self.root / name).write_text(payload)
+        for name in (*payloads, "missing"):
+            with self.subTest(record=name):
+                result = self.run_helper(self.RECORD_HELPERS, 'single_record_matches "$1" "$2"\n',
+                                         self.root / name, expected)
+                self.assertEqual(result.returncode, 0 if name == "valid" else 1, result.stderr)
+
+    @staticmethod
+    def retire_subject(child):
+        if child.poll() is None:
+            child.kill()
+        child.wait(timeout=3)
+
+    def start_identity_subject(self):
+        ready = self.root / "identity-subject-ready"
+        child = subprocess.Popen([sys.executable, "-c", textwrap.dedent('''
+            import ctypes
+            import os
+            from pathlib import Path
+            import sys
+            import time
+
+            if ctypes.CDLL(None).prctl(15, b"fixture ) name", 0, 0, 0) != 0:
+                raise SystemExit(75)
+            Path(sys.argv[1]).write_text(str(os.getpid()))
+            time.sleep(30)
+        '''), str(ready)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        self.addCleanup(self.retire_subject, child)
+        self.wait_for_helper_path(ready, child)
+        self.assertEqual(ready.read_text(), str(child.pid))
+        return child
+
+    def wait_for_helper_path(self, path, child):
+        deadline = time.monotonic() + 5
+        while not path.exists():
+            self.assertIsNone(child.poll(), "The isolated identity fixture exited before its phase gate.")
+            self.assertLess(time.monotonic(), deadline, "The isolated identity fixture did not reach its phase gate.")
+            time.sleep(0.01)
+
+    def test_process_identity_binds_real_pid_birth_parent_group_and_session(self):
+        child = self.start_identity_subject()
+        child.send_signal(signal.SIGSTOP)
+        stopped_pid, stopped = os.waitpid(child.pid, os.WUNTRACED)
+        self.assertEqual(stopped_pid, child.pid)
+        self.assertTrue(os.WIFSTOPPED(stopped))
+        fields = Path(f"/proc/{child.pid}/stat").read_text().rsplit(")", 1)[1].split()
+        birth = fields[19]
+        expected = ("T", str(os.getpid()), birth, str(os.getpgid(child.pid)), str(os.getsid(child.pid)))
+        result = self.run_helper(self.IDENTITY_HELPERS, r'''
+            read_process_identity "$1" || exit 80
+            printf '%s|%s|%s|%s|%s\n' "$PROCESS_STATE" "$PROCESS_PARENT" "$PROCESS_BIRTH" "$PROCESS_GROUP" "$PROCESS_SESSION"
+            process_birth "$1" || exit 81
+            process_parent "$1" || exit 82
+        ''', child.pid)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), ["|".join(expected), birth, str(os.getpid())])
+        cases = ((birth, os.getpid(), True), (str(int(birth) + 1), os.getpid(), False),
+                 (birth, os.getpid() + 1, False), (str(int(birth) + 1), os.getpid() + 1, False))
+        for candidate_birth, parent, matches in cases:
+            with self.subTest(birth_matches=candidate_birth == birth, parent_matches=parent == os.getpid()):
+                result = self.run_helper(self.IDENTITY_HELPERS, 'process_matches "$1" "$2" "$3"\n',
+                                         child.pid, candidate_birth, parent)
+                self.assertEqual(result.returncode, 0 if matches else 1, result.stderr)
+        for pid in ("", "self", str(child.pid) + "/../" + str(child.pid), str(child.pid) + "x"):
+            with self.subTest(pid=pid):
+                result = self.run_helper(self.IDENTITY_HELPERS, 'read_process_identity "$1"\n', pid)
+                self.assertNotEqual(result.returncode, 0, result.stderr)
+        child.send_signal(signal.SIGCONT)
+
+    def test_process_identity_is_rechecked_after_the_original_process_exits(self):
+        child = self.start_identity_subject()
+        fields = Path(f"/proc/{child.pid}/stat").read_text().rsplit(")", 1)[1].split()
+        window = self.root / "identity-phase-window"
+        release = self.root / "identity-phase-release"
+        script = self.helper_script(self.IDENTITY_HELPERS, r'''
+            process_matches "$1" "$2" "$3" || exit 80
+            : >"$4"
+            checks=300
+            while [ ! -f "$5" ]; do
+                [ "$checks" -gt 0 ] || exit 81
+                sleep 0.01
+                checks=$((checks - 1))
+            done
+            if process_matches "$1" "$2" "$3"; then exit 82; fi
+            if read_process_identity "$1"; then exit 83; fi
+            printf '%s\n' original-identity-expired
+        ''')
+        helper = subprocess.Popen(["sh", str(script), str(child.pid), fields[19], str(os.getpid()),
+                                   str(window), str(release)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.addCleanup(self.retire_subject, helper)
+        self.wait_for_helper_path(window, helper)
+        child.terminate()
+        child.wait(timeout=3)
+        release.touch()
+        output, error = helper.communicate(timeout=5)
+        self.assertEqual(helper.returncode, 0, error)
+        self.assertEqual(output, "original-identity-expired\n")
 
 
 if __name__ == "__main__":

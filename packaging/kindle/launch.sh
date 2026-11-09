@@ -189,27 +189,68 @@ NATIVE_BASELINE_APP=''
 NATIVE_BASELINE_VIEW=''
 NATIVE_POWER_FAILURES=0
 
-process_birth() {
+read_single_record() {
+    SINGLE_RECORD=''
+    single_record_extra=''
+    [ -f "$1" ] && [ ! -L "$1" ] || return 1
+    # Read one complete line and require EOF, including no unterminated tail.
+    # Keep both reads on the same open file when a writer replaces its path.
+    if {
+        IFS= read -r SINGLE_RECORD &&
+            { if IFS= read -r single_record_extra; then false; else [ -z "$single_record_extra" ]; fi; }
+    } 2>/dev/null <"$1"; then
+        return 0
+    fi
+    SINGLE_RECORD=''
+    return 1
+}
+
+single_record_matches() {
+    read_single_record "$1" && [ "$SINGLE_RECORD" = "$2" ]
+}
+
+read_process_identity() {
+    PROCESS_STATE=''
+    PROCESS_PARENT=''
+    PROCESS_BIRTH=''
+    PROCESS_GROUP=''
+    PROCESS_SESSION=''
+    case "$1" in *[!0-9]*|''|0) return 1 ;; esac
+    read_single_record "/proc/$1/stat" || return 1
+    [ "${SINGLE_RECORD%% *}" = "$1" ] || return 1
     # The comm field may contain spaces or parentheses. Field 22 is the
     # twentieth field after the final closing parenthesis, including state.
-    process_stat=$(cat "/proc/$1/stat" 2>/dev/null || :)
-    process_tail=${process_stat##*) }
-    [ "$process_tail" != "$process_stat" ] || return 1
-    set -- $process_tail
+    process_identity_tail=${SINGLE_RECORD##*) }
+    [ "$process_identity_tail" != "$SINGLE_RECORD" ] || return 1
+    set -- $process_identity_tail
     [ "$#" -ge 20 ] || return 1
+    case "$1" in R|S|D|Z|T|t|X|x|K|W|P|I) ;; *) return 1 ;; esac
+    PROCESS_STATE=$1
+    PROCESS_PARENT=$2
+    PROCESS_GROUP=$3
+    PROCESS_SESSION=$4
     shift 19
-    case "$1" in *[!0-9]*|'') return 1 ;; esac
-    printf '%s\n' "$1"
+    PROCESS_BIRTH=$1
+    case "$PROCESS_PARENT:$PROCESS_BIRTH:$PROCESS_GROUP:$PROCESS_SESSION" in
+        *[!0-9:]*|::*|:*|*:) return 1 ;;
+    esac
+    [ "$PROCESS_BIRTH" != 0 ]
+}
+
+process_birth() {
+    read_process_identity "$1" || return 1
+    printf '%s\n' "$PROCESS_BIRTH"
 }
 
 process_parent() {
-    sed -n 's/^PPid:[[:space:]]*//p' "/proc/$1/status" 2>/dev/null
+    read_process_identity "$1" || return 1
+    printf '%s\n' "$PROCESS_PARENT"
 }
 
 process_matches() {
     case "$1:$2:$3" in *[!0-9:]*|::*|:*|*:) return 1 ;; esac
-    [ "$(process_birth "$1" 2>/dev/null || :)" = "$2" ] &&
-        [ "$(process_parent "$1" 2>/dev/null || :)" = "$3" ]
+    read_process_identity "$1" &&
+        [ "$PROCESS_BIRTH" = "$2" ] && [ "$PROCESS_PARENT" = "$3" ]
 }
 
 application_command_matches() {
@@ -297,11 +338,11 @@ capture_runner_identity() {
 
 managed_application_is_current() {
     [ -n "$APP_CHILD_PID" ] && [ -n "$APP_CHILD_BIRTH" ] || return 1
-    [ "$(cat "$LOCK_DIR/pid" 2>/dev/null || :)" = "$$" ] &&
-        [ "$(cat "$LOCK_DIR/nonce" 2>/dev/null || :)" = "$LAUNCH_TOKEN" ] &&
-        [ "$(cat "$LOCK_DIR/generation" 2>/dev/null || :)" = "$APP_GENERATION:$LAUNCH_TOKEN" ] &&
-        [ "$(cat "$LOCK_DIR/application-pid" 2>/dev/null || :)" = "$APP_CHILD_PID" ] &&
-        [ "$(cat "$LOCK_DIR/application-birth" 2>/dev/null || :)" = "$APP_CHILD_BIRTH" ] &&
+    single_record_matches "$LOCK_DIR/pid" "$$" &&
+        single_record_matches "$LOCK_DIR/nonce" "$LAUNCH_TOKEN" &&
+        single_record_matches "$LOCK_DIR/generation" "$APP_GENERATION:$LAUNCH_TOKEN" &&
+        single_record_matches "$LOCK_DIR/application-pid" "$APP_CHILD_PID" &&
+        single_record_matches "$LOCK_DIR/application-birth" "$APP_CHILD_BIRTH" &&
         process_matches "$APP_RUNNER_PID" "$APP_RUNNER_BIRTH" "$$" &&
         process_matches "$APP_CHILD_PID" "$APP_CHILD_BIRTH" "$APP_RUNNER_PID" &&
         application_command_matches "$APP_CHILD_PID"
@@ -313,7 +354,7 @@ signal_managed_application() {
 }
 
 managed_marker_matches() {
-    [ "$(cat "$LOCK_DIR/$1" 2>/dev/null || :)" = "$APP_GENERATION:$LAUNCH_TOKEN:$MANAGED_SLEEP_CYCLE" ]
+    single_record_matches "$LOCK_DIR/$1" "$APP_GENERATION:$LAUNCH_TOKEN:$MANAGED_SLEEP_CYCLE"
 }
 
 write_managed_request() {
@@ -381,8 +422,8 @@ capture_wrapper_child_birth() {
 
 owned_child_is_running() {
     process_matches "$1" "$2" "$3" || return 1
-    case "$(sed -n 's/^State:[[:space:]]*//p' "/proc/$1/status" 2>/dev/null || :)" in
-        Z*|X*|'') return 1 ;;
+    case "$PROCESS_STATE" in
+        Z|X|x|'') return 1 ;;
     esac
 }
 
@@ -392,8 +433,8 @@ owned_child_has_exited() {
     # match its captured birth and parent before its exited state is trusted.
     [ ! -d "/proc/$1" ] && return 0
     process_matches "$1" "$2" "$3" || return 1
-    case "$(sed -n 's/^State:[[:space:]]*//p' "/proc/$1/status" 2>/dev/null || :)" in
-        Z*|X*) return 0 ;;
+    case "$PROCESS_STATE" in
+        Z|X|x) return 0 ;;
         *) return 1 ;;
     esac
 }
@@ -450,10 +491,11 @@ frame_guard_is_current() {
         frame_guard_command_matches "$FRAME_GUARD_PID" &&
         [ -n "$FRAME_GUARD_RELAY_PID" ] && [ -n "$FRAME_GUARD_RELAY_BIRTH" ] &&
         owned_child_is_running "$FRAME_GUARD_RELAY_PID" "$FRAME_GUARD_RELAY_BIRTH" "$$" &&
-        [ "$(cat "$LOCK_DIR/pid" 2>/dev/null || :)" = "$$" ] &&
-        [ "$(cat "$LOCK_DIR/nonce" 2>/dev/null || :)" = "$LAUNCH_TOKEN" ] || return 1
-    case "$(sed -n 's/^State:[[:space:]]*//p' "/proc/$FRAME_GUARD_PID/status" 2>/dev/null || :)" in
-        T*|t*|Z*|X*|'') return 1 ;;
+        single_record_matches "$LOCK_DIR/pid" "$$" &&
+        single_record_matches "$LOCK_DIR/nonce" "$LAUNCH_TOKEN" || return 1
+    process_matches "$FRAME_GUARD_PID" "$FRAME_GUARD_BIRTH" "$$" || return 1
+    case "$PROCESS_STATE" in
+        T|t|Z|X|x|'') return 1 ;;
     esac
 }
 
@@ -464,8 +506,7 @@ frame_guard_ready_matches() {
     guard_ready_bytes=${guard_ready_bytes%"${guard_ready_bytes##*[![:space:]]}"}
     case "$guard_ready_bytes" in *[!0-9]*|'') return 1 ;; esac
     [ "$guard_ready_bytes" -gt 0 ] && [ "$guard_ready_bytes" -le 128 ] || return 1
-    guard_ready_record=$(cat "$LOCK_DIR/frame-guard-ready" 2>/dev/null) || return 1
-    [ "$guard_ready_record" = "$1:$2:$LAUNCH_TOKEN:$FRAME_GUARD_PID:$FRAME_GUARD_BIRTH" ]
+    single_record_matches "$LOCK_DIR/frame-guard-ready" "$1:$2:$LAUNCH_TOKEN:$FRAME_GUARD_PID:$FRAME_GUARD_BIRTH"
 }
 
 capture_frame_guard_window() {
@@ -476,9 +517,9 @@ capture_frame_guard_window() {
     guard_window_bytes=${guard_window_bytes%"${guard_window_bytes##*[![:space:]]}"}
     case "$guard_window_bytes" in *[!0-9]*|'') return 1 ;; esac
     [ "$guard_window_bytes" -gt 0 ] && [ "$guard_window_bytes" -le 128 ] || return 1
-    IFS=: read -r guard_window_token guard_window_pid guard_window_birth guard_window_id guard_window_extra <"$LOCK_DIR/frame-guard-window" || return 1
-    [ "$guard_window_token:$guard_window_pid:$guard_window_birth" = "$LAUNCH_TOKEN:$FRAME_GUARD_PID:$FRAME_GUARD_BIRTH" ] &&
-        [ -z "$guard_window_extra" ] || return 1
+    read_single_record "$LOCK_DIR/frame-guard-window" || return 1
+    guard_window_prefix="$LAUNCH_TOKEN:$FRAME_GUARD_PID:$FRAME_GUARD_BIRTH:"
+    case "$SINGLE_RECORD" in "$guard_window_prefix"*) guard_window_id=${SINGLE_RECORD#"$guard_window_prefix"} ;; *) return 1 ;; esac
     case "$guard_window_id" in 0x*) ;; *) return 1 ;; esac
     guard_window_hex=${guard_window_id#0x}
     case "$guard_window_hex" in *[!0-9a-f]*|'') return 1 ;; esac
@@ -548,15 +589,16 @@ start_frame_guard() {
 frame_guard_application_is_frozen() {
     managed_application_is_current && frame_guard_is_current &&
         [ "$DISPLAY_OWNED" -eq 1 ] && [ -z "$WM_STOP_PENDING_IDENTITY" ] || return 1
-    case "$(sed -n 's/^State:[[:space:]]*//p' "/proc/$APP_CHILD_PID/status" 2>/dev/null || :)" in
-        T*|t*) ;; *) return 1 ;;
+    process_matches "$APP_CHILD_PID" "$APP_CHILD_BIRTH" "$APP_RUNNER_PID" || return 1
+    case "$PROCESS_STATE" in
+        T|t) ;; *) return 1 ;;
     esac
     for guard_wm_identity in $PAUSED_WM_IDENTITIES; do
         guard_wm_pid=${guard_wm_identity%%:*}
         guard_wm_birth=${guard_wm_identity#*:}
-        [ "$(process_birth "$guard_wm_pid" 2>/dev/null || :)" = "$guard_wm_birth" ] || return 1
-        case "$(sed -n 's/^State:[[:space:]]*//p' "/proc/$guard_wm_pid/status" 2>/dev/null || :)" in
-            T*|t*) ;; *) return 1 ;;
+        read_process_identity "$guard_wm_pid" && [ "$PROCESS_BIRTH" = "$guard_wm_birth" ] || return 1
+        case "$PROCESS_STATE" in
+            T|t) ;; *) return 1 ;;
         esac
     done
     if [ "$NATIVE_THEME_IN_PROGRESS" -eq 1 ]; then native_theme_request_is_current || return 1; fi
@@ -635,10 +677,7 @@ native_theme_supported() {
 native_theme_group_is_owned() {
     [ -n "$NATIVE_THEME_COMMAND_PID" ] && [ -n "$NATIVE_THEME_COMMAND_BIRTH" ] || return 1
     process_matches "$NATIVE_THEME_COMMAND_PID" "$NATIVE_THEME_COMMAND_BIRTH" "$$" || return 1
-    native_theme_group_stat=$(cat "/proc/$NATIVE_THEME_COMMAND_PID/stat" 2>/dev/null || :)
-    native_theme_group_tail=${native_theme_group_stat##*) }
-    set -- $native_theme_group_tail
-    [ "$#" -ge 4 ] && [ "$3:$4" = "$NATIVE_THEME_COMMAND_PID:$NATIVE_THEME_COMMAND_PID" ]
+    [ "$PROCESS_GROUP:$PROCESS_SESSION" = "$NATIVE_THEME_COMMAND_PID:$NATIVE_THEME_COMMAND_PID" ]
 }
 
 stop_native_theme_command() {
@@ -655,8 +694,8 @@ stop_native_theme_command() {
     native_theme_reap_checks=10
     while process_matches "$NATIVE_THEME_COMMAND_PID" "$NATIVE_THEME_COMMAND_BIRTH" "$$" &&
         [ "$native_theme_reap_checks" -gt 0 ]; do
-        case "$(sed -n 's/^State:[[:space:]]*//p' "/proc/$NATIVE_THEME_COMMAND_PID/status" 2>/dev/null || :)" in
-            Z*|X*|'') break ;;
+        case "$PROCESS_STATE" in
+            Z|X|x|'') break ;;
         esac
         usleep 100000 || native_theme_stop_status=1
         native_theme_reap_checks=$((native_theme_reap_checks - 1))
@@ -664,7 +703,7 @@ stop_native_theme_command() {
     if [ -n "$NATIVE_THEME_COMMAND_PID" ]; then
         if [ ! -d "/proc/$NATIVE_THEME_COMMAND_PID" ] ||
             { process_matches "$NATIVE_THEME_COMMAND_PID" "$NATIVE_THEME_COMMAND_BIRTH" "$$" &&
-              [ "$(sed -n 's/^State:[[:space:]]*//p' "/proc/$NATIVE_THEME_COMMAND_PID/status" 2>/dev/null || :)" = 'Z (zombie)' ]; }; then
+              [ "$PROCESS_STATE" = Z ]; }; then
             wait "$NATIVE_THEME_COMMAND_PID" 2>/dev/null || :
         fi
     fi
@@ -760,7 +799,8 @@ owned_native_command() {
                 native_theme_released=1
             fi
             if [ -r "$LOCK_DIR/native-theme-done" ]; then
-                native_completed_status=$(cat "$LOCK_DIR/native-theme-done" 2>/dev/null || :)
+                native_completed_status=''
+                if read_single_record "$LOCK_DIR/native-theme-done"; then native_completed_status=$SINGLE_RECORD; fi
                 case "$native_completed_status" in
                     0) native_theme_status=0; NATIVE_COMMAND_EXIT_STATUS=0; NATIVE_COMMAND_FAILURE='' ;;
                     *[!0-9]*|'') NATIVE_COMMAND_FAILURE=invalid-completion ;;
@@ -1216,10 +1256,7 @@ take_display() {
 native_theme_power_epoch_is_current() {
     owned_child_is_running "$EVENT_SOURCE_PID" "$EVENT_SOURCE_BIRTH" "$$" &&
         owned_child_is_running "$EVENT_SOURCE_CHILD_PID" "$EVENT_SOURCE_CHILD_BIRTH" "$EVENT_SOURCE_PID" || return 1
-    [ -f "$LOCK_DIR/native-theme-power-epoch" ] && [ ! -L "$LOCK_DIR/native-theme-power-epoch" ] || return 1
-    IFS=: read -r theme_epoch_token theme_epoch_count theme_epoch_extra <"$LOCK_DIR/native-theme-power-epoch" || return 1
-    [ "$theme_epoch_token" = "$LAUNCH_TOKEN" ] && [ -z "$theme_epoch_extra" ] &&
-        [ "$theme_epoch_count" = "$SLEEP_GENERATION" ]
+    single_record_matches "$LOCK_DIR/native-theme-power-epoch" "$LAUNCH_TOKEN:$SLEEP_GENERATION"
 }
 
 latch_native_theme_interrupt() {
@@ -1278,9 +1315,17 @@ read_native_theme_request() {
     theme_request_bytes=${theme_request_bytes%"${theme_request_bytes##*[![:space:]]}"}
     case "$theme_request_bytes" in *[!0-9]*|'') return 1 ;; esac
     [ "$theme_request_bytes" -gt 0 ] && [ "$theme_request_bytes" -le 128 ] || return 1
-    IFS=: read -r theme_request_generation theme_request_token theme_request_sequence theme_request_target theme_request_extra <"$LOCK_DIR/native-theme-request" || return 1
-    [ "$theme_request_generation:$theme_request_token" = "$APP_GENERATION:$LAUNCH_TOKEN" ] &&
-        [ -z "$theme_request_extra" ] || return 1
+    read_single_record "$LOCK_DIR/native-theme-request" || return 1
+    theme_request_generation=${SINGLE_RECORD%%:*}
+    theme_request_tail=${SINGLE_RECORD#*:}
+    [ "$theme_request_tail" != "$SINGLE_RECORD" ] || return 1
+    theme_request_token=${theme_request_tail%%:*}
+    theme_request_rest=${theme_request_tail#*:}
+    [ "$theme_request_rest" != "$theme_request_tail" ] || return 1
+    theme_request_sequence=${theme_request_rest%%:*}
+    theme_request_target=${theme_request_rest#*:}
+    [ "$theme_request_target" != "$theme_request_rest" ] || return 1
+    [ "$theme_request_generation:$theme_request_token" = "$APP_GENERATION:$LAUNCH_TOKEN" ] || return 1
     case "$theme_request_target" in Y8|Y8INV) ;; *) return 1 ;; esac
 }
 
@@ -1307,8 +1352,8 @@ continue_theme_window_managers() {
     for theme_wm_identity in $PAUSED_WM_IDENTITIES; do
         theme_wm_pid=${theme_wm_identity%%:*}
         theme_wm_birth=${theme_wm_identity#*:}
-        [ "$(process_birth "$theme_wm_pid" 2>/dev/null || :)" = "$theme_wm_birth" ] || return 1
-        case "$(sed -n 's/^State:[[:space:]]*//p' "/proc/$theme_wm_pid/status" 2>/dev/null || :)" in T*|t*) ;; *) return 1 ;; esac
+        read_process_identity "$theme_wm_pid" && [ "$PROCESS_BIRTH" = "$theme_wm_birth" ] || return 1
+        case "$PROCESS_STATE" in T|t) ;; *) return 1 ;; esac
         kill -CONT "$theme_wm_pid" 2>/dev/null || return 1
     done
     # Retain every original restore obligation while the App is frozen.
@@ -1325,9 +1370,9 @@ pause_theme_window_managers() {
         theme_wm_checks=$(managed_wait_budget 1)
         theme_wm_stopped=0
         while [ "$theme_wm_checks" -gt 0 ]; do
-            [ "$(process_birth "$theme_wm_pid" 2>/dev/null || :)" = "$theme_wm_birth" ] || return 1
-            case "$(sed -n 's/^State:[[:space:]]*//p' "/proc/$theme_wm_pid/status" 2>/dev/null || :)" in
-                T*|t*) theme_wm_stopped=1; break ;;
+            read_process_identity "$theme_wm_pid" && [ "$PROCESS_BIRTH" = "$theme_wm_birth" ] || return 1
+            case "$PROCESS_STATE" in
+                T|t) theme_wm_stopped=1; break ;;
             esac
             managed_wait_tick || return 1
             theme_wm_checks=$((theme_wm_checks - 1))
@@ -1347,8 +1392,9 @@ perform_native_theme_request() {
     theme_app_stopped=0
     while [ "$theme_app_checks" -gt 0 ]; do
         native_theme_request_is_current || return 1
-        case "$(sed -n 's/^State:[[:space:]]*//p' "/proc/$APP_CHILD_PID/status" 2>/dev/null || :)" in
-            T*|t*) theme_app_stopped=1; break ;;
+        process_matches "$APP_CHILD_PID" "$APP_CHILD_BIRTH" "$APP_RUNNER_PID" || return 1
+        case "$PROCESS_STATE" in
+            T|t) theme_app_stopped=1; break ;;
         esac
         managed_wait_tick || return 1
         theme_app_checks=$((theme_app_checks - 1))
@@ -1421,7 +1467,8 @@ perform_native_theme_request() {
         if [ -f "$LOCK_DIR/native-theme-ready" ] && [ ! -L "$LOCK_DIR/native-theme-ready" ] &&
             IFS= read -r theme_ready_record <"$LOCK_DIR/native-theme-ready" &&
             [ "$theme_ready_record" = "$theme_ready_value" ]; then
-            case "$(sed -n 's/^State:[[:space:]]*//p' "/proc/$APP_CHILD_PID/status" 2>/dev/null || :)" in T*|t*|Z*|X*|'') return 1 ;; esac
+            process_matches "$APP_CHILD_PID" "$APP_CHILD_BIRTH" "$APP_RUNNER_PID" || return 1
+            case "$PROCESS_STATE" in T|t|Z|X|x|'') return 1 ;; esac
             NATIVE_THEME_STAGE=power-after-renderer
             native_theme_transaction_power_is_active || return 1
             APP_PHASE=running
@@ -2238,7 +2285,7 @@ resume_application() {
 }
 
 marker_matches_application() {
-    [ "$(sed -n '1p' "$LOCK_DIR/$1" 2>/dev/null || :)" = "$APP_GENERATION:$LAUNCH_TOKEN" ]
+    single_record_matches "$LOCK_DIR/$1" "$APP_GENERATION:$LAUNCH_TOKEN"
 }
 
 attempt_managed_sleep() {

@@ -103,6 +103,42 @@ results do not prove that native Library is absent during a system-theme
 change or wake. The R3 visual failures below remain recorded, and the isolated
 candidate has not replaced the earlier normal-mode private trial.
 
+## Native frame-guard v8 software candidate
+
+The v8 launcher reduces repeated external `cat` and `sed` work in the native
+handoff's identity checks. Each check still reads current records. Process
+birth, parent, state, group, and session come from one fresh `/proc` stat
+record; private protocol records require one complete line and EOF from the
+same open file. Every existing power, epoch, ownership, SYSTEM readback,
+persistence, renderer, and commit checkpoint remains in place. The Rust
+writer's newline-terminated atomic records are unchanged.
+
+The complete 201-case launcher suite passed on `test-env` in 741.769 seconds,
+including the six new identity/record/phase regressions. All four packaging
+contract cases also passed. The archive's exact 36-member set, every CRC,
+0755/0644 mode, and expected file digest were verified with no extra or private
+input. These are new launcher and package executions. The main ELF, C helper,
+and the 30 native/pixel/watch results above are reused evidence; no Rust or C
+rebuild or repeated runtime test execution is claimed.
+
+| Artifact | SHA-256 |
+| --- | --- |
+| v8 development ZIP | `eac8a0f6a2cdcf9b4ae817bbd19aee96c005bb16da7f014cb47f01ae2f88ace5` |
+| Production launcher | `4192f7d45e4566612284ddab4b15f3e15285bcaac56fe45a31a15b64c3937dfa` |
+| Launcher test source | `282e08e9113e5e6f8c601c7642641190c88ccdcaaca14e8ef5e4ca61e35c9bc0` |
+
+The immutable source and software manifest is
+`test-env:/root/weread-native-frame-v8-src/frozen/v8-verification-manifest.json`.
+Its referenced full launcher log, package log, and archive inventory preserve
+the individual execution and artifact identities.
+
+One equivalent two-way theme fixture, including startup and cleanup, reduced
+observed `cat`/`sed` invocations from 2024 to 98 (about 95.2%). This measures
+external command count, not Kindle latency. The two ptrace-based timing
+attempts were invalidated because tracing introduced process state `t`; they
+provide no performance or product result. The v8 physical visual and
+responsiveness gates remain **OPEN**.
+
 ## Physical observations and remaining gates
 
 The identified device is a first-generation Kindle Scribe (2022), firmware
@@ -175,3 +211,45 @@ The earlier formal daily-trial installation has not been replaced by these
 isolated runs. USB insertion remains deferred at the user's request. Manual
 rotation is disabled, and no four-way automatic rotation or other model/firmware
 support is claimed.
+
+## R6 partial frame-guard trial
+
+The isolated v7 candidate completed its supervised 15-second display window.
+The operator requested one owned TERM, the launcher returned 143, the supervisor
+finished, both display locks were absent, and the original native window
+manager, status bar, active application, and `Y8INV` mode were restored. This is
+managed-stop evidence, not a voluntary UI-exit result.
+
+In the subsequent manual window, the user confirmed startup feedback, the
+demonstration Library, Reader text, and working touch. The native guard was
+viewable at 1860 x 2480 and depth 8. The first night-to-day transaction retained
+the original application and guard identities, advanced the guard sequence to
+2 for application generation 1, and completed theme sequence 1 with matching
+`ok:Y8` result and renderer acknowledgment. The request was removed, native
+persistence was `Y8`, and the application preference was false.
+
+The user observed an in-place switch without native Library exposure, but
+reported a four-to-five-second delay. That delay remains an open interaction
+problem. The reverse transition, sleep/wake presentation, orientation, and
+voluntary exit still require this candidate's own observations. A bounded
+passive transaction sampler expired after 300 seconds without observing a new
+request; it collected zero transaction samples and verified the original
+identity again at completion. It supplies no handoff timing result. Any later
+passive measurement must account for its own polling overhead.
+
+The manual window ended with another owned managed TERM and launcher exit 143.
+The supervisor finished; the original launcher, application, guard, lifecycle
+watcher, and passive sampler had ended, and both display locks were absent.
+An initial private cleanup assertion incorrectly required the numeric XID to
+be absent: the X server had already reused that resource ID for its restarted
+`JunoStatusBarDriver` title bar. The saved and current window title, class, and
+1860 x 101 geometry distinguish it from the original full-screen guard. No
+native window was destroyed to satisfy that assertion.
+
+The original native window manager was running with restored status bar,
+`KPPMainApp` foreground, active power state, and the user's committed `Y8`
+setting. These machine observations do not constitute a new manual touch
+confirmation. The exact R6 lease was released at 14:35:14 UTC, followed by an
+independent absent-directory check, and BiliComics was notified. No reverse
+theme, sleep/wake, orientation, or voluntary-exit acceptance is claimed for
+this window; the visual and responsiveness gates remain open.
