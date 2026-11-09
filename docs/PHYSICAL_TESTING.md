@@ -21,6 +21,17 @@ display correction have their own current remote and physical gates in
 [Native reading corrections](NATIVE_FIX_ACCEPTANCE.md). Those later changes do
 not inherit acceptance from earlier daily-trial or resource-review artifacts.
 
+The subsequent v10 isolated manual trial passed the scoped visual, sleep, and
+UI-exit checks on this same device and firmware. Its matching normal-mode
+installation was independently verified against all 36 public file hashes and
+sizes. The user opened the existing document entry, confirmed the original
+Library and books, then exited to a working dark native UI. Full normal
+arguments, backup provenance, filesystem-mode observations, remaining
+approximately five-second theme response, and final lease return are recorded
+in [Native reading corrections](NATIVE_FIX_ACCEPTANCE.md). No new content
+entitlement, download, reboot, USB, or other-device claim follows from this
+installation check.
+
 ## Live resource authentication and image aliases
 
 ### Performance-build physical continuation

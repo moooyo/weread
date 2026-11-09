@@ -18,8 +18,12 @@ launcher target and all 183 corrected launcher cases passed. The gated package
 passed its exact 35-member, CRC, mode, and ELF/launcher identity checks. Physical
 acceptance subsequently established TOC alignment, the resident system-setting
 commit, same-process wake, and exit persistence in an isolated R3 trial. The user
-observed native Library during both theme change and wake; visual handoff remains
-unaccepted and requires a new correction. Earlier failed launcher output and its package remain failed
+observed native Library during both theme change and wake; that R3 artifact
+did not pass visual handoff. The later v8 and v10 isolated trials closed their
+scoped visual gates on Scribe 2022 / firmware 5.19.5. The matching v10 normal
+installation has independent 36-file readback, preserved data, and user-confirmed
+original Library and native UI restoration. Theme response remains about five
+seconds and is not reported as improved. Earlier failed launcher output and its package remain failed
 evidence, with no reassignment of historical artifact results.
 
 ## Finite resource closeout and active orientation

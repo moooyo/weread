@@ -69,7 +69,9 @@ and treats confirmed native state as authoritative at startup and wake. The
 isolated v10 trial passed scoped visual, sleep, and UI-exit checks on Scribe
 2022 / firmware 5.19.5; its approximately five-second response remains open.
 System mode changes retain the Kindle's native day/night illumination presets.
-The earlier normal-mode private trial has not been replaced by these tests.
+The matching v10 normal-mode private trial is now installed at the existing
+document entry, retaining the account data and books. The user confirmed the
+original Library and normal native restoration after UI exit.
 [Rotation alignment](docs/ROTATION_ALIGNMENT.md) compares the accepted automatic
 0/180-degree display and touch paths with pinned KOReader sources.
 [Current native corrections](docs/NATIVE_FIX_ACCEPTANCE.md) records the TOC,
@@ -88,8 +90,9 @@ change shares the final bounded candidate and its own controlled tests.
 Final remote verification passed 1,481 library, 52 Main, 65 backend, 15 Swash,
 and 168 launcher cases; three manual library benchmarks remain ignored.
 The matching static ARM development bundle and source provenance are recorded
-in [Verification](docs/VERIFICATION.md). This resource task has made no Kindle
-deployment, and the existing `2fd3/799d` trial has not been replaced.
+in [Verification](docs/VERIFICATION.md). That resource-review checkpoint made
+no Kindle deployment. The later native-correction deployment has its own
+artifact and physical record in [Native reading corrections](docs/NATIVE_FIX_ACCEPTANCE.md).
 
 ## Current architecture
 

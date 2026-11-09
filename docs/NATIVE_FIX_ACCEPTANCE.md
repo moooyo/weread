@@ -512,3 +512,58 @@ and firmware 5.19.5. The separate inverted-holding observations remain v8/R9
 evidence. The approximately five-second response remains a known **OPEN**
 issue, without a claimed optimization. Overall product acceptance, USB,
 other models, and other firmware combinations are unchanged.
+
+## Matching v10 normal-mode deployment
+
+The existing normal entry was subsequently updated on the same Scribe 2022 /
+5.19.5 device. Read-only preflight independently matched the old `2fd3d6ab`
+application and `799d5bba` launcher. The approved public inventory contained
+18 existing files and 18 absent targets. Device and private host backups of
+the existing public files passed the complete expected hash and size checks.
+A separate byte-for-byte snapshot of the known `library.sqlite` file was
+verified unchanged at its source and copied to private host storage; WAL and
+SHM files were absent. No account or book rows were printed or published.
+
+The update staged the 35 public App files and production document launcher,
+then replaced files by same-directory rename with the document entry last.
+It was a per-file transaction, not a globally atomic directory replacement.
+The outer transport reached its 180-second timeout. Subsequent read-only
+inspection found no remaining commit process and a complete commit journal,
+including the final all-36-files marker. The commit was not blindly retried or
+rolled back. An independent readback then verified every public hash and size
+and all three executable targets:
+
+| Installed component | SHA-256 |
+| --- | --- |
+| Normal document launcher | `15aab68c25a6d9b31c2a1020f62001ab4e86827e4dcfd2926bbaf17ef6f3c9e9` |
+| Static ARM application | `8010a21786b0b68dce67baeb00452e85f217daaef08293d6c25959d9f81fbc7b` |
+| Native frame guard | `a235b41c80a21a35c99f8798f366a4f2e921b971a606c83f3f8d69d576676806` |
+
+The device's FSP filesystem reported mode 777 for all 36 files. This is recorded
+separately from the verified ZIP's 0755/0644 attributes; no exact POSIX mode
+pass is claimed for the mounted device storage. Required executability was
+confirmed. Public replacement was restricted to the approved App and document
+paths; account state, books, caches, progress, and private configuration remained
+in the existing normal data directory.
+
+The user opened `WeRead for Kindle` from native Library and confirmed the
+original Library and retained books. The live process arguments were exactly
+`--kindle --device scribe --data-dir /mnt/us/weread/data`, without demo, offline,
+scripted actions, or a product exit timer. The production helper and original
+process family were bound while running. The user then exited through the UI
+and confirmed normal dark native presentation and touch. Independent cleanup
+confirmed every original master, runner, application, helper, and watcher had
+ended, both display locks were absent, and the actual guard XID no longer
+existed. Native window manager and status bar were running with `KPPMainApp`,
+active power, and `Y8INV`. No numeric launcher exit status was observed for
+this user-started normal launch; the manual exit and cleanup observations are
+not restamped as a supervised exit-code result.
+
+Receipts remain private under
+`test-env:/root/weread-manual-20261109-r10/evidence/private/`, including
+`r10-formal-v10-readback36.stdout`, `r10-formal-normal-live.stdout`, and
+`r10-formal-normal-user-gone.stdout`. The R10 lease was exactly released at
+2026-11-09 18:09:47 UTC, its absence was independently checked, and BiliComics
+was notified only after all device transports closed. The normal entry is
+available for private daily trial. This deployment does not close the known
+approximately five-second theme response or expand the device-support matrix.
