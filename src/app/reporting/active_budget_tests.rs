@@ -536,7 +536,7 @@ fn pending_http() -> Result<()> {
         pending_id = format!("{}-{run}-0-60", &account[..12]);
         let mut cursors = serde_json::Map::new();
         cursors.insert(run.into(), json!(0));
-        app.store.set_setting(OUTBOX_KEY, &json!({"batches_v2":[{"request":{"session_id":pending_id,
+        app.store.set_setting(OUTBOX_KEY, &json!({"batches":[{"request":{"session_id":pending_id,
             "account_key":account,"book_id":BOOK,"started_at":Utc::now().timestamp()-600,"seconds":60,
             "progress_write_allowed":true,"active_reader_intent":false,"position":{"chapter_uid":CHAPTER,
                 "chapter_index":0,"chapter_offset":0,"progress":0,"summary":"Pending proof","updated_at":1,"device":"fixture"}},
@@ -569,7 +569,7 @@ fn pending_http() -> Result<()> {
                 )
                 .unwrap();
             let queue: Value = serde_json::from_str(&encoded).unwrap();
-            assert_eq!(queue["batches_v2"][0]["state"], "sending");
+            assert_eq!(queue["batches"][0]["state"], "sending");
             if let Some(seconds) = request.json()["rt"].as_u64() {
                 assert_eq!(seconds, 60);
             }
@@ -632,7 +632,7 @@ fn pending_http() -> Result<()> {
                 );
                 assert_eq!(stats().full_deserializations, 0);
                 assert!(
-                    app.store.setting::<Value>(OUTBOX_KEY)?.unwrap()["batches_v2"]
+                    app.store.setting::<Value>(OUTBOX_KEY)?.unwrap()["batches"]
                         .as_array()
                         .unwrap()
                         .is_empty()
@@ -683,9 +683,9 @@ fn utf16_active_exact_working_fees_reject_one_less_before_deserialization() -> R
     )
 }
 #[test]
-fn actual_checkpoint_preserves_legacy_fields_and_unallocated_seconds() -> Result<()> {
+fn actual_checkpoint_preserves_current_fields_and_unallocated_seconds() -> Result<()> {
     isolated(
-        "app::reporting::active_budget_tests::actual_checkpoint_preserves_legacy_fields_and_unallocated_seconds",
+        "app::reporting::active_budget_tests::actual_checkpoint_preserves_current_fields_and_unallocated_seconds",
         checkpoint_preserves_cold_fields,
     )
 }

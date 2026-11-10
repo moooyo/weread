@@ -703,72 +703,6 @@ fn catalog_reindex_preserves_uid_state_and_removes_unselected_rows() -> Result<(
 }
 
 #[test]
-fn schema_migration_lazily_preserves_legacy_prefix_retry_notes_and_position() -> Result<()> {
-    let directory = tempfile::tempdir()?;
-    let path = directory.path().join("legacy-chapter-state.sqlite");
-    let (store, mut task) = fixture_at(&path)?;
-    store.upsert_chapter(&packet(0))?;
-    store.save_position(&ReadingPosition {
-        book_id: BOOK.into(),
-        chapter_index: 0,
-        char_offset: 8,
-        ..Default::default()
-    })?;
-    let annotation = Annotation {
-        id: "legacy-chapter-note".into(),
-        book_id: BOOK.into(),
-        chapter_index: 0,
-        start: 0,
-        end: 7,
-        quote: "Chapter".into(),
-        note: "Keep the legacy note".into(),
-        ..Default::default()
-    };
-    store.save_annotation(&annotation)?;
-    task.status = DownloadStatus::Paused;
-    task.next_index = 1;
-    task.retry_cursor = 1;
-    task.retry_count = 2;
-    task.retry_not_before = 500;
-    task.error = Some(REJECTION.into());
-    store.save_task(&task)?;
-    store.connection.execute(
-        "UPDATE download_tasks SET payload=json_remove(payload,'$.completed_count') WHERE id=?1",
-        [&task.id],
-    )?;
-    store
-        .connection
-        .execute_batch("DROP TABLE task_chapter_states; PRAGMA user_version=2;")?;
-    drop(store);
-
-    let store = Store::open(&path)?;
-    let version: i64 = store
-        .connection
-        .pragma_query_value(None, "user_version", |row| row.get(0))?;
-    assert_eq!(version, 3);
-    let mut task = reload(&store, &task)?;
-    task.status = DownloadStatus::Running;
-    task.updated_at = 200;
-    store.save_task(&task)?;
-    let states = store.prepare_download_chapter_states(&task, 200)?;
-    assert_eq!(states[0].status, DownloadChapterStatus::Complete);
-    assert_eq!(states[1].status, DownloadChapterStatus::RetryWait);
-    assert_eq!(states[1].retry_count, 2);
-    assert_eq!(states[1].retry_not_before, 500);
-    assert_eq!(states[1].error.as_deref(), Some(REJECTION));
-    assert_eq!(states[2].status, DownloadChapterStatus::Pending);
-    let task = reload(&store, &task)?;
-    assert_eq!(task.completed_count, 1);
-    assert_eq!(task.next_index, 1);
-    assert_eq!(task.retry_count, 0);
-    assert_eq!(task.retry_not_before, 0);
-    assert_eq!(store.chapter_body(BOOK, 0)?, packet(0).body);
-    assert_eq!(store.position(BOOK)?.unwrap().char_offset, 8);
-    assert_eq!(store.annotations(BOOK)?, vec![annotation]);
-    Ok(())
-}
-
-#[test]
 fn terminal_lifecycle_releases_normalized_chapter_rows() -> Result<()> {
     let (store, mut task) = fixture()?;
     store.record_download_chapter_failure(
@@ -1059,33 +993,31 @@ fn chapter_failure_errors_are_redacted_before_persistence_and_on_legacy_reads() 
 }
 
 #[test]
-fn legacy_running_retry_budget_survives_restart_without_a_task_error() -> Result<()> {
+fn chapter_retry_budget_survives_restart_without_a_task_error() -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let path = directory.path().join("legacy-running-chapter-state.sqlite");
+    let path = directory.path().join("running-chapter-state.sqlite");
     let (store, mut task) = fixture_at(&path)?;
-    store.upsert_chapter(&packet(0))?;
-    task.next_index = 1;
-    task.retry_cursor = 1;
-    task.retry_count = 2;
-    task.retry_not_before = 500;
-    task.error = None;
-    store.save_task(&task)?;
-    store.connection.execute(
-        "UPDATE download_tasks SET payload=json_remove(payload,'$.completed_count') WHERE id=?1",
-        [&task.id],
-    )?;
-    store
-        .connection
-        .execute_batch("DROP TABLE task_chapter_states; PRAGMA user_version=2;")?;
+    store.commit_independent_download_chapter(&task, &packet(0), 0, 101)?;
+    task = reload(&store, &task)?;
+    for now in [200, 380] {
+        store.record_download_chapter_failure(
+            &task,
+            "independent-uid-1",
+            1,
+            1,
+            true,
+            REJECTION,
+            now,
+        )?;
+        task = reload(&store, &task)?;
+    }
+    assert!(task.error.is_none());
     drop(store);
 
     let store = Store::open(&path)?;
     let mut resumed = reload(&store, &task)?;
     assert_eq!(resumed.status, DownloadStatus::Paused);
     assert_eq!(resumed.error, None);
-    assert_eq!(resumed.retry_cursor, 1);
-    assert_eq!(resumed.retry_count, 2);
-    assert_eq!(resumed.retry_not_before, 500);
     resumed.status = DownloadStatus::Running;
     resumed.updated_at = 200;
     store.save_task(&resumed)?;
@@ -1100,8 +1032,6 @@ fn legacy_running_retry_budget_survives_restart_without_a_task_error() -> Result
     resumed = reload(&store, &resumed)?;
     assert_eq!(resumed.completed_count, 1);
     assert_eq!(resumed.next_index, 1);
-    assert_eq!(resumed.retry_count, 0);
-    assert_eq!(resumed.retry_not_before, 0);
     assert!(
         store
             .start_download_chapter_attempt(&resumed, "independent-uid-1", 1, 1, 499)

@@ -2390,9 +2390,6 @@ impl App {
         };
         task.error = error.as_ref().map(ToString::to_string);
         task.updated_at = Utc::now().timestamp();
-        if cancelled {
-            download_recovery::reset_recovery(&mut task);
-        }
         match self.store.save_task_if_current(&previous, &task) {
             Ok(true) => {}
             Ok(false) => {

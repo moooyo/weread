@@ -2,7 +2,6 @@
 
 use super::*;
 
-pub(super) const REJECTION_CODE: &str = "source.api.-10102";
 const NOTICE_KEY: &str = "download.notice.v1";
 
 pub(super) struct DownloadNotice {
@@ -15,17 +14,6 @@ pub(super) struct DownloadNotice {
 
 pub(super) fn rejected_read(error: &source::SourceError) -> bool {
     matches!(error, source::SourceError::Api(code) if code == "-10102")
-}
-
-pub(super) fn recorded_rejection(task: &DownloadTask) -> bool {
-    task.error.as_deref() == Some(REJECTION_CODE)
-}
-
-/// Legacy task fields are retained only for migration, never active scheduling.
-pub(super) fn reset_recovery(task: &mut DownloadTask) {
-    task.retry_cursor = 0;
-    task.retry_count = 0;
-    task.retry_not_before = 0;
 }
 
 pub(super) fn chapter_summary_label(
@@ -79,14 +67,8 @@ impl App {
 
     pub(super) fn remember_download_notice(&mut self, task: &DownloadTask) -> Result<()> {
         let progress = self.store.download_chapter_progress(&task.id)?;
-        let legacy =
-            recorded_rejection(task) && self.store.download_chapter_states(&task.id)?.is_empty();
-        let waiting = progress.retry_wait_count.max(usize::from(
-            legacy && task.retry_count > 0 && task.retry_count <= 3,
-        ));
-        let blocked = progress
-            .blocked_count
-            .max(usize::from(legacy && waiting == 0));
+        let waiting = progress.retry_wait_count;
+        let blocked = progress.blocked_count;
         self.sync_running_download_actions(blocked);
         if waiting == 0 && blocked == 0 {
             return self.clear_download_notice(&task.id);
@@ -274,19 +256,11 @@ impl App {
             return Ok(false);
         }
         let states = self.store.download_chapter_states(&task.id)?;
-        let remaining = if states.is_empty() {
-            task.chapters
-                .iter()
-                .skip(task.next_index)
-                .copied()
-                .collect::<Vec<_>>()
-        } else {
-            states
-                .iter()
-                .filter(|state| state.status != DownloadChapterStatus::Complete)
-                .map(|state| state.chapter_index)
-                .collect()
-        };
+        let remaining = states
+            .iter()
+            .filter(|state| state.status != DownloadChapterStatus::Complete)
+            .map(|state| state.chapter_index)
+            .collect::<Vec<_>>();
         if remaining.is_empty() || !remaining.iter().all(|index| requested.contains(index)) {
             return Ok(false);
         }
@@ -402,7 +376,6 @@ impl App {
         task.status = DownloadStatus::Cancelled;
         task.error = None;
         task.updated_at = Utc::now().timestamp();
-        reset_recovery(&mut task);
         if self.store.save_task_if_current(&previous, &task)? {
             self.downloads.retain(|queued| queued.id != id);
             if self
@@ -474,7 +447,6 @@ impl App {
         pending.status = DownloadStatus::Pending;
         pending.error = None;
         pending.updated_at = now;
-        reset_recovery(&mut pending);
         if self.store.save_task_if_current(&previous, &pending)? {
             self.downloads.retain(|queued| queued.id != id);
             self.downloads.push_front(pending);

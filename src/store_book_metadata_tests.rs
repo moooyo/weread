@@ -264,7 +264,7 @@ fn utf16_metadata_fields_use_the_same_cached_conversion_upper_bound() -> Result<
         {
             let mut connection = Connection::open(&path)?;
             connection.pragma_update(None, "encoding", encoding)?;
-            migrate(&mut connection)?;
+            initialize_schema(&mut connection)?;
         }
         let store = Store::open(&path)?;
         let book = Book {

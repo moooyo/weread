@@ -100,7 +100,7 @@ fn new_four_batches() -> Result<()> {
         state.start_read_report_session()?;
         state.checkpoint_read_reports(false)?;
         let queue = state.store.setting::<Value>(OUTBOX)?.unwrap();
-        let batches = queue["batches_v2"].as_array().unwrap();
+        let batches = queue["batches"].as_array().unwrap();
         assert_eq!(batches.len(), 4);
         for (index, batch) in batches.iter().enumerate() {
             let request: ReadReportRequest = serde_json::from_value(batch["request"].clone())?;
@@ -160,7 +160,7 @@ fn old_proof_and_new_projection() -> Result<()> {
         state.store.set_setting(
             OUTBOX,
             &json!({
-                "batches_v2": [old_batch],
+                "batches": [old_batch],
                 "reported_cursors": { "legacy-uncertain-run": 0, "retained-proof-run": 60 },
                 "compacted_runs": { "retained-proof-run": proof }
             }),
@@ -171,14 +171,16 @@ fn old_proof_and_new_projection() -> Result<()> {
                 "id": "legacy-active-summary-run", "account_key": account, "book_id": BOOK,
                 "started_at": started, "observed_seconds": 240, "eligible_seconds": 240,
                 "allocated_seconds": 0, "last_checkpoint_at": now, "local_chapter": 0,
-                "local_anchor": 0, "position": position
+                "local_anchor": 0, "position": position,
+                "observer_started_at": started, "observer_seconds_base": 0,
+                "local_session_id": "active-summary-run"
             }),
         )?;
         let capacity = state.jobs.metadata_capacity();
         state.checkpoint_read_reports(true)?;
         state.tick_read_reports()?;
         let queue = state.store.setting::<Value>(OUTBOX)?.unwrap();
-        let batches = queue["batches_v2"].as_array().unwrap();
+        let batches = queue["batches"].as_array().unwrap();
         assert_eq!(batches.len(), 5);
         assert_eq!(batches[0], old_batch);
         assert_eq!(queue["compacted_runs"]["retained-proof-run"], proof);
@@ -201,10 +203,10 @@ fn old_proof_and_new_projection() -> Result<()> {
 }
 
 #[test]
-fn new_batches_project_legacy_active_metadata_without_rewriting_uncertain_request_or_proof()
+fn new_batches_project_current_active_metadata_without_rewriting_uncertain_request_or_proof()
 -> Result<()> {
     isolated(
-        "app::report_summary_tests::new_batches_project_legacy_active_metadata_without_rewriting_uncertain_request_or_proof",
+        "app::report_summary_tests::new_batches_project_current_active_metadata_without_rewriting_uncertain_request_or_proof",
         old_proof_and_new_projection,
     )
 }

@@ -28,7 +28,7 @@ fn store(encoding: &str) -> Result<(tempfile::TempDir, Store)> {
     {
         let mut connection = Connection::open(&path)?;
         connection.pragma_update(None, "encoding", encoding)?;
-        migrate(&mut connection)?;
+        initialize_schema(&mut connection)?;
     }
     Ok((directory, Store::open(path)?))
 }
@@ -440,7 +440,7 @@ fn current_report_maintenance_uses_default_envelope_while_allocation_stays_refus
         [],
     )?;
     let original = snapshot(&store)?;
-    let encoded = "{\"batches_v2\":[],\"reported_cursors\":{},\"compacted_runs\":{}}";
+    let encoded = "{\"batches\":[],\"reported_cursors\":{},\"compacted_runs\":{}}";
     with_encoded_settings_test_limits(
         EncodedSettingsLimits {
             bytes: 32,

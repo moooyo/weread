@@ -110,7 +110,7 @@ fn snapshot(app: &App, key: &str) -> Result<Value> {
 }
 
 fn batches(app: &App) -> Result<Vec<Value>> {
-    Ok(snapshot(app, OUTBOX)?["batches_v2"]
+    Ok(snapshot(app, OUTBOX)?["batches"]
         .as_array()
         .cloned()
         .unwrap_or_default())
@@ -628,13 +628,13 @@ fn pending_post() -> Result<()> {
                 .unwrap();
             let queue: Value = serde_json::from_str(&encoded).unwrap();
             assert!(
-                queue["batches_v2"]
+                queue["batches"]
                     .as_array()
                     .unwrap()
                     .iter()
                     .any(|batch| batch["state"] == "sending")
             );
-            let original = queue["batches_v2"]
+            let original = queue["batches"]
                 .as_array()
                 .unwrap()
                 .iter()
@@ -919,7 +919,7 @@ fn confirmed_history() -> Result<()> {
         }
         app.store.set_setting(
             OUTBOX,
-            &json!({"batches_v2":[],"reported_cursors":cursors,"compacted_runs":proofs}),
+            &json!({"batches":[],"reported_cursors":cursors,"compacted_runs":proofs}),
         )?;
         app.reader.session_seconds = 60;
         with_allocation_test_limits(AllocationLimits::default(), || -> Result<()> {

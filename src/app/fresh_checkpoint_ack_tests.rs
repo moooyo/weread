@@ -385,7 +385,7 @@ fn report_capacity_and_sql_cause() -> Result<()> {
         let run = "report-handler-run";
         let account = source::report::account_key(&auth()).unwrap();
         let original = json!({
-            "batches_v2": [{
+            "batches": [{
                 "request": { "session_id": id, "account_key": account, "book_id": BOOK,
                     "started_at": 100, "seconds": 60, "progress_write_allowed": true,
                     "active_reader_intent": false, "position": null },

@@ -264,8 +264,6 @@ fn run_independent_retry_budgets(
         assert_eq!(chapter.error.as_deref(), Some(REJECTION_ERROR));
         assert_eq!(saved.completed_count, 1);
         assert_eq!(saved.next_index, 1);
-        assert_eq!(saved.retry_count, 0);
-        assert_eq!(saved.retry_not_before, 0);
         if let Some(delay) = delay {
             assert_retry_deadline(&chapter, retry, before, after, delay);
         } else {
@@ -575,81 +573,4 @@ fn run_partial_failure_controls(
 fn an_incomplete_selection_offers_retry_and_cancel_without_restarting_completed_chapters()
 -> Result<()> {
     on_ui_thread(run_partial_failure_controls)
-}
-
-fn run_legacy_failed_notice(
-    ui: &AppWindow,
-    application: &Rc<RefCell<App>>,
-    _: &Path,
-) -> Result<()> {
-    let mut state = application.borrow_mut();
-    seed_remote(&mut state, 3)?;
-    begin_task(&mut state, vec![0, 1, 2], false)?;
-    commit_recovery_chapter(&mut state, 0)?;
-    let mut older = state.current_download.take().unwrap();
-    older.id = "legacy-older-rejection".into();
-    older.status = DownloadStatus::Failed;
-    older.error = Some(REJECTION_ERROR.into());
-    older.retry_cursor = 1;
-    older.retry_count = 4;
-    older.retry_not_before = 0;
-    older.updated_at = 100;
-    state.store.save_task(&older)?;
-    let mut latest = older.clone();
-    latest.id = "legacy-latest-rejection".into();
-    latest.updated_at = 200;
-    state.store.save_task(&latest)?;
-    let mut cancelled = older.clone();
-    cancelled.id = "legacy-newer-cancellation".into();
-    cancelled.status = DownloadStatus::Cancelled;
-    cancelled.updated_at = 300;
-    state.store.save_task(&cancelled)?;
-    assert!(state.store.download_chapter_states(&latest.id)?.is_empty());
-    state.store.delete_setting(NOTICE_KEY)?;
-    state.downloads.clear();
-    state.download_notice = None;
-    state.restore_download_notice();
-    state.render()?;
-    assert!(ui.global::<LibraryModel>().get_download_notice());
-    assert_eq!(
-        state.store.setting::<String>(NOTICE_KEY)?.as_deref(),
-        Some(latest.id.as_str())
-    );
-    state.open_download_notice()?;
-    assert_eq!(state.dialog_action, "download-continue");
-    state.continue_download_notice()?;
-    let pending = state.store.task(&latest.id)?.unwrap();
-    assert_eq!(pending.status, DownloadStatus::Pending);
-    assert_eq!(pending.id, latest.id);
-    assert_eq!(pending.chapters, latest.chapters);
-    assert_eq!(pending.account_key, latest.account_key);
-    assert_eq!(pending.next_index, 1);
-    assert_eq!(pending.completed_count, 1);
-    assert_eq!(pending.retry_count, 0);
-    assert_eq!(pending.retry_not_before, 0);
-    assert!(pending.error.is_none());
-    assert_eq!(
-        chapter_retry_state(&state, &latest.id, 0)?.status,
-        DownloadChapterStatus::Complete
-    );
-    assert_eq!(
-        chapter_retry_state(&state, &latest.id, 1)?.status,
-        DownloadChapterStatus::Pending
-    );
-    assert_eq!(
-        chapter_retry_state(&state, &latest.id, 2)?.status,
-        DownloadChapterStatus::Pending
-    );
-    assert!(state.store.chapter("fixture-book", 0)?.unwrap().cached);
-    assert_eq!(state.store.task(&older.id)?.unwrap(), older);
-    assert_eq!(state.store.task(&cancelled.id)?.unwrap(), cancelled);
-    assert!(state.current_download.is_none());
-    assert!(state.jobs.active_download().is_none());
-    assert!(state.force_offline);
-    Ok(())
-}
-
-#[test]
-fn legacy_task_retry_fields_resume_the_latest_failure_without_losing_cached_work() -> Result<()> {
-    on_ui_thread(run_legacy_failed_notice)
 }

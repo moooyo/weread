@@ -62,12 +62,9 @@ struct ActiveRun {
     local_anchor: u32,
     position: Option<source::ReadingPosition>,
     /// An account transition can split report ownership without resetting the Reader.
-    #[serde(default)]
     observer_started_at: i64,
-    #[serde(default)]
     observer_seconds_base: u64,
     /// Local statistics still use one ID for the original Reader observation.
-    #[serde(default)]
     local_session_id: String,
 }
 
@@ -111,11 +108,8 @@ struct ActiveHeader {
     last_checkpoint_at: i64,
     local_chapter: u32,
     local_anchor: u32,
-    #[serde(default)]
     observer_started_at: i64,
-    #[serde(default)]
     observer_seconds_base: u64,
-    #[serde(default)]
     local_session_id: String,
 }
 

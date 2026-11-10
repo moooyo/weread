@@ -524,7 +524,7 @@ fn fail_synchronous_admission(fixture: &Fixture) -> Result<&'static str> {
     state.store.set_setting(
         "report.outbox.v1",
         &serde_json::json!({
-            "batches_v2": [{
+            "batches": [{
                 "request": request,
                 "run_id": "admission-run",
                 "from": 0,

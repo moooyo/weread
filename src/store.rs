@@ -16,7 +16,6 @@ use crate::domain::{
     StorageSummary,
 };
 
-const SCHEMA_VERSION: i64 = 3;
 const MAX_CATALOG_HEADERS: usize = 8192;
 const MAX_CATALOG_HEADER_BYTES: i64 = 64 * 1024 * 1024;
 const CATALOG_INDEX_OFFSET: i64 = u32::MAX as i64 + 1;
@@ -1486,8 +1485,7 @@ impl Store {
         connection.pragma_update(None, "journal_mode", "WAL")?;
         connection.pragma_update(None, "synchronous", "NORMAL")?;
         let text_encoding = TextEncoding::read(&connection)?;
-        migrate_with_encoding(&mut connection, text_encoding)?;
-        ensure_annotation_read_indexes(&connection)?;
+        initialize_schema(&mut connection)?;
         #[cfg(unix)]
         if path != Path::new(":memory:") {
             use std::os::unix::fs::PermissionsExt;
@@ -4600,7 +4598,7 @@ impl Store {
         }
     }
 
-    /// Inspect one recent independent or legacy recovery candidate.
+    /// Inspect one recent chapter recovery candidate.
     /// Its identifier is admitted before copying and its payload uses the same
     /// task inventory gate as a selected task; no historical JSON scan occurs.
     pub fn latest_download_notice_candidate(&self) -> Result<Option<DownloadTask>> {
@@ -4611,9 +4609,9 @@ impl Store {
                 "SELECT CASE WHEN typeof(id)='text' AND COALESCE(octet_length(id),0)<=?1
                         THEN id ELSE NULL END FROM download_tasks AS t
                  WHERE status IN ('pending','running','paused','failed')
-                   AND (status IN ('paused','failed') OR EXISTS(
+                   AND EXISTS(
                      SELECT 1 FROM task_chapter_states AS s WHERE s.task_id=t.id
-                       AND s.status IN ('retry_wait','blocked')))
+                       AND s.status IN ('retry_wait','blocked'))
                  ORDER BY updated_at DESC,rowid DESC LIMIT 1",
                 [maximum],
                 |row| row.get(0),
@@ -5751,7 +5749,6 @@ fn completed_body_rows_on(
     encoding: TextEncoding,
     operation: &mut BodyLengthOperation,
     task: &DownloadTask,
-    migration: bool,
 ) -> Result<Vec<Option<i64>>> {
     let input = selected_cached_bytes(&[
         task.book_id.len(),
@@ -5766,23 +5763,19 @@ fn completed_body_rows_on(
     let fields = BODY_LENGTH_FIELDS
         .replace("rowid", "c.rowid")
         .replace("body", "c.body");
-    let sql = format!("SELECT {fields},CASE WHEN typeof(c.content_account_key)<>'text' THEN 0
+    let sql = format!(
+        "SELECT {fields},CASE WHEN typeof(c.content_account_key)<>'text' THEN 0
         WHEN COALESCE(octet_length(c.content_account_key),0)>?4 THEN NULL
-        ELSE c.body IS NOT NULL AND ((?5=0 AND c.content_status='full') OR (?5=1 AND b.source<>'weread'))
-        AND c.content_account_key=?3 END FROM chapters c LEFT JOIN books b ON b.id=c.book_id
-        WHERE c.book_id=?1 AND c.chapter_index=?2");
+        ELSE c.body IS NOT NULL AND c.content_status='full'
+        AND c.content_account_key=?3 END FROM chapters c
+        WHERE c.book_id=?1 AND c.chapter_index=?2"
+    );
     let mut selected = Vec::with_capacity(task.chapters.len());
     for index in &task.chapters {
         let row: Option<(i64, u8, i64, Option<bool>)> = connection
             .query_row(
                 &sql,
-                params![
-                    task.book_id,
-                    index,
-                    task.account_key,
-                    owner_maximum,
-                    migration
-                ],
+                params![task.book_id, index, task.account_key, owner_maximum],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .optional()?;
@@ -5811,7 +5804,7 @@ fn validate_completed_task_on(
     task: &DownloadTask,
 ) -> Result<()> {
     let mut operation = BodyLengthOperation::new(encoding);
-    let selected = completed_body_rows_on(connection, encoding, &mut operation, task, false)?;
+    let selected = completed_body_rows_on(connection, encoding, &mut operation, task)?;
     operation.evaluate(connection)?;
     let mut full = selected.len() == task.chapters.len();
     for rowid in selected {
@@ -5831,15 +5824,6 @@ fn prepare_completed_tasks_on(
     connection: &Connection,
     encoding: TextEncoding,
     operation: &mut BodyLengthOperation,
-) -> Result<Vec<(DownloadTask, Vec<Option<i64>>)>> {
-    prepare_completed_tasks_with_mode_on(connection, encoding, operation, false)
-}
-
-fn prepare_completed_tasks_with_mode_on(
-    connection: &Connection,
-    encoding: TextEncoding,
-    operation: &mut BodyLengthOperation,
-    migration: bool,
 ) -> Result<Vec<(DownloadTask, Vec<Option<i64>>)>> {
     let (count, bytes, cells, valid): (i64, i64, i64, bool) = connection.query_row(
         "SELECT COUNT(*),COALESCE(SUM(bytes),0),COALESCE(SUM(bytes>0),0),COALESCE(MIN(valid),1)
@@ -5871,8 +5855,7 @@ fn prepare_completed_tasks_with_mode_on(
             let raw = cache_text(row, 0, upper)?;
             let task = serde_json::from_str::<DownloadTask>(raw)
                 .context("decode completed task during content verification")?;
-            let selected =
-                completed_body_rows_on(connection, encoding, operation, &task, migration)?;
+            let selected = completed_body_rows_on(connection, encoding, operation, &task)?;
             tasks.push((task, selected));
         }
     }
@@ -5908,54 +5891,6 @@ fn apply_completed_task_pauses_on(
         }
     }
     Ok(())
-}
-
-fn migrate_body_evidence_on(connection: &Connection, encoding: TextEncoding) -> Result<()> {
-    let mut operation = BodyLengthOperation::new(encoding);
-    let mut groups: BTreeMap<i64, Vec<i64>> = BTreeMap::new();
-    {
-        let mut statement = connection.prepare("SELECT c.rowid,CASE typeof(c.body) WHEN 'text' THEN 1 WHEN 'blob' THEN 2
-            WHEN 'integer' THEN 3 WHEN 'real' THEN 3 ELSE 0 END,COALESCE(octet_length(c.body),0),b.rowid
-            FROM chapters c JOIN books b ON b.id=c.book_id WHERE b.source<>'weread' AND c.body IS NOT NULL LIMIT ?1")?;
-        let mut rows = statement.query([i64::try_from(
-            operation
-                .limits
-                .rows
-                .checked_add(1)
-                .ok_or(CachedResourceLimit)?,
-        )
-        .map_err(|_| CachedResourceLimit)?])?;
-        while let Some(row) = rows.next()? {
-            let rowid: i64 = row.get(0)?;
-            operation.add(
-                rowid,
-                row.get(1)?,
-                usize::try_from(row.get::<_, i64>(2)?).map_err(|_| CachedResourceLimit)?,
-            )?;
-            groups.entry(row.get(3)?).or_default().push(rowid);
-        }
-    }
-    let completed =
-        prepare_completed_tasks_with_mode_on(connection, encoding, &mut operation, true)?;
-    operation.evaluate(connection)?;
-    connection.execute("UPDATE books SET cached_chapters=0", [])?;
-    for (book_rowid, rows) in groups {
-        let mut count = 0_i64;
-        for rowid in rows {
-            if operation.positive(rowid)? {
-                connection.execute(
-                    "UPDATE chapters SET content_status='full' WHERE rowid=?1",
-                    [rowid],
-                )?;
-                count = count.checked_add(1).ok_or(CachedResourceLimit)?;
-            }
-        }
-        connection.execute(
-            "UPDATE books SET cached_chapters=?2 WHERE rowid=?1",
-            params![book_rowid, count],
-        )?;
-    }
-    apply_completed_task_pauses_on(connection, &operation, completed)
 }
 
 fn validate_download_chapter_on(
@@ -6081,8 +6016,7 @@ fn validate_download_content_on(
     let mut marker_boundary = None;
     if let (Some(previous), Some(incoming)) = (old_body.as_deref(), chapter.body.as_deref()) {
         if previous != incoming {
-            let same_owner = old_owner == task.account_key
-                || old_status == ContentStatus::Unknown && old_owner.is_empty();
+            let same_owner = old_owner == task.account_key;
             if !is_full || old_status == ContentStatus::Full || !same_owner {
                 return Err(ContentConflict.into());
             }
@@ -6221,10 +6155,7 @@ fn parse_report_batch_delivery_metadata(
     raw: &str,
     sid: &str,
 ) -> Result<Option<(ReportBatchDeliveryState, Option<i64>, u32)>> {
-    use serde::{
-        Deserialize as _,
-        de::{DeserializeSeed, MapAccess, SeqAccess, Visitor},
-    };
+    use serde::de::{DeserializeSeed, MapAccess, SeqAccess, Visitor};
     use std::{fmt, io::Read as _};
     // Resource policy: current SDK numeric fields fit within 20 bytes. Bound
     // unquoted numeric tokens before serde's optional long-number scratch path.
@@ -6277,8 +6208,7 @@ fn parse_report_batch_delivery_metadata(
         }
     }
     enum Key {
-        V2,
-        Legacy,
+        Batches,
         Cursors,
         Proofs,
         Request,
@@ -6304,8 +6234,7 @@ fn parse_report_batch_delivery_metadata(
                 }
                 fn visit_str<E: serde::de::Error>(self, key: &str) -> std::result::Result<Key, E> {
                     Ok(match key {
-                        "batches_v2" => Key::V2,
-                        "batches" => Key::Legacy,
+                        "batches" => Key::Batches,
                         "reported_cursors" => Key::Cursors,
                         "compacted_runs" => Key::Proofs,
                         "request" => Key::Request,
@@ -6634,22 +6563,15 @@ fn parse_report_batch_delivery_metadata(
                     mut map: M,
                 ) -> std::result::Result<Self::Value, M::Error> {
                     let mut current = None;
-                    let mut legacy = None;
                     let mut cursors = false;
                     let mut proofs = false;
                     while let Some(key) = map.next_key_seed(KeySeed(&mut *self.0))? {
                         match key {
-                            Key::V2 => {
+                            Key::Batches => {
                                 if current.is_some() {
-                                    return Err(serde::de::Error::duplicate_field("batches_v2"));
-                                }
-                                current = Some(map.next_value_seed(Array(&mut *self.0, self.1))?);
-                            }
-                            Key::Legacy => {
-                                if legacy.is_some() {
                                     return Err(serde::de::Error::duplicate_field("batches"));
                                 }
-                                legacy = Some(map.next_value_seed(Array(&mut *self.0, self.1))?);
+                                current = Some(map.next_value_seed(Array(&mut *self.0, self.1))?);
                             }
                             Key::Cursors => {
                                 if cursors {
@@ -6677,15 +6599,10 @@ fn parse_report_batch_delivery_metadata(
                     if !cursors {
                         return Err(serde::de::Error::missing_field("reported_cursors"));
                     }
-                    match (current, legacy) {
-                        (Some(selected), None) if proofs => Ok(selected),
-                        (Some(_), None) => Err(serde::de::Error::missing_field("compacted_runs")),
-                        (None, Some(selected)) => Ok(selected),
-                        (Some(_), Some(_)) => {
-                            Err(serde::de::Error::custom("duplicate batch field versions"))
-                        }
-                        (None, None) => Err(serde::de::Error::missing_field("batches_v2")),
+                    if !proofs {
+                        return Err(serde::de::Error::missing_field("compacted_runs"));
                     }
+                    current.ok_or_else(|| serde::de::Error::missing_field("batches"))
                 }
             }
             deserializer.deserialize_map(Roots(self.0, self.1))
@@ -6725,14 +6642,6 @@ fn parse_report_batch_delivery_metadata(
         .end()
         .context("decode report batch delivery metadata")?;
     Ok(selected)
-}
-
-fn ensure_annotation_read_indexes(connection: &Connection) -> Result<()> {
-    connection.execute_batch(
-        "CREATE INDEX IF NOT EXISTS annotations_metadata ON annotations(book_id,chapter_index,start_offset,created_at);
-         CREATE INDEX IF NOT EXISTS annotations_created_at ON annotations(created_at);",
-    )?;
-    Ok(())
 }
 
 fn book_metadata_admit(resource: &'static str, requested: usize, limit: usize) -> Result<()> {
@@ -6776,9 +6685,7 @@ fn parse_book_introduction_metadata(
     raw: &str,
     limits: BookIntroductionLimits,
 ) -> Result<IntroductionFields> {
-    use serde::de::{
-        DeserializeSeed, Deserializer as _, IgnoredAny, MapAccess, SeqAccess, Visitor,
-    };
+    use serde::de::{DeserializeSeed, IgnoredAny, MapAccess, SeqAccess, Visitor};
     use std::{cell::Cell, fmt};
 
     struct NodeBudget {
@@ -8027,7 +7934,7 @@ fn task_inventory_core_on<P: rusqlite::Params>(
 }
 
 fn task_owner_matches(payload: &str, owner: &str) -> Result<bool> {
-    use serde::de::{DeserializeSeed, IgnoredAny, MapAccess, SeqAccess, Visitor};
+    use serde::de::{DeserializeSeed, IgnoredAny, MapAccess, Visitor};
     struct Account<'a> {
         owner: &'a str,
         denied: &'a std::cell::Cell<bool>,
@@ -8124,50 +8031,13 @@ fn task_owner_matches(payload: &str, owner: &str) -> Result<bool> {
                             map.next_value::<IgnoredAny>()?;
                         }
                     }
-                    // DownloadTask's container default supplies an empty key.
-                    Ok(matched.unwrap_or(self.owner.is_empty()))
-                }
-                fn visit_seq<A: SeqAccess<'de>>(
-                    self,
-                    mut sequence: A,
-                ) -> std::result::Result<bool, A::Error> {
-                    // Bound the legacy and current sequence forms accepted by DownloadTask.
-                    sequence.next_element::<IgnoredAny>()?;
-                    sequence.next_element::<IgnoredAny>()?;
-                    let matched = sequence
-                        .next_element_seed(Account {
-                            owner: self.owner,
-                            denied: self.denied,
-                        })?
-                        .unwrap_or(self.owner.is_empty());
-                    for _ in 0..10 {
-                        sequence.next_element::<IgnoredAny>()?;
-                    }
-                    Ok(matched)
+                    matched.ok_or_else(|| serde::de::Error::missing_field("account_key"))
                 }
             }
-            de.deserialize_struct(
-                "DownloadTask",
-                &[
-                    "id",
-                    "book_id",
-                    "account_key",
-                    "chapters",
-                    "status",
-                    "include_images",
-                    "next_index",
-                    "error",
-                    "retry_cursor",
-                    "retry_count",
-                    "retry_not_before",
-                    "updated_at",
-                    "completed_count",
-                ],
-                Object {
-                    owner: self.owner,
-                    denied: self.denied,
-                },
-            )
+            de.deserialize_map(Object {
+                owner: self.owner,
+                denied: self.denied,
+            })
         }
     }
     let denied = std::cell::Cell::new(false);
@@ -9420,23 +9290,16 @@ fn read_chapter(row: &Row<'_>) -> rusqlite::Result<Chapter> {
     })
 }
 
-fn migrate(connection: &mut Connection) -> Result<()> {
-    let encoding = TextEncoding::read(connection)?;
-    migrate_with_encoding(connection, encoding)
-}
-
-fn migrate_with_encoding(connection: &mut Connection, encoding: TextEncoding) -> Result<()> {
-    let version: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    if version > SCHEMA_VERSION {
-        bail!("metadata schema is newer than this application");
-    }
-    if version == SCHEMA_VERSION {
-        return Ok(());
-    }
-    if version == 0 {
-        let transaction = connection.transaction()?;
-        transaction.execute_batch("
-        CREATE TABLE books (
+/// Development storage has one current layout and no upgrade path.
+fn initialize_schema(connection: &mut Connection) -> Result<()> {
+    let transaction = connection.transaction()?;
+    let version: i64 = transaction.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    ensure!(
+        version == 0,
+        "versioned development databases are unsupported; use a new data directory"
+    );
+    transaction.execute_batch("
+        CREATE TABLE IF NOT EXISTS books (
             id TEXT PRIMARY KEY NOT NULL CHECK(length(id) > 0),
             title TEXT NOT NULL, author TEXT NOT NULL, category TEXT NOT NULL,
             intro TEXT NOT NULL, cover_url TEXT NOT NULL, source TEXT NOT NULL,
@@ -9446,68 +9309,53 @@ fn migrate_with_encoding(connection: &mut Connection, encoding: TextEncoding) ->
             updated INTEGER NOT NULL DEFAULT 0, finished INTEGER NOT NULL DEFAULT 0,
             on_shelf INTEGER NOT NULL DEFAULT 1
         );
-        CREATE TABLE chapters (
+        CREATE TABLE IF NOT EXISTS chapters (
             book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
             chapter_index INTEGER NOT NULL CHECK(chapter_index >= 0),
             source_id TEXT NOT NULL, title TEXT NOT NULL, body TEXT,
+            content_status TEXT NOT NULL DEFAULT 'unknown'
+                CHECK(content_status IN ('unknown','full','preview','locked')),
+            content_account_key TEXT NOT NULL DEFAULT '',
             PRIMARY KEY(book_id, chapter_index)
         );
-        CREATE TABLE positions (
+        CREATE TABLE IF NOT EXISTS positions (
             book_id TEXT PRIMARY KEY NOT NULL REFERENCES books(id) ON DELETE CASCADE,
             chapter_index INTEGER NOT NULL, char_offset INTEGER NOT NULL,
             updated_at INTEGER NOT NULL, device TEXT NOT NULL
         );
-        CREATE TABLE annotations (
+        CREATE TABLE IF NOT EXISTS annotations (
             id TEXT PRIMARY KEY NOT NULL,
             book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
             chapter_index INTEGER NOT NULL, start_offset INTEGER NOT NULL,
             end_offset INTEGER NOT NULL CHECK(end_offset > start_offset),
             quote TEXT NOT NULL, note TEXT NOT NULL, created_at INTEGER NOT NULL
         );
-        CREATE INDEX annotations_book ON annotations(book_id,chapter_index,start_offset);
-        CREATE TABLE bookmarks (
+        CREATE INDEX IF NOT EXISTS annotations_metadata ON annotations(book_id,chapter_index,start_offset,created_at);
+        CREATE INDEX IF NOT EXISTS annotations_created_at ON annotations(created_at);
+        CREATE TABLE IF NOT EXISTS bookmarks (
             id TEXT PRIMARY KEY NOT NULL,
             book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
             chapter_index INTEGER NOT NULL, char_offset INTEGER NOT NULL,
             label TEXT NOT NULL, created_at INTEGER NOT NULL
         );
-        CREATE INDEX bookmarks_book ON bookmarks(book_id,chapter_index,char_offset);
-        CREATE TABLE download_tasks (
+        CREATE INDEX IF NOT EXISTS bookmarks_book ON bookmarks(book_id,chapter_index,char_offset);
+        CREATE TABLE IF NOT EXISTS download_tasks (
             id TEXT PRIMARY KEY NOT NULL,
             book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
             status TEXT NOT NULL CHECK(status IN ('pending','running','paused','complete','cancelled','failed')),
             updated_at INTEGER NOT NULL, payload TEXT NOT NULL
         );
-        CREATE INDEX tasks_status ON download_tasks(status,updated_at);
-        CREATE TABLE settings (key TEXT PRIMARY KEY NOT NULL,value TEXT NOT NULL);
-        CREATE TABLE reading_sessions (
+        CREATE INDEX IF NOT EXISTS tasks_status ON download_tasks(status,updated_at);
+        CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY NOT NULL,value TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS reading_sessions (
             id TEXT PRIMARY KEY NOT NULL,
             book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
             started_at INTEGER NOT NULL, ended_at INTEGER NOT NULL,
             seconds INTEGER NOT NULL CHECK(seconds >= 0 AND ended_at >= started_at)
         );
-        CREATE INDEX sessions_date ON reading_sessions(started_at);
-        CREATE TABLE query_history (query TEXT PRIMARY KEY NOT NULL,sequence INTEGER NOT NULL);
-        PRAGMA user_version=1;
-    ")?;
-        transaction.commit()?;
-    }
-    if version < 2 {
-        let transaction = connection.transaction()?;
-        transaction.execute_batch(
-            "ALTER TABLE chapters ADD COLUMN content_status TEXT NOT NULL DEFAULT 'unknown'
-                 CHECK(content_status IN ('unknown','full','preview','locked'));
-             ALTER TABLE chapters ADD COLUMN content_account_key TEXT NOT NULL DEFAULT '';
-             ",
-        )?;
-        migrate_body_evidence_on(&transaction, encoding)?;
-        transaction.pragma_update(None, "user_version", 2)?;
-        transaction.commit()?;
-    }
-    if version < 3 {
-        let transaction = connection.transaction()?;
-        transaction.execute_batch(
-            "CREATE TABLE task_chapter_states (
+        CREATE INDEX IF NOT EXISTS sessions_date ON reading_sessions(started_at);
+        CREATE TABLE IF NOT EXISTS query_history (query TEXT PRIMARY KEY NOT NULL,sequence INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS task_chapter_states (
                 task_id TEXT NOT NULL REFERENCES download_tasks(id) ON DELETE CASCADE,
                 chapter_uid TEXT NOT NULL,
                 ordinal INTEGER NOT NULL CHECK(ordinal>=0 AND ordinal<8192),
@@ -9519,11 +9367,9 @@ fn migrate_with_encoding(connection: &mut Connection, encoding: TextEncoding) ->
                 PRIMARY KEY(task_id,chapter_uid),
                 UNIQUE(task_id,ordinal)
              );
-             CREATE INDEX task_chapter_retry ON task_chapter_states(task_id,status,retry_not_before);",
-        )?;
-        transaction.pragma_update(None, "user_version", 3)?;
-        transaction.commit()?;
-    }
+             CREATE INDEX IF NOT EXISTS task_chapter_retry ON task_chapter_states(task_id,status,retry_not_before);
+    ")?;
+    transaction.commit()?;
     Ok(())
 }
 
@@ -9562,8 +9408,8 @@ mod tests {
     }
 
     #[test]
-    fn migration_is_idempotent_and_preserves_state() -> Result<()> {
-        let path = temporary_path("migration");
+    fn schema_initialization_is_idempotent_and_preserves_state() -> Result<()> {
+        let path = temporary_path("initialization");
         {
             let store = Store::open(&path)?;
             store.upsert_book(&book())?;
@@ -9577,175 +9423,29 @@ mod tests {
         Ok(())
     }
 
-    fn legacy_content_database(path: &Path) -> Result<()> {
-        let connection = Connection::open(path)?;
-        connection.execute_batch(
-            "CREATE TABLE books (
-                id TEXT PRIMARY KEY NOT NULL,title TEXT NOT NULL,author TEXT NOT NULL,
-                category TEXT NOT NULL,intro TEXT NOT NULL,cover_url TEXT NOT NULL,source TEXT NOT NULL,
-                progress REAL NOT NULL DEFAULT 0,total_chapters INTEGER NOT NULL DEFAULT 0,
-                cached_chapters INTEGER NOT NULL DEFAULT 0,updated INTEGER NOT NULL DEFAULT 0,
-                finished INTEGER NOT NULL DEFAULT 0,on_shelf INTEGER NOT NULL DEFAULT 1);
-             CREATE TABLE chapters (book_id TEXT NOT NULL,chapter_index INTEGER NOT NULL,
-                source_id TEXT NOT NULL,title TEXT NOT NULL,body TEXT,PRIMARY KEY(book_id,chapter_index));
-             CREATE TABLE positions (book_id TEXT PRIMARY KEY NOT NULL,chapter_index INTEGER NOT NULL,
-                char_offset INTEGER NOT NULL,updated_at INTEGER NOT NULL,device TEXT NOT NULL);
-             CREATE TABLE annotations (id TEXT PRIMARY KEY NOT NULL,book_id TEXT NOT NULL,
-                chapter_index INTEGER NOT NULL,start_offset INTEGER NOT NULL,end_offset INTEGER NOT NULL,
-                quote TEXT NOT NULL,note TEXT NOT NULL,created_at INTEGER NOT NULL);
-             CREATE TABLE bookmarks (id TEXT PRIMARY KEY NOT NULL,book_id TEXT NOT NULL,
-                chapter_index INTEGER NOT NULL,char_offset INTEGER NOT NULL,label TEXT NOT NULL,created_at INTEGER NOT NULL);
-             CREATE TABLE download_tasks (id TEXT PRIMARY KEY NOT NULL,book_id TEXT NOT NULL,
-                status TEXT NOT NULL,updated_at INTEGER NOT NULL,payload TEXT NOT NULL);
-             CREATE TABLE settings (key TEXT PRIMARY KEY NOT NULL,value TEXT NOT NULL);
-             CREATE TABLE reading_sessions (id TEXT PRIMARY KEY NOT NULL,book_id TEXT NOT NULL,
-                started_at INTEGER NOT NULL,ended_at INTEGER NOT NULL,seconds INTEGER NOT NULL);
-             CREATE TABLE query_history (query TEXT PRIMARY KEY NOT NULL,sequence INTEGER NOT NULL);
-             INSERT INTO books (id,title,author,category,intro,cover_url,source,progress,total_chapters,cached_chapters)
-                VALUES ('book-1','Remote fixture','','','','','weread',0.4,1,1),
-                       ('demo-book','Demo fixture','','','','','demo',0,1,1);
-             INSERT INTO chapters VALUES ('book-1',0,'chapter-0','Fixture chapter','Legacy preview...'),
-                ('demo-book',0,'demo-chapter','Demo chapter','Local full content');
-             INSERT INTO positions VALUES ('book-1',0,3,7,'fixture');
-             INSERT INTO annotations VALUES ('legacy-note','book-1',0,0,6,'Legacy','Preserve this thought',8);
-             INSERT INTO bookmarks VALUES ('legacy-bookmark','book-1',0,4,'Preserve bookmark',9);
-             PRAGMA user_version=1;",
-        )?;
-        let complete = DownloadTask {
-            id: "legacy-complete".into(),
-            book_id: "book-1".into(),
-            account_key: "fixture-account".into(),
-            chapters: vec![0],
-            next_index: 1,
-            status: DownloadStatus::Complete,
-            updated_at: 20,
-            ..Default::default()
-        };
-        persist_task_on(&connection, &complete)?;
-        let cancelled = DownloadTask {
-            id: "legacy-cancelled".into(),
-            status: DownloadStatus::Cancelled,
-            ..complete
-        };
-        persist_task_on(&connection, &cancelled)?;
-        let local = DownloadTask {
-            id: "legacy-local-complete".into(),
-            book_id: "demo-book".into(),
-            chapters: vec![0],
-            next_index: 1,
-            status: DownloadStatus::Complete,
-            updated_at: 20,
-            ..Default::default()
-        };
-        persist_task_on(&connection, &local)?;
-        Ok(())
-    }
-
     #[test]
-    fn legacy_remote_content_becomes_unverified_without_losing_text_or_personal_records()
-    -> Result<()> {
-        let path = temporary_path("content-v1-migration");
-        legacy_content_database(&path)?;
-        let store = Store::open(&path)?;
-        let version: i64 = store
-            .connection
-            .pragma_query_value(None, "user_version", |row| row.get(0))?;
-        assert_eq!(version, SCHEMA_VERSION);
-        let remote = store.chapter("book-1", 0)?.unwrap();
-        assert_eq!(remote.content_status, ContentStatus::Unknown);
-        assert_eq!(remote.content_account_key, "");
-        assert_eq!(remote.body.as_deref(), Some("Legacy preview..."));
-        assert!(!remote.cached);
-        assert_eq!(store.book("book-1")?.unwrap().cached_chapters, 0);
-        assert_eq!(store.book("book-1")?.unwrap().progress, 0.4);
-        assert_eq!(store.position("book-1")?.unwrap().char_offset, 3);
-        assert_eq!(
-            store.annotations("book-1")?[0].note,
-            "Preserve this thought"
-        );
-        assert_eq!(store.bookmarks("book-1")?[0].char_offset, 4);
-        let waiting = store.task("legacy-complete")?.unwrap();
-        assert_eq!(waiting.status, DownloadStatus::Paused);
-        assert_eq!(waiting.next_index, 0);
-        assert_eq!(waiting.error.as_deref(), Some("source.content_unverified"));
-        assert_eq!(
-            store.task("legacy-cancelled")?.unwrap().status,
-            DownloadStatus::Cancelled
-        );
-        assert_eq!(
-            store.chapter("demo-book", 0)?.unwrap().content_status,
-            ContentStatus::Full
-        );
-        assert_eq!(store.book("demo-book")?.unwrap().cached_chapters, 1);
-        assert_eq!(
-            store.task("legacy-local-complete")?.unwrap().status,
-            DownloadStatus::Complete
-        );
-        drop(store);
-        let reopened = Store::open(&path)?;
-        assert_eq!(reopened.chapter("book-1", 0)?, Some(remote));
-        assert_eq!(
-            reopened.task("legacy-cancelled")?.unwrap().status,
-            DownloadStatus::Cancelled
-        );
-        drop(reopened);
-        let _ = fs::remove_file(path);
-        Ok(())
-    }
-
-    #[test]
-    fn failed_content_migration_rolls_back_schema_counts_and_user_data() -> Result<()> {
-        let path = temporary_path("content-v1-rollback");
-        legacy_content_database(&path)?;
+    fn versioned_development_database_is_rejected_without_changing_records() -> Result<()> {
+        let path = temporary_path("unsupported-layout");
         let connection = Connection::open(&path)?;
-        connection.execute(
-            "UPDATE download_tasks SET payload='{' WHERE id='legacy-complete'",
-            [],
+        connection.execute_batch(
+            "CREATE TABLE retained (value TEXT NOT NULL);
+            INSERT INTO retained VALUES ('Keep private development data'); PRAGMA user_version=3;",
         )?;
         drop(connection);
-        assert!(Store::open(&path).is_err());
+        let error = Store::open(&path)
+            .err()
+            .context("versioned database was accepted")?;
+        assert!(error.to_string().contains("use a new data directory"));
         let connection = Connection::open(&path)?;
-        assert_eq!(
-            connection.pragma_query_value::<i64, _>(None, "user_version", |row| row.get(0))?,
-            1
-        );
-        let content_columns: i64 = connection.query_row(
-            "SELECT COUNT(*) FROM pragma_table_info('chapters') WHERE name IN ('content_status','content_account_key')",
-            [], |row| row.get(0),
+        let value: String =
+            connection.query_row("SELECT value FROM retained", [], |row| row.get(0))?;
+        assert_eq!(value, "Keep private development data");
+        let tables: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM sqlite_schema WHERE type='table'",
+            [],
+            |row| row.get(0),
         )?;
-        assert_eq!(content_columns, 0);
-        assert_eq!(
-            connection.query_row::<String, _, _>(
-                "SELECT body FROM chapters WHERE book_id='book-1'",
-                [],
-                |row| row.get(0)
-            )?,
-            "Legacy preview..."
-        );
-        assert_eq!(
-            connection.query_row::<i64, _, _>(
-                "SELECT cached_chapters FROM books WHERE id='book-1'",
-                [],
-                |row| row.get(0)
-            )?,
-            1
-        );
-        assert_eq!(
-            connection.query_row::<String, _, _>(
-                "SELECT note FROM annotations WHERE id='legacy-note'",
-                [],
-                |row| row.get(0)
-            )?,
-            "Preserve this thought"
-        );
-        assert_eq!(
-            connection.query_row::<String, _, _>(
-                "SELECT status FROM download_tasks WHERE id='legacy-cancelled'",
-                [],
-                |row| row.get(0)
-            )?,
-            "cancelled"
-        );
+        assert_eq!(tables, 1);
         drop(connection);
         let _ = fs::remove_file(path);
         Ok(())
@@ -10332,7 +10032,7 @@ mod tests {
     fn authorized_prefix_extensions_preserve_notes_and_clamp_only_marker_anchors() -> Result<()> {
         for (status, owner) in [
             (ContentStatus::Preview, "fixture-account"),
-            (ContentStatus::Unknown, ""),
+            (ContentStatus::Unknown, "fixture-account"),
             (ContentStatus::Locked, "fixture-account"),
         ] {
             for marker in ["...", "\u{2026}"] {
@@ -10441,6 +10141,12 @@ mod tests {
         assert_eq!(store.task(&task.id)?.unwrap(), task);
 
         for (old_status, owner, incoming, incoming_status) in [
+            (
+                ContentStatus::Unknown,
+                "",
+                "Original prefix extended",
+                ContentStatus::Full,
+            ),
             (
                 ContentStatus::Preview,
                 "fixture-account",

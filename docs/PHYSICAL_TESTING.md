@@ -11,6 +11,32 @@ Development is continuing. The observations in this document do not complete acc
 
 No device address, credential, serial number, private note text, or account content is part of this record. Offline demonstration results do not establish live-account authentication, content entitlements, or upstream writes.
 
+## Clean current-layout installation
+
+On 2026-11-11 (Asia/Shanghai), the user authorized deleting this project's Kindle installation, application data, and related test residue without backups, then installing the newly verified build. Reauthentication and redownloading were explicitly accepted. The remote software gates in [Verification](VERIFICATION.md#pre-release-persistence-cleanup) completed before device access. The coordinator waited for the other project's natural lease release and acquired a fresh exclusive lease only for the actual installation window.
+
+The target was the identified Scribe 2022 / firmware 5.19.5. The precheck found no active reading application or display lock, with native Library, running statusbar, and an unpaused window manager. Inventory found only `/mnt/us/weread` and the normal `/mnt/us/documents/weread.sh` entry in this project's application/document scope, with no matching scratch roots. The old application root occupied 98,376 KiB. That entire root, including the database, account file, downloaded content, previous programs, and logs, and the old document entry were deleted. No backup or private-content archive was created. The separate KOReader installation was outside this project's reset.
+
+The first installation transfer exhausted `/var/tmp`'s 64 MiB memory-backed `tmpfs` before any old application data was deleted. The incomplete transfer was removed immediately. The verified payload was then staged on `/mnt/us`, which had about 20 GiB available. Both temporary transfer paths were absent at completion.
+
+All 36 installed public files matched the remotely verified staging manifest. Installed ARM SHA-256 is `1a4bab8bd652e38e1bdff15de793628e3a202eb24a0a3941f7fda4d5bced0110`; launcher `a5fec72f` and frame guard `a235b41c` retain their existing identities. Fresh local configuration contains the exact `scribe` / `5.19.5` experiment pair and no compatibility override for another device.
+
+The normal document entry launched exactly `--kindle --device scribe --data-dir /mnt/us/weread/data`, without demo, offline, scripted-action, capture, or exit-deadline arguments. The running `/proc` executable hash matched the new ARM. Startup reached `state-open`, created the current unversioned layout (`PRAGMA user_version=0`), and had zero books, download tasks, and chapter-state rows, with no account file. This proves clean initialization; it does not claim successful reauthentication, a completed download, finger-touch acceptance, or a new firmware support matrix.
+
+The coordinator then stopped the launcher through managed TERM, verified all WeRead and frame-guard processes and display locks were absent, and removed the installation payload. Native Library, running statusbar, and the original running window-manager identity were confirmed. Both native EPDC metadata and the persisted native setting remained `Y8INV`. All device commands had exited before the owner/token-checked lease release at **2026-11-11 02:26:42.352999 +08:00**, followed by an independent lease-absence check. The application is installed but stopped after verification, ready for a later ordinary user launch.
+
+Private command receipts are under `test-env:/root/weread-persistence-device-20261111-r1/evidence/`; they contain no old-data backup. Public build and software verification identities remain separate from any later authenticated use.
+
+## Temporary-memory cleanup
+
+The user's follow-up requested inspection of `/var/tmp` and removal of residue from the related development sessions. A fresh exclusive lease was acquired for this separate device-only window. `/tmp` was confirmed to be a symlink to `/var/tmp`; both use the same 64 MiB memory-backed `/var` filesystem.
+
+Inventory distinguished seven old BiliComics barrier/pose probe scripts and result directories from native service files, logs, network state, X11 sockets, and the `chroot` tree. It also found the 7,547,448-byte `slint-kindle-default.ttf` runtime font. Reviewed backend source writes that font at every startup, so it can be removed while all reading applications are stopped and will be regenerated when needed.
+
+Before deletion, all eight targets passed canonical-path, ownership, symlink, nested-mount, process-executable/cwd/root/file-descriptor, and memory-mapping checks. No reading application or display lock was active. Only those admitted targets were deleted. The measured free-space change was **8,508 KiB**, leaving **44,948 KiB free** at that sample; unrelated system state and the `chroot` tree were retained. No backup was created.
+
+The native Library, original running window manager, running statusbar, and unchanged `Y8INV` metadata were confirmed. Device transports completed before the owner/token-checked release at **2026-11-11 02:32:38.277812 +08:00**. Private inventory and deletion receipts remain outside the repository at `test-env:/root/weread-tmp-cleanup-20261111-r2/evidence/`.
+
 ## Relaxed Reader budget comparison
 
 The 2026-11-11 user-authorized comparison ran a separate native ARM harness on

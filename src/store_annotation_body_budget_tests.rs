@@ -99,7 +99,7 @@ fn annotation_utf16_uses_rust_count_and_retains_original_body() -> Result<()> {
         {
             let mut connection = Connection::open(&path)?;
             connection.pragma_update(None, "encoding", encoding)?;
-            migrate(&mut connection)?;
+            initialize_schema(&mut connection)?;
         }
         let store = Store::open(&path)?;
         store.upsert_book(&Book {

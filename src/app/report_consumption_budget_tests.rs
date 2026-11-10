@@ -44,7 +44,7 @@ fn seed(app: &App, summary: &str, state: &str) -> Result<(String, Value)> {
         "error":if state=="uncertain" { json!("source.delivery_uncertain") } else { Value::Null }});
     let mut cursors = serde_json::Map::new();
     cursors.insert(run.to_owned(), json!(0));
-    let queue = json!({"batches_v2":[batch],"reported_cursors":cursors,"compacted_runs":{}});
+    let queue = json!({"batches":[batch],"reported_cursors":cursors,"compacted_runs":{}});
     app.store.set_setting(OUTBOX, &queue)?;
     app.store.set_setting(
         ACTIVE,
@@ -222,7 +222,7 @@ fn proof_only() -> Result<()> {
                 "confirmed_until":60,"confirmed_ranges":[]}),
             );
         }
-        let original = json!({"batches_v2":[],"reported_cursors":cursors,"compacted_runs":proofs});
+        let original = json!({"batches":[],"reported_cursors":cursors,"compacted_runs":proofs});
         app.store.set_setting(OUTBOX, &original)?;
         with_report_input_test_limits(ReportInputLimits::default(), || -> Result<()> {
             app.compact_report_input_for_test()?;
@@ -284,7 +284,7 @@ fn pending_long_summary() -> Result<()> {
                 )
                 .unwrap();
             let queue: Value = serde_json::from_str(&encoded).unwrap();
-            let batch = &queue["batches_v2"][0];
+            let batch = &queue["batches"][0];
             assert_eq!(batch["state"], "sending");
             assert_eq!(
                 batch["request"]["position"]["summary"]
@@ -361,7 +361,7 @@ fn pending_long_summary() -> Result<()> {
                         .seconds,
                     60
                 );
-                assert_eq!(snapshot(&app)?["batches_v2"][0]["state"], "sending");
+                assert_eq!(snapshot(&app)?["batches"][0]["state"], "sending");
                 app.tick_read_reports()?;
                 assert_ne!(app.store.setting::<bool>(STORAGE_ERROR)?, Some(true));
                 Ok(())
@@ -369,7 +369,7 @@ fn pending_long_summary() -> Result<()> {
         )?;
         app.store.set_setting("report.next_check.v1", &0_i64)?;
         app.tick_read_reports()?;
-        assert!(snapshot(&app)?["batches_v2"].as_array().unwrap().is_empty());
+        assert!(snapshot(&app)?["batches"].as_array().unwrap().is_empty());
         assert_eq!(
             snapshot(&app)?["reported_cursors"]["consumption-old-run"],
             60
@@ -418,7 +418,7 @@ fn cleanup_prepaid() -> Result<()> {
                     "summary":"","updated_at":0,"device":"device"}},"run_id":run,"from":0,"to":60,
                 "state":"confirmed","attempted_at":100,"retry_after":0,"attempts":1,"error":null}));
         }
-        let original = json!({"batches_v2":rows,"reported_cursors":cursors,"compacted_runs":{}});
+        let original = json!({"batches":rows,"reported_cursors":cursors,"compacted_runs":{}});
         app.store.set_setting(OUTBOX, &original)?;
         for id in &ids {
             for prefix in [
@@ -502,7 +502,7 @@ fn terminal_headroom() -> Result<()> {
         let mut app = fixture.app();
         let (_, mut original) = seed(&app, &SUMMARY.repeat(16), "pending")?;
         let id = "legacy-noncanonical-delivery";
-        original["batches_v2"][0]["request"]["session_id"] = json!(id);
+        original["batches"][0]["request"]["session_id"] = json!(id);
         app.store.set_setting(OUTBOX, &original)?;
         app.store.delete_setting(ACTIVE)?;
         let encoded = serde_json::to_string(&original)?.len();
@@ -541,10 +541,10 @@ fn terminal_headroom() -> Result<()> {
                 )?;
                 app.recover_read_reports()?;
                 let saved = snapshot(&app)?;
-                assert_eq!(saved["batches_v2"][0]["state"], "confirmed");
+                assert_eq!(saved["batches"][0]["state"], "confirmed");
                 assert_eq!(
-                    saved["batches_v2"][0]["request"]["position"]["summary"],
-                    original["batches_v2"][0]["request"]["position"]["summary"]
+                    saved["batches"][0]["request"]["position"]["summary"],
+                    original["batches"][0]["request"]["position"]["summary"]
                 );
                 assert_eq!(saved["reported_cursors"]["consumption-old-run"], 60);
                 Ok(())

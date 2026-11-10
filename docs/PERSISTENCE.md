@@ -1,6 +1,6 @@
 # Local persistence implementation
 
-Status: implementation contract. Runtime and device acceptance evidence is recorded separately.
+Status: implementation contract. The 2026-11-11 pre-release cleanup has remote software verification in [Verification](VERIFICATION.md#pre-release-persistence-cleanup). Device acceptance is recorded separately.
 
 ## Ownership and locations
 
@@ -107,23 +107,28 @@ unallocated seconds; it does not authorize another elapsed-time POST.
 The [resource review](RESOURCE_LEAK_REVIEW.md) records verification separately
 from these implementation contracts and from physical durability evidence.
 
-## Schema version 1 baseline
+## Current development layout
+
+Accepted on 2026-11-11 (Asia/Shanghai): this application is unreleased and maintains one current layout. There is no schema upgrade chain or backward-compatible payload reader. Create a fresh private data directory for this candidate; keep older development data separately. Opening a database with nonzero SQLite `user_version` fails with an explicit instruction to use a new directory. No existing database is reset, upgraded, or deleted. New databases leave `user_version` at zero.
 
 | Table | Responsibility |
 | --- | --- |
 | `books` | Normalized metadata, shelf membership, local progress and derived cached chapter count |
-| `chapters` | Stable zero-based chapter index, upstream identifier, title and optional extracted text; version 1 did not distinguish preview and full text |
+| `chapters` | Stable zero-based chapter index, upstream identifier, title, optional extracted text, explicit content status, and opaque account binding |
 | `positions` | Unicode scalar offset, chapter index, timestamp and local device label |
 | `annotations` | Half-open Unicode scalar range, quoted text and optional note |
 | `bookmarks` | Chapter and scalar position, label and timestamp |
-| `download_tasks` | Persisted explicit chapter selection, next item cursor, status and options |
-| `settings` | Versionable JSON values under application-owned keys |
+| `download_tasks` | Current task JSON: explicit chapter selection, contiguous prefix, independent completion count, status and options |
+| `task_chapter_states` | Per-UID completion, bounded retries, retry deadline, and redacted errors |
+| `settings` | Current JSON snapshots under application-owned keys |
 | `reading_sessions` | Active reading seconds and the corresponding elapsed time interval |
 | `query_history` | At most 20 unique recent queries |
 
-Schema creation and `user_version` update occur in one transaction. A database with a newer version is rejected rather than overwritten. WAL mode, a five-second busy timeout and foreign keys are enabled. Unix database permissions are restricted to `0600`; Windows permissions follow the runtime directory's ACL.
+Tables, content-state columns, and annotation read indexes are initialized together in one transaction. Reopening the current layout is idempotent. Download tasks no longer contain task-level retry fields or historical tuple formats. Preferences, outbox records, and confirmed ranges require complete current fields; first-use defaults come from application constructors. WAL mode, a five-second busy timeout and foreign keys are enabled. Unix database permissions are restricted to `0600`; Windows permissions follow the runtime directory's ACL.
 
-## Schema version 2 content-state migration
+## Historical content-state migration evidence
+
+The migration implementation described in this section has been removed. The observations retain their original artifact scope and do not describe the current initialization contract.
 
 Schema version 2 implements the [content-access correction](CONTENT_ACCESS.md).
 It adds `Chapter.content_status` and an opaque `content_account_key` binding.
@@ -200,9 +205,9 @@ transactional with stale-task rejection. Account changes downgrade old
 permission proof rather than transfer it to the new account.
 
 Safe preview replacement requires identical text or a checked exact prefix
-extension from an unverified/preview body to confirmed full text. A legacy
-`Unknown` body with an empty owner binding can pass the same UID/full-access
-and prefix checks, but is not bound to an account by default. Removing a
+extension from an unverified/preview body to confirmed full text. A changed
+`Unknown` body requires the same verified owner binding, UID, and full-access
+evidence; an unbound body cannot be extended into account-owned content. Removing a
 terminal `...` or `…` marker clamps positions and bookmarks to the retained
 prefix; an annotation touching the removed marker rejects replacement and
 preserves the original records. Merely receiving a longer body is insufficient.
@@ -280,18 +285,7 @@ transaction. Failed commits preserve both the previous queue and its side
 records. A completion for a retired or unknown session cannot recreate those
 records. Normal per-run reading history remains retained user data.
 
-The outbox setting key remains `report.outbox.v1`, but new snapshots serialize
-the required record field as `batches_v2`. The current reader accepts the legacy
-`batches` field as an alias and accepts original prefix-only proof without the
-new range field. Supplying both batch field names is rejected. An older binary
-must reject a new snapshot because its required `batches` field is absent;
-silently ignoring suffix proof while accepting a zero contiguous cursor could
-otherwise reallocate already acknowledged minutes after a crash. This is a
-fail-closed downgrade barrier, not permission to erase or reconstruct evidence.
-New snapshots also require an explicit `compacted_runs` map and a
-`confirmed_ranges` field for every run. Missing or null proof cannot be
-defaulted to empty evidence merely because the reported cursor is zero. Only
-the legacy record format permits an absent proof map or prefix-only proof.
+The outbox setting `report.outbox.v1` stores exactly one format: `batches`, `reported_cursors`, and `compacted_runs`. Every confirmed run requires `confirmed_ranges`. Missing or null proof is rejected rather than defaulted to empty evidence. Historical batch aliases and prefix-only snapshot parsing have been removed. Arbitrary retained session identities are still validated as evidence rather than rewritten.
 
 These are implementation invariants. The resource review records controlled
 execution separately; no new authenticated reporting or physical-device claim

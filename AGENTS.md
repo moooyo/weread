@@ -22,6 +22,11 @@
 - Device behavior must be assessed on an explicitly identified Kindle model and firmware combination. Keep device claims separate from emulator results.
 - Ordinary source review, documentation editing, and Git operations are not application verification.
 
+## Pre-release persistence
+
+- The application has not been released. Maintain one current database layout and current task, preference, and reporting snapshots. Do not add schema migrations, historical payload aliases, or backward-compatibility fields.
+- Development layouts may require a fresh data directory. Reject unsupported versioned databases without deleting or upgrading private data.
+
 ## Architecture boundaries
 
 - The product is an independent Rust and Slint application, not a Jobman dependency or a KOReader plugin.

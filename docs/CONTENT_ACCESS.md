@@ -83,23 +83,17 @@ uncluttered reading view.
 
 The correction adds `Chapter.content_status` and opaque
 `Chapter.content_account_key` metadata. The latter is an identity hash, not a
-credential or a perpetual authorization token. Legacy WeRead bodies become
-unverified during schema migration while all body text and user records are
-retained. Imported/demo content remains local full content. Full-text counts
-are recomputed instead of inheriting the legacy nonempty-body count.
+credential or a perpetual authorization token. The current development layout creates these fields directly and has no schema migration path. Historical migration observations below apply only to the recorded candidates. Imported/demo content remains local full content, and full-text counts depend on explicit content evidence.
 
 A preview checkpoint can persist the excerpt and its state but cannot advance
 the full-download cursor or increment full-content totals. The task pauses for
-explicit revalidation. Cancelled tasks remain cancelled during migration and
+explicit revalidation. Cancelled tasks remain cancelled during
 recovery; phone-side unlocking is not permission to resurrect them.
 
 An identical response can establish a stronger state without moving anchors.
 A changed body can replace an unverified or preview body only after full access
 is established and a checked exact prefix extension preserves the existing
-text anchors in the same chapter/account scope. A legacy `Unknown` body with an
-empty account binding may be upgraded only after fresh full-access evidence
-and the same UID/prefix checks; an empty legacy binding is not assigned to an
-account by default.
+text anchors in the same chapter/account scope. A changed `Unknown` body requires the same verified account binding and UID/prefix checks. An unbound body cannot be extended into an account-owned full download.
 
 When a terminal `...` or `…` preview marker is removed for the exact-prefix
 comparison, reading positions and bookmarks in that marker are clamped to the

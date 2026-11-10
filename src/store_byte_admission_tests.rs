@@ -84,7 +84,7 @@ fn fixture(encoding: &str) -> Result<(tempfile::TempDir, Store)> {
     {
         let mut connection = Connection::open(&path)?;
         connection.pragma_update(None, "encoding", encoding)?;
-        migrate(&mut connection)?;
+        initialize_schema(&mut connection)?;
     }
     let store = Store::open(&path)?;
     let mut book = Book::new("book", "Byte fixture");
@@ -575,7 +575,7 @@ fn encoding_is_read_once_per_store_and_reused_by_all_byte_boundaries() -> Result
     {
         let mut connection = Connection::open(&path)?;
         connection.pragma_update(None, "encoding", "UTF-16be")?;
-        migrate(&mut connection)?;
+        initialize_schema(&mut connection)?;
     }
     let scope = Scope::start();
     let store = Store::open(&path)?;

@@ -620,7 +620,7 @@ impl Serialize for CompactionPreview<'_> {
     ) -> std::result::Result<S::Ok, S::Error> {
         use serde::ser::SerializeStruct;
         let mut state = serializer.serialize_struct("ReportOutbox", 3)?;
-        state.serialize_field("batches_v2", &self.batches)?;
+        state.serialize_field("batches", &self.batches)?;
         state.serialize_field("reported_cursors", &self.reported_cursors)?;
         state.serialize_field("compacted_runs", &self.compacted_runs)?;
         state.end()
@@ -738,11 +738,9 @@ pub(super) struct ReportBatch {
     pub error: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Serialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub(super) struct ReportOutbox {
-    /// Keep unresolved and legacy records until their proof can be represented losslessly.
-    /// Old readers must reject range proof instead of silently ignoring it.
-    #[serde(rename = "batches_v2")]
+    /// Retain unresolved records until their proof can be represented losslessly.
     pub batches: Vec<ReportBatch>,
     /// The contiguous confirmed offset for each run, distinct from allocation.
     pub reported_cursors: BTreeMap<String, u64>,
@@ -750,96 +748,12 @@ pub(super) struct ReportOutbox {
     pub compacted_runs: BTreeMap<String, ConfirmedRun>,
 }
 
-impl<'de> Deserialize<'de> for ReportOutbox {
-    fn deserialize<D: serde::Deserializer<'de>>(
-        deserializer: D,
-    ) -> std::result::Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        struct StoredProof {
-            account_key: String,
-            book_id: String,
-            started_at: i64,
-            confirmed_until: u64,
-            #[serde(default, deserialize_with = "deserialize_present")]
-            confirmed_ranges: Option<Vec<ConfirmedRange>>,
-        }
-
-        #[derive(Deserialize)]
-        struct Snapshot {
-            #[serde(default, deserialize_with = "deserialize_present")]
-            batches_v2: Option<Vec<ReportBatch>>,
-            #[serde(default, deserialize_with = "deserialize_present")]
-            batches: Option<Vec<ReportBatch>>,
-            reported_cursors: BTreeMap<String, u64>,
-            #[serde(default, deserialize_with = "deserialize_present")]
-            compacted_runs: Option<BTreeMap<String, StoredProof>>,
-        }
-
-        let snapshot = Snapshot::deserialize(deserializer)?;
-        let (batches, stored_proofs, requires_ranges) =
-            match (snapshot.batches_v2, snapshot.batches) {
-                (Some(batches), None) => (
-                    batches,
-                    snapshot.compacted_runs.ok_or_else(|| {
-                        <D::Error as serde::de::Error>::missing_field("compacted_runs")
-                    })?,
-                    true,
-                ),
-                (None, Some(batches)) => {
-                    (batches, snapshot.compacted_runs.unwrap_or_default(), false)
-                }
-                (Some(_), Some(_)) => {
-                    return Err(<D::Error as serde::de::Error>::custom(
-                        "duplicate batch field versions",
-                    ));
-                }
-                (None, None) => {
-                    return Err(<D::Error as serde::de::Error>::missing_field("batches_v2"));
-                }
-            };
-        let mut compacted_runs = BTreeMap::new();
-        for (run_id, proof) in stored_proofs {
-            let confirmed_ranges = if requires_ranges {
-                proof.confirmed_ranges.ok_or_else(|| {
-                    <D::Error as serde::de::Error>::missing_field("confirmed_ranges")
-                })?
-            } else {
-                proof.confirmed_ranges.unwrap_or_default()
-            };
-            compacted_runs.insert(
-                run_id,
-                ConfirmedRun {
-                    account_key: proof.account_key,
-                    book_id: proof.book_id,
-                    started_at: proof.started_at,
-                    confirmed_until: proof.confirmed_until,
-                    confirmed_ranges,
-                },
-            );
-        }
-        Ok(Self {
-            batches,
-            reported_cursors: snapshot.reported_cursors,
-            compacted_runs,
-        })
-    }
-}
-
-fn deserialize_present<'de, D, T>(deserializer: D) -> std::result::Result<Option<T>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: Deserialize<'de>,
-{
-    // Missing legacy fields are allowed; an explicitly null proof is never one.
-    T::deserialize(deserializer).map(Some)
-}
-
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(super) struct ConfirmedRun {
     pub account_key: String,
     pub book_id: String,
     pub started_at: i64,
-    /// Retain the original prefix field so older persisted proof remains readable.
+    /// Contiguous confirmed prefix, followed by any confirmed ranges beyond gaps.
     pub confirmed_until: u64,
     /// Sorted, disjoint, nonadjacent ranges strictly beyond the contiguous prefix.
     pub confirmed_ranges: Vec<ConfirmedRange>,
@@ -2295,7 +2209,7 @@ mod tests {
             .append(batch("first", "account-a", "run-a", 0, 60))
             .unwrap();
         let mut snapshot = serde_json::to_value(&outbox).unwrap();
-        snapshot["batches_v2"][0]
+        snapshot["batches"][0]
             .as_object_mut()
             .unwrap()
             .remove("attempts");
@@ -2620,19 +2534,15 @@ mod tests {
     }
 
     #[test]
-    fn legacy_ids_and_unicode_accounts_are_retained_without_panicking() {
+    fn arbitrary_ids_and_unicode_accounts_are_retained_without_panicking() {
         for account in ["account-a", "legacy-id-\u{1f6d1}-account"] {
             let mut outbox = ReportOutbox::default();
             outbox
                 .append(batch("legacy-session", account, "legacy-run", 0, 60))
                 .unwrap();
             confirm_batch(&mut outbox, "legacy-session", 60);
-            let mut legacy = serde_json::to_value(&outbox).unwrap();
-            let fields = legacy.as_object_mut().unwrap();
-            fields.remove("compacted_runs");
-            let batches = fields.remove("batches_v2").unwrap();
-            fields.insert("batches".into(), batches);
-            let restored: ReportOutbox = serde_json::from_value(legacy).unwrap();
+            let snapshot = serde_json::to_value(&outbox).unwrap();
+            let restored: ReportOutbox = serde_json::from_value(snapshot).unwrap();
             restored.validate().unwrap();
             let (replacement, removed) = restored.compacted().unwrap();
             assert!(removed.is_empty());
@@ -2764,29 +2674,6 @@ mod tests {
     }
 
     #[test]
-    fn original_prefix_only_checkpoint_snapshots_remain_readable() {
-        let mut outbox = ReportOutbox::default();
-        let first = canonical_batch("account-a", "run-a", 0, 60);
-        let id = first.request.session_id.clone();
-        outbox.append(first).unwrap();
-        confirm_batch(&mut outbox, &id, 60);
-        let (compacted, _) = outbox.compacted().unwrap();
-        let mut legacy = serde_json::to_value(&compacted).unwrap();
-        legacy["compacted_runs"]["run-a"]
-            .as_object_mut()
-            .unwrap()
-            .remove("confirmed_ranges");
-        let fields = legacy.as_object_mut().unwrap();
-        let batches = fields.remove("batches_v2").unwrap();
-        fields.insert("batches".into(), batches);
-        let restored: ReportOutbox = serde_json::from_value(legacy).unwrap();
-        restored.validate().unwrap();
-        assert_eq!(restored.compacted_until("run-a"), 60);
-        assert_eq!(restored.allocation_cursor("run-a"), 60);
-        assert!(restored.compacted_runs["run-a"].confirmed_ranges.is_empty());
-    }
-
-    #[test]
     fn a_retained_legacy_bridge_advances_the_cursor_without_losing_its_proof() {
         let mut outbox = ReportOutbox::default();
         outbox
@@ -2814,15 +2701,7 @@ mod tests {
     }
 
     #[test]
-    fn old_readers_reject_range_snapshots_and_new_readers_accept_real_legacy_batches() {
-        #[derive(Deserialize)]
-        struct LegacyOutbox {
-            #[serde(rename = "batches")]
-            _batches: Vec<ReportBatch>,
-            #[serde(rename = "reported_cursors")]
-            _reported_cursors: BTreeMap<String, u64>,
-        }
-
+    fn current_snapshot_requires_complete_range_proof() {
         let mut outbox = ReportOutbox::default();
         let gap = canonical_batch("account-a", "run-a", 0, 60);
         let gap_id = gap.request.session_id.clone();
@@ -2833,44 +2712,28 @@ mod tests {
         let suffix_id = suffix.request.session_id.clone();
         outbox.append(suffix).unwrap();
         confirm_batch(&mut outbox, &suffix_id, 60);
-        let mut legacy = serde_json::to_value(&outbox).unwrap();
-        let fields = legacy.as_object_mut().unwrap();
-        fields.remove("compacted_runs");
-        let batches = fields.remove("batches_v2").unwrap();
-        fields.insert("batches".into(), batches);
-        assert!(serde_json::from_value::<LegacyOutbox>(legacy.clone()).is_ok());
-        let restored: ReportOutbox = serde_json::from_value(legacy).unwrap();
+        let (compacted, _) = outbox.compacted().unwrap();
+        let snapshot = serde_json::to_value(&compacted).unwrap();
+        let restored: ReportOutbox = serde_json::from_value(snapshot.clone()).unwrap();
         restored.validate().unwrap();
-        let (compacted, _) = restored.compacted().unwrap();
-        assert_eq!(compacted.reported_cursors["run-a"], 0);
-        assert_eq!(compacted.allocation_cursor("run-a"), 120);
-        let new_snapshot = serde_json::to_value(&compacted).unwrap();
-        assert!(new_snapshot.get("batches").is_none());
-        assert!(new_snapshot.get("batches_v2").is_some());
-        assert!(serde_json::from_value::<LegacyOutbox>(new_snapshot.clone()).is_err());
-        let mut missing_proof = new_snapshot.clone();
-        missing_proof
-            .as_object_mut()
-            .unwrap()
-            .remove("compacted_runs");
-        assert!(serde_json::from_value::<ReportOutbox>(missing_proof).is_err());
-        let mut null_proof = new_snapshot.clone();
-        null_proof["compacted_runs"] = serde_json::Value::Null;
-        assert!(serde_json::from_value::<ReportOutbox>(null_proof).is_err());
-        let mut missing_ranges = new_snapshot.clone();
+        assert_eq!(restored.reported_cursors["run-a"], 0);
+        assert_eq!(restored.allocation_cursor("run-a"), 120);
+        for field in ["batches", "reported_cursors", "compacted_runs"] {
+            let mut missing = snapshot.clone();
+            missing.as_object_mut().unwrap().remove(field);
+            assert!(serde_json::from_value::<ReportOutbox>(missing).is_err());
+            let mut null = snapshot.clone();
+            null[field] = serde_json::Value::Null;
+            assert!(serde_json::from_value::<ReportOutbox>(null).is_err());
+        }
+        let mut missing_ranges = snapshot.clone();
         missing_ranges["compacted_runs"]["run-a"]
             .as_object_mut()
             .unwrap()
             .remove("confirmed_ranges");
         assert!(serde_json::from_value::<ReportOutbox>(missing_ranges).is_err());
-        let mut null_ranges = new_snapshot.clone();
+        let mut null_ranges = snapshot;
         null_ranges["compacted_runs"]["run-a"]["confirmed_ranges"] = serde_json::Value::Null;
         assert!(serde_json::from_value::<ReportOutbox>(null_ranges).is_err());
-        let mut ambiguous = new_snapshot;
-        ambiguous
-            .as_object_mut()
-            .unwrap()
-            .insert("batches".into(), serde_json::json!([]));
-        assert!(serde_json::from_value::<ReportOutbox>(ambiguous).is_err());
     }
 }

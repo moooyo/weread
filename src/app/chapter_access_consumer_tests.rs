@@ -380,7 +380,7 @@ fn report_source_flags() -> Result<()> {
             .store
             .setting::<serde_json::Value>("report.outbox.v1")?
             .unwrap();
-        assert_eq!(old["batches_v2"].as_array().unwrap().len(), 1);
+        assert_eq!(old["batches"].as_array().unwrap().len(), 1);
         database.execute("UPDATE books SET source='local' WHERE id=?1", [BOOK])?;
         state.route = Route::Library;
         state.force_offline = false;
@@ -393,7 +393,7 @@ fn report_source_flags() -> Result<()> {
             .store
             .setting::<serde_json::Value>("report.outbox.v1")?
             .unwrap();
-        assert_eq!(stopped["batches_v2"][0]["state"], "blocked");
+        assert_eq!(stopped["batches"][0]["state"], "blocked");
         assert_eq!(state.jobs.metadata_capacity(), capacity);
         assert_eq!(state.store.book_read_stats().intro_copies, 0);
         assert_eq!(state.store.chapter_body_read_count(), owned);

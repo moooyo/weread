@@ -24,7 +24,7 @@ fn fixture(encoding: &str) -> Result<(tempfile::TempDir, Store, Book)> {
     {
         let mut connection = Connection::open(&path)?;
         connection.pragma_update(None, "encoding", encoding)?;
-        migrate(&mut connection)?;
+        initialize_schema(&mut connection)?;
     }
     let store = Store::open(path)?;
     let book = Book {
@@ -401,61 +401,5 @@ fn modern_download_checkpoint_keeps_delta_counter_without_legacy_recount() -> Re
     assert_eq!(store.task("delta")?, Some(finished));
     assert_eq!(body_length_read_stats().unique_rows, 1);
     assert_eq!(body_length_read_stats().text_evaluations, 1);
-    Ok(())
-}
-
-#[test]
-fn legacy_utf16_migration_keeps_body_bytes_and_original_nonempty_classification() -> Result<()> {
-    let (directory, store, _) = fixture("UTF-16le")?;
-    store
-        .connection
-        .execute("UPDATE books SET source='local' WHERE id='book'", [])?;
-    store.connection.execute(
-        "UPDATE chapters SET body=?1 WHERE chapter_index=0",
-        ["\0tail"],
-    )?;
-    store.connection.execute(
-        "UPDATE chapters SET body=?1 WHERE chapter_index=1",
-        ["\u{3000} "],
-    )?;
-    let mut statement = store
-        .connection
-        .prepare("SELECT body FROM chapters ORDER BY chapter_index")?;
-    let original = statement
-        .query_map([], |row| row.get::<_, String>(0))?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    drop(statement);
-    // Recreate the actual version-one table and column boundaries in this fixture.
-    store.connection.execute_batch(
-        "DROP TABLE task_chapter_states;
-        ALTER TABLE chapters DROP COLUMN content_account_key;
-        ALTER TABLE chapters DROP COLUMN content_status; PRAGMA user_version=1",
-    )?;
-    drop(store);
-    reset_body_length_read_stats();
-    let reopened = Store::open(directory.path().join("length.sqlite"))?;
-    assert_eq!(body_length_read_stats().text_evaluations, 2);
-    assert_eq!(reopened.book("book")?.unwrap().cached_chapters, 1);
-    let mut statement = reopened
-        .connection
-        .prepare("SELECT body,content_status FROM chapters ORDER BY chapter_index")?;
-    let rows = statement
-        .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    assert_eq!(
-        rows.iter().map(|row| row.0.clone()).collect::<Vec<_>>(),
-        original
-    );
-    assert_eq!(
-        (rows[0].1.as_str(), rows[1].1.as_str()),
-        ("unknown", "full")
-    );
-    assert_eq!(reopened.annotations("book")?.len(), 1);
-    assert_eq!(
-        reopened.setting::<String>("length.account")?,
-        Some("owner".into())
-    );
     Ok(())
 }

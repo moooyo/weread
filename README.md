@@ -36,6 +36,10 @@ xvfb-run -a -s '-screen 0 2200x3000x24' ./target/debug/weread \
 
 The actual Cargo target directory may be set through `CARGO_TARGET_DIR`. Device profiles are `pw5`, `pw6`, `scribe`, and `scribe2025`. Profiles select design geometry; they do not declare verified hardware support.
 
+Pre-release persistence uses one current layout with no upgrade path. Existing versioned development databases require a fresh `--data-dir`; retain an earlier directory separately only if needed. An explicitly authorized reset may discard it. The application rejects them without upgrading or deleting their records. See [the storage contract](docs/PERSISTENCE.md#current-development-layout). Device rollout evidence is recorded separately in [Physical testing](docs/PHYSICAL_TESTING.md).
+
+The 2026-11-11 clean-install candidate passed 1,599 remote library tests, 52 Main tests, and 133 desktop UI/persistence checks. ARM `1a4bab8b` was then installed on Scribe 2022 / firmware 5.19.5 after the user-authorized reset without backups. All 36 installed public files matched; fresh current-layout initialization passed with no account or books. The application was stopped after verification and native ownership was restored. See [the installation receipt](docs/PHYSICAL_TESTING.md#clean-current-layout-installation) for scope and remaining authenticated-use gates.
+
 The normal data directory is `%APPDATA%/weread` on Windows and `$XDG_DATA_HOME/weread` or `~/.local/share/weread` on Linux. `--data-dir` overrides it. `--demo` uses a separate `demo/` child directory and makes no authenticated upstream writes. Put local TXT or EPUB files in the active data directory's `imports/` folder and choose **Import local books** or **Scan and associate local books** in the application. The interface itself is Chinese.
 
 A fresh launch, including a launch after voluntary exit, opens Library when a session, local books, or demo data is available. First use without any of these opens Login. Managed sleep/wake resumes the previous Reader position instead. The physical experience-test entry follows the same Library entry rather than forcing Reader.
@@ -55,8 +59,8 @@ later user decision to complete and retry chapters independently, without a
 request-error policy that pauses the entire book. The new source saves results
 in completion order, preserves per-chapter state across restart, permits retry
 of blocked chapters while peers remain active, and admits large Reader pages
-through a shared byte budget with two parser workers. It upgrades task metadata
-to schema 3. Remote verification passed 1,603 library tests, 52 Main tests,
+through a shared byte budget with two parser workers. The original candidate
+used schema 3; that historical migration path is now removed. Its remote verification passed 1,603 library tests, 52 Main tests,
 133 standard desktop checks, and 44 independent-chapter interface checks.
 The matching ARM development bundle is built. The subsequent bounded physical
 follow-up installed ARM `dd8ac6c3`, retained private pre-upgrade backups, and
@@ -79,7 +83,7 @@ increased elapsed by approximately 5.5-6.9%. Default-eight samples likewise
 showed no reliable speedup. Production limits and the installed build remain
 unchanged, with workload and timing qualifications retained in the record.
 
-[Content access and preview recovery](docs/CONTENT_ACCESS.md) separates verified chapter text from previews and unverified legacy caches. Limited content remains readable, but does not count as a full download or a completed reading position. After obtaining reading rights in the phone application, use **Refresh access and complete content** in book details or the Reader notice. This only revalidates existing rights; it does not purchase a book or a membership. Migration preserves cached text, positions, bookmarks, and notes, and incompatible text is retained for safe recovery. The correction's verification and live unlock acceptance are recorded separately from the earlier transport results.
+[Content access and preview recovery](docs/CONTENT_ACCESS.md) separates verified chapter text from previews and unverified legacy caches. Limited content remains readable, but does not count as a full download or a completed reading position. After obtaining reading rights in the phone application, use **Refresh access and complete content** in book details or the Reader notice. This only revalidates existing rights; it does not purchase a book or a membership. Current-format content replacement preserves personal anchors, and incompatible text is retained for safe recovery. Historical migration observations apply only to their recorded candidates. The correction's verification and live unlock acceptance are recorded separately from the earlier transport results.
 
 The [Kindle development bundle instructions](packaging/kindle/README.md) describe cross-compilation, launcher configuration, and the explicit device/firmware acceptance gate. Do not copy a desktop executable to a Kindle.
 

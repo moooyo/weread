@@ -562,7 +562,7 @@ fn utf16_annotation_fields_use_the_conservative_utf8_bound_before_ownership() ->
         {
             let mut connection = Connection::open(&path)?;
             connection.pragma_update(None, "encoding", encoding)?;
-            migrate(&mut connection)?;
+            initialize_schema(&mut connection)?;
         }
         let store = Store::open(&path)?;
         let mut book = Book::new("book", "Fixture");

@@ -78,10 +78,7 @@ impl Store {
                 ..DownloadChapterProgress::default()
             },
             DownloadStatus::Cancelled => DownloadChapterProgress {
-                completed_count: task
-                    .completed_count
-                    .max(task.next_index)
-                    .min(task.chapters.len()),
+                completed_count: task.completed_count.min(task.chapters.len()),
                 next_index: task.next_index.min(task.chapters.len()),
                 ..DownloadChapterProgress::default()
             },
@@ -621,7 +618,6 @@ fn prepare_states_on(
 ) -> Result<Vec<DownloadChapterState>> {
     let held = inventory_sum(&[admit_chapter_task(task)?, extra_held])?;
     let old = chapter_states_on(connection, encoding, &task.id, held)?;
-    let legacy = old.is_empty();
     let limits = store_inventory_limits();
     let mut metadata = held;
     for state in &old {
@@ -740,26 +736,7 @@ fn prepare_states_on(
             });
         state.chapter_index = index;
         state.ordinal = ordinal;
-        if legacy
-            && task.retry_cursor == task.next_index
-            && ordinal == task.retry_cursor
-            && task.retry_count > 0
-        {
-            state.retry_count = task.retry_count.min(4);
-            state.retry_not_before = if task.retry_count <= 3 {
-                task.retry_not_before
-            } else {
-                0
-            };
-            state.status = if task.retry_count <= 3 {
-                DownloadChapterStatus::RetryWait
-            } else {
-                DownloadChapterStatus::Blocked
-            };
-            state.error = Some("source.api.-10102".into());
-        }
-        let prior_complete =
-            state.status == DownloadChapterStatus::Complete || legacy && ordinal < task.next_index;
+        let prior_complete = state.status == DownloadChapterStatus::Complete;
         let resources_complete =
             !task.include_images || verified_images.is_some_and(|proof| proof.contains(&uid));
         let complete = resources_complete
@@ -842,14 +819,19 @@ fn persist_chapter_progress_on(
     task: &DownloadTask,
     progress: DownloadChapterProgress,
     updated_at: i64,
-    clear_legacy: bool,
+    clear_error: bool,
 ) -> Result<()> {
-    let changed = if clear_legacy {
+    let changed = if clear_error {
         connection.execute(
             "UPDATE download_tasks SET updated_at=?4,payload=json_set(payload,
              '$.next_index',?2,'$.completed_count',?3,'$.updated_at',?4,
-             '$.error',NULL,'$.retry_cursor',0,'$.retry_count',0,'$.retry_not_before',0) WHERE id=?1",
-            params![task.id,progress.next_index as i64,progress.completed_count as i64,updated_at],
+             '$.error',NULL) WHERE id=?1",
+            params![
+                task.id,
+                progress.next_index as i64,
+                progress.completed_count as i64,
+                updated_at
+            ],
         )?
     } else {
         connection.execute(
@@ -1238,18 +1220,10 @@ fn safe_chapter_error(error: &str) -> &str {
 }
 
 /// Called only after the parent task passes its existing write admission.
-/// Historical schema fixtures may not have the lazy-state table yet.
 pub(super) fn clean_states_before_task_write_on(
     connection: &Connection,
     task: &DownloadTask,
 ) -> Result<()> {
-    let present: bool = connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name='task_chapter_states')",
-        [], |row| row.get(0),
-    )?;
-    if !present {
-        return Ok(());
-    }
     if matches!(
         task.status,
         DownloadStatus::Complete | DownloadStatus::Cancelled

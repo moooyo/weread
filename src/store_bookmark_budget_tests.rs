@@ -202,7 +202,7 @@ fn utf16_bookmark_header_keeps_actual_identifier_and_quoted_nul_label() -> Resul
         {
             let mut connection = Connection::open(&path)?;
             connection.pragma_update(None, "encoding", encoding)?;
-            migrate(&mut connection)?;
+            initialize_schema(&mut connection)?;
         }
         let store = Store::open(&path)?;
         store.upsert_book(&Book {
@@ -245,7 +245,7 @@ fn bookmark_label_and_utf16_vm_share_exact_working_set_allowance() -> Result<()>
     {
         let mut connection = Connection::open(&path)?;
         connection.pragma_update(None, "encoding", "UTF-16le")?;
-        migrate(&mut connection)?;
+        initialize_schema(&mut connection)?;
     }
     let store = Store::open(&path)?;
     store.upsert_book(&Book {

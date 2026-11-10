@@ -24,11 +24,11 @@ ordinary request errors. Login, purchase, and content-access rules are unchanged
 
 ## Implementation contracts
 
-- Schema version 3 adds normalized task/chapter state keyed by task and stable
+- The current layout includes normalized task/chapter state keyed by task and stable
   source UID. It stores selection order, current catalog index, completion or
   retry state, bounded attempt count, deadline, and a redacted error.
 - `completed_count` reports actual completed chapters. `next_index` retains
-  the contiguous-prefix meaning for compatibility and recovery; it does not
+  the contiguous-prefix meaning for ordered checkpoints and recovery; it does not
   determine whether a later successful chapter can be published.
 - Body/access transitions, image publication, chapter state, and task progress
   use guarded transactional paths. The original ordered Store APIs retain their
@@ -69,20 +69,11 @@ parser-work limits can still reject a response below 24 MiB; the transport cap
 is not a guarantee of parsability. These are logical reservation bounds, not an
 allocator-RSS or physical-device memory claim.
 
-## Migration and rollback
+## Pre-release storage policy
 
-Migration retains books, chapter bodies, notes, bookmarks, positions, and legacy
-task selections. Legacy progress and the former retry fields are reconciled
-with the current catalog and validated cache. Stable UIDs retain their state
-through catalog remapping; removed or mismatched identities cannot transfer
-completion credit to different content. Terminal cleanup avoids retaining an
-unbounded historical chapter-state queue.
+The accepted 2026-11-11 cleanup removes the schema upgrade chain, historical task tuple parsing, and task-level retry fields. Current normalized chapter rows own retries and deadlines across restart. Stable UIDs retain state through catalog remapping; removed or mismatched identities cannot transfer completion credit. Terminal cleanup bounds retained chapter-state rows.
 
-An older application that only supports schema version 2 cannot open an upgraded
-database. Before a future physical installation, preserve a matching private
-backup of the existing data and executable. At the original software delivery,
-no Kindle deployment or device lease was performed; the separate physical
-follow-up is recorded below.
+This candidate requires a fresh data directory when replacing a versioned development database. The application rejects unsupported layouts without changing records. Keep any earlier executable/data pair privately if needed. The user subsequently authorized a clean Kindle installation without backups after remote verification. Its new receipt is recorded separately; earlier deployment and migration observations below belong only to their named artifacts.
 
 ## Verification status
 

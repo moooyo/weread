@@ -1837,7 +1837,6 @@ impl App {
                 let previous = task.clone();
                 task.status = DownloadStatus::Running;
                 task.error = None;
-                task.retry_not_before = 0;
                 task.updated_at = Utc::now().timestamp();
                 anyhow::ensure!(
                     self.store.save_task_if_current(&previous, &task)?,
@@ -1919,9 +1918,7 @@ impl App {
         self.schedule_download_retry();
         let eligible = |task: &DownloadTask| {
             task.account_key == owner
-                && (transient_download_error(task.error.as_deref())
-                    || download_recovery::recorded_rejection(task)
-                    || task.error.is_none())
+                && (transient_download_error(task.error.as_deref()) || task.error.is_none())
         };
         if !pending.iter().any(eligible) {
             return Ok(());
@@ -2110,7 +2107,6 @@ impl App {
                         task.status = DownloadStatus::Cancelled;
                         task.error = None;
                         task.updated_at = Utc::now().timestamp();
-                        download_recovery::reset_recovery(&mut task);
                         self.store.save_task(&task)?;
                         self.retire_task_wake_guard();
                         self.clear_download_notice(&task.id)?;

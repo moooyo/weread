@@ -49,7 +49,7 @@ impl Fixture {
         {
             let mut connection = Connection::open(&path)?;
             connection.pragma_update(None, "encoding", encoding)?;
-            migrate(&mut connection)?;
+            initialize_schema(&mut connection)?;
         }
         let store = Store::open(&path)?;
         store.upsert_book(&Book {

@@ -6,6 +6,8 @@ Recorded: 2026-11-03 (Asia/Shanghai).
 
 Build an independent Rust and Slint client for jailbroken Kindle devices. Use a modular monolith: one application process with clear internal responsibilities, background work, and persistent local state.
 
+The accepted 2026-11-11 pre-release storage decision keeps one current layout without schema upgrades or historical JSON formats. Initialization creates content-state columns, normalized chapter retry rows, and read indexes together. Task retry budgets live only in chapter rows. Preferences and reporting snapshots require their current fields; defaults apply on first use. Versioned development databases are rejected without automatic conversion or deletion and require a fresh data directory. Historical device and migration evidence below belongs only to its named artifacts.
+
 WeChat Read cover images are retrieved from the upstream and cached on the Kindle. The architecture does not include S3 or a hosted cover library.
 
 Book-resource authentication uses an explicit origin boundary: HTTPS port 443 on `weread.qq.com` and the individually reviewed `res.weread.qq.com` may receive web cookies. Other CDNs, unreviewed subdomains, suffix lookalikes, and nonstandard ports do not. A redirect leaving this set permanently drops cookies for that chain. Public covers remain anonymous, and the Skill Bearer key and reader authorization headers are never sent to resource origins. This corrects the former primary-only resource rule using the pinned source contract and the physical 401/302/200 comparison in [the API record](API_REFERENCE.md#book-chapter-image-resources).
@@ -38,10 +40,10 @@ or the existing content-permission rules.
 
 The user's later 2026-11-10 instruction supersedes request-error-driven
 task-wide pause with [independent chapter completion and retry](INDEPENDENT_CHAPTER_DOWNLOADS.md).
-Normalized schema-3 chapter state owns each UID's completion, bounded retries,
+Normalized task/chapter state owns each UID's completion, bounded retries,
 and deadline. Successful results commit in completion order while a single
 writer preserves transactional content, resource-proof, and progress checks.
-`completed_count` is distinct from the contiguous `next_index` compatibility
+`completed_count` is distinct from the contiguous `next_index` completion
 prefix. Retry waits release worker and payload credits; active explicit retry
 resets only blocked ordinals through a bounded coalescing control signal.
 Account/lifecycle fences and user cancellation retain their original scope.

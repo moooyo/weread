@@ -115,7 +115,7 @@ fn stored_setting_utf16_invalid_type_and_missing_keep_distinct_results() -> Resu
         {
             let mut c = Connection::open(&path)?;
             c.pragma_update(None, "encoding", encoding)?;
-            migrate(&mut c)?;
+            initialize_schema(&mut c)?;
         }
         let store = Store::open(&path)?;
         store.set_setting("key", &"  Unicode \u{4e2d}\0device  ")?;

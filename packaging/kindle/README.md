@@ -20,11 +20,11 @@ weread/app/config/device-allowlist.example
 weread/app/manifest.draft.json
 ```
 
-Fonts, icons, the dictionary and interface strings are embedded in the executable; their notices are bundled separately. The launcher creates persistent state under `/mnt/us/weread/data/`, including `fonts/` and `logs/`. Replacing `app/` must preserve `data/`. The build script never copies credentials, books, or operator state into the staged output.
+Fonts, icons, the dictionary and interface strings are embedded in the executable; their notices are bundled separately. The launcher creates persistent state under `/mnt/us/weread/data/`, including `fonts/` and `logs/`. Ordinary app-only updates preserve `data/`; an explicitly authorized pre-release reset may remove it. The build script never copies credentials, books, or operator state into the staged output.
 
 The resource-review candidate retains application diagnostics in `data/logs/application.log` and two fixed backups, each limited to 1 MiB with an 8 KiB message limit. A diagnostic I/O failure closes that sink and suppresses repeated fallback messages. Normal document launches maintain `launcher.log` with a 64 KiB threshold and in-place truncation; `last-launch.log` is replaced on a normal launch and `application-bootstrap.log` on each application generation. The latter two capture finite bootstrap or unexpected external output and are not general byte-capped collectors. Direct `--detached` fixtures retain their captured output.
 
-Keep the matching executable and launcher together. New report snapshots retain compact confirmed ranges and cause older readers to fail closed rather than ignore those ranges and repeat delivery. Preserve the existing database; do not remove report evidence to force an older binary to accept it. [Resource lifetime review](../../docs/RESOURCE_LEAK_REVIEW.md) records the current candidate's review rounds and verification scope.
+Keep the matching executable and launcher together. The current pre-release build expects the current storage layout and complete reporting snapshots. An explicitly authorized reset discards previous application state; it is not an upgrade or a rollback mechanism. [Resource lifetime review](../../docs/RESOURCE_LEAK_REVIEW.md) retains the historical candidate-specific evidence.
 
 The main application remains a static musl Rust/Slint executable. The visual
 handoff candidate additionally stages the small `weread-frame-guard` native
@@ -65,25 +65,11 @@ For daily use on the operator's identified device, install the real ARM executab
 
 Start the document entry with the default home directory. For an SSH launch, use `WEREAD_HOME=/mnt/us/weread DISPLAY=:0.0 sh /mnt/us/documents/weread.sh`. The script detaches itself and starts the application with only the native backend, profile, and data-directory arguments. No smoke wrapper, watchdog, `--demo`, `--offline`, scripted actions, capture, or exit deadline is used.
 
-A fresh private-trial data directory initially opens Login. Authenticate on the device to synchronize the real Library, or choose the local Library and import books. Later ordinary starts use Library when a session or local books exist. Managed sleep recovery retains the previous Reader position. Preserve existing regular `data/` on future updates. Keep former demo progress and notes in a separate operator-controlled backup rather than promoting demo records into a real account's library.
+A fresh private-trial data directory initially opens Login. Authenticate on the device to synchronize the real Library, or choose the local Library and import books. Later ordinary starts use Library when a session or local books exist. Managed sleep recovery retains the previous Reader position. Preserve existing regular `data/` on ordinary updates unless a reset is explicitly authorized. Keep former demo progress and notes in a separate operator-controlled backup rather than promoting demo records into a real account's library.
 
-The content-access correction migrates SQLite metadata to schema 2. Exit the application and back up the existing database and account material before replacing the executable. First launch retains all text and personal records but marks legacy WeRead bodies as unverified. Use the book's access-refresh action to revalidate them; previews do not count as complete downloads. An older schema-1 executable cannot open the migrated database, so a rollback must restore its matching pre-upgrade database backup as well as the old executable. Runtime backups remain private and are never package inputs.
+The accepted 2026-11-11 pre-release storage policy removes database upgrades and historical JSON compatibility. Exit the application and select a fresh private data directory for this candidate. Keep any earlier executable and data together as a private archive; do not merge or copy old SQLite records into the current layout. Unsupported versioned databases are rejected without conversion or deletion. Defaults apply to first use, and current snapshots must contain all required fields. Device installation and acceptance are recorded separately in the physical testing record.
 
-The later independent-chapter candidate upgrades metadata to schema 3 and adds
-task-scoped chapter completion and retry records. Existing bodies, notes,
-bookmarks, positions, and task selections are retained. Completed caches are
-revalidated when work resumes; one rejected chapter does not pause other ready
-chapters. A schema-2 executable cannot open this upgraded database. Before any
-future device rollout, preserve a matching private backup of the executable and
-data. Preserve any newer user changes separately before restoring an older
-backup. The implementation and remote gates are described in
-[Independent chapter downloads](../../docs/INDEPENDENT_CHAPTER_DOWNLOADS.md).
-The bounded 2026-11-11 physical follow-up replaced `985efefc` with `dd8ac6c3`
-on the identified Scribe 2022 / firmware 5.19.5 and confirmed schema 3. Launcher
-`a5fec72f` and native frame guard `a235b41c` remain unchanged. The original
-executable/data pair is backed up privately. Device windows ended with native
-restoration and exact lease release; failed sampling qualification and
-remaining physical acceptance do not change the rollback boundary above.
+Independent chapter completion and retry use the current normalized chapter-state table. Completed caches are revalidated when work resumes; one rejected chapter does not pause other ready chapters. The earlier `985efefc` to `dd8ac6c3` deployment and its schema-3 observation remain historical evidence in [Independent chapter downloads](../../docs/INDEPENDENT_CHAPTER_DOWNLOADS.md), not a current migration requirement.
 
 The resident-sleep candidate requires its matching launcher and executable to enable same-process recovery. A per-cycle private handshake confirms that state and hardware workers have stopped, touch has been released, and drawing is paused before the supervisor stops the application process. Wake confirms native dismissal before continuing that process; complete framebuffer restoration and touch reacquisition precede resumed work. Capability absence or a failed handshake retains the bounded saved-session fallback. An interrupted or failed recovery must restore native ownership instead of leaving a stopped application behind. See the current verification documents for the candidate-specific acceptance status.
 

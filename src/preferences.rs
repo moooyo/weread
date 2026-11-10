@@ -47,7 +47,6 @@ fn open_startup_preferences(data_dir: &Path) -> Option<rusqlite::Connection> {
 
 /// Device-independent preferences. Display values are rendered by the locale layer.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
 pub struct AppPreferences {
     pub view_mode: String,
     pub dark_mode: bool,
@@ -110,7 +109,6 @@ impl Default for AppPreferences {
 
 /// Reading typography is separate from article typography and uses logical dp.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
 pub struct ReaderPreferences {
     pub font: String,
     pub font_size: u32,
@@ -144,7 +142,6 @@ impl Default for ReaderPreferences {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
 pub struct ArticlePreferences {
     pub font: String,
     pub font_size: u32,
@@ -609,9 +606,18 @@ mod tests {
                     rusqlite::Connection::open(directory.path().join("library.sqlite")).unwrap();
                 connection.execute_batch(
                 "CREATE TABLE settings (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
-                 INSERT INTO settings VALUES ('preferences', '{\"dark_mode\":true}');
                  PRAGMA user_version=9;",
             ).unwrap();
+                let preferences = AppPreferences {
+                    dark_mode: true,
+                    ..AppPreferences::default()
+                };
+                connection
+                    .execute(
+                        "INSERT INTO settings (key,value) VALUES ('preferences',?1)",
+                        [serde_json::to_string(&preferences).unwrap()],
+                    )
+                    .unwrap();
                 user_record_snapshot(&connection)
             };
         let connection = open_startup_preferences(directory.path()).unwrap();
@@ -634,14 +640,18 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(stored, r#"{"dark_mode":true}"#);
+        assert!(
+            serde_json::from_str::<AppPreferences>(&stored)
+                .unwrap()
+                .dark_mode
+        );
         assert!(startup_dark_mode(directory.path()));
         assert_eq!(user_record_snapshot(&connection), before);
     }
 
     #[test]
     fn application_dark_mode_defaults_to_light_and_survives_preference_round_trips() {
-        let mut preferences: AppPreferences = serde_json::from_str("{}").unwrap();
+        let mut preferences = AppPreferences::default();
         assert!(!preferences.dark_mode);
         assert!(preferences.apply_toggle("night-mode"));
         assert_eq!(preferences.value("night_mode"), "true");
@@ -656,24 +666,29 @@ mod tests {
     }
 
     #[test]
-    fn download_concurrency_defaults_migrates_and_survives_storage() {
-        for stored in [
-            "{}",
-            r#"{"download_images":false,"reader":{"font_size":28}}"#,
-        ] {
-            let mut preferences: AppPreferences = serde_json::from_str(stored).unwrap();
-            assert_eq!(
-                preferences.download_concurrency,
-                DEFAULT_DOWNLOAD_CONCURRENCY
-            );
-            assert!(preferences.adjust("download_concurrency", 1));
-            assert_eq!(preferences.value("download_concurrency"), "9");
-            let restored: AppPreferences =
-                serde_json::from_str(&serde_json::to_string(&preferences).unwrap()).unwrap();
-            assert_eq!(restored.download_concurrency, 9);
-        }
+    fn download_concurrency_defaults_and_survives_storage() {
+        let mut preferences = AppPreferences::default();
+        assert_eq!(
+            preferences.download_concurrency,
+            DEFAULT_DOWNLOAD_CONCURRENCY
+        );
+        assert!(preferences.adjust("download_concurrency", 1));
+        let restored: AppPreferences =
+            serde_json::from_str(&serde_json::to_string(&preferences).unwrap()).unwrap();
+        assert_eq!(restored.download_concurrency, 9);
         assert_eq!(AppPreferences::for_device(true).download_concurrency, 8);
         assert_eq!(AppPreferences::for_device(false).download_concurrency, 8);
+    }
+
+    #[test]
+    fn incomplete_preference_snapshots_are_rejected() {
+        assert!(serde_json::from_str::<AppPreferences>("{}").is_err());
+        let mut snapshot = serde_json::to_value(AppPreferences::default()).unwrap();
+        snapshot
+            .as_object_mut()
+            .unwrap()
+            .remove("download_concurrency");
+        assert!(serde_json::from_value::<AppPreferences>(snapshot).is_err());
     }
 
     #[test]
@@ -691,9 +706,9 @@ mod tests {
     }
 
     #[test]
-    fn missing_fields_use_design_defaults_and_article_stays_independent() {
-        let mut preferences: AppPreferences =
-            serde_json::from_str(r#"{"reader":{"font_size":28}}"#).unwrap();
+    fn design_defaults_keep_article_preferences_independent() {
+        let mut preferences = AppPreferences::default();
+        preferences.reader.font_size = 28;
         assert_eq!(preferences.reader.font_size, 28);
         assert_eq!(preferences.reader.indent, 2);
         assert_eq!(preferences.article.font_size, 19);

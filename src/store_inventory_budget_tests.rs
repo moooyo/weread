@@ -345,7 +345,7 @@ fn utf16_pctencoded_key_uses_actual_utf8_contract_and_prepaid_upper() -> Result<
         {
             let mut connection = Connection::open(&path)?;
             connection.pragma_update(None, "encoding", encoding)?;
-            migrate(&mut connection)?;
+            initialize_schema(&mut connection)?;
         }
         let store = Store::open(&path)?;
         let key = format!("chapter.assets:{}", "%25".repeat(8192));
@@ -519,10 +519,15 @@ fn task_inventory_output_and_parser_scratch_share_one_exact_allowance() -> Resul
 }
 
 #[test]
-fn task_owner_projection_preserves_legacy_defaults_and_strict_error_causes() -> Result<()> {
+fn task_owner_projection_preserves_current_fields_and_strict_error_causes() -> Result<()> {
     let store = fixture()?;
-    let payload = "{\"id\":\"legacy\",\"book_id\":\"book\",\"chapters\":[0]}";
-    store.connection.execute("INSERT INTO download_tasks (id,book_id,status,updated_at,payload) VALUES ('legacy','book','pending',0,?1)", [payload])?;
+    let payload = serde_json::to_string(&DownloadTask {
+        id: "legacy".into(),
+        book_id: "book".into(),
+        chapters: vec![0],
+        ..Default::default()
+    })?;
+    store.connection.execute("INSERT INTO download_tasks (id,book_id,status,updated_at,payload) VALUES ('legacy','book','pending',0,?1)", [&payload])?;
     reset();
     assert!(store.pending_tasks_for_owner("owner")?.is_empty());
     assert_eq!(read_stats().task_deserializations, 0);
@@ -535,7 +540,6 @@ fn task_owner_projection_preserves_legacy_defaults_and_strict_error_causes() -> 
             ..Default::default()
         }]
     );
-    let sequence = "[\"seq\",\"book\",\"own\\u0065r\",[0],\"pending\",false,0,null,0]";
     let selected = DownloadTask {
         id: "seq".into(),
         book_id: "book".into(),
@@ -543,7 +547,8 @@ fn task_owner_projection_preserves_legacy_defaults_and_strict_error_causes() -> 
         chapters: vec![0],
         ..Default::default()
     };
-    store.connection.execute("INSERT INTO download_tasks (id,book_id,status,updated_at,payload) VALUES ('seq','book','pending',0,?1)", [sequence])?;
+    let sequence = serde_json::to_string(&selected)?;
+    store.connection.execute("INSERT INTO download_tasks (id,book_id,status,updated_at,payload) VALUES ('seq','book','pending',0,?1)", [&sequence])?;
     assert_eq!(
         store.pending_tasks_for_owner("owner")?,
         vec![selected.clone()]
@@ -577,7 +582,7 @@ fn task_owner_projection_preserves_legacy_defaults_and_strict_error_causes() -> 
     assert_eq!(read_stats().task_deserializations, 0);
     store.connection.execute(
         "UPDATE download_tasks SET payload=?1 WHERE id='legacy'",
-        [payload],
+        [&payload],
     )?;
     store.connection.execute(
         "UPDATE download_tasks SET updated_at=x'80' WHERE id='legacy'",
@@ -604,109 +609,61 @@ fn task_owner_projection_preserves_legacy_defaults_and_strict_error_causes() -> 
 }
 
 #[test]
-fn task_completion_count_defaults_for_legacy_object_and_sequence_but_rejects_null() -> Result<()> {
-    let object = r#"{"id":"legacy-count","book_id":"book","account_key":"own\u0065r","chapters":[0],"error":null,"updated_at":100}"#;
-    let sequence = r#"["legacy-count","book","own\u0065r",[0],"pending",false,0,null,100]"#;
-    let expected = DownloadTask {
-        id: "legacy-count".into(),
+fn task_payload_requires_current_fields_and_rejects_old_sequences() -> Result<()> {
+    let store = fixture()?;
+    let task = DownloadTask {
+        id: "current-task".into(),
         book_id: "book".into(),
         account_key: "owner".into(),
         chapters: vec![0],
         updated_at: 100,
         ..Default::default()
     };
-    for payload in [object, sequence] {
-        let store = fixture()?;
-        store.connection.execute(
-            "INSERT INTO download_tasks (id,book_id,status,updated_at,payload)
-             VALUES ('legacy-count','book','pending',100,?1)",
-            [payload],
-        )?;
-        let selected = store.pending_tasks_for_owner("owner")?;
-        assert_eq!(selected, vec![expected.clone()]);
-        assert_eq!(selected[0].completed_count, 0);
-        assert_eq!(selected[0].updated_at, 100);
-        assert_eq!(selected[0].retry_cursor, 0);
-        assert_eq!(store.task("legacy-count")?, Some(expected.clone()));
-        if payload == object {
-            let mut explicit_null: serde_json::Value = serde_json::from_str(payload)?;
-            explicit_null["completed_count"] = serde_json::Value::Null;
-            let explicit_null = serde_json::to_string(&explicit_null)?;
+    store.save_task(&task)?;
+    assert_eq!(store.pending_tasks_for_owner("owner")?, vec![task.clone()]);
+    let current = serde_json::to_value(&task)?;
+    for field in ["account_key", "completed_count", "updated_at", "chapters"] {
+        for null in [false, true] {
+            let mut damaged = current.clone();
+            if null {
+                damaged[field] = serde_json::Value::Null;
+            } else {
+                damaged.as_object_mut().unwrap().remove(field);
+            }
+            let payload = serde_json::to_string(&damaged)?;
             store.connection.execute(
-                "UPDATE download_tasks SET payload=?1 WHERE id='legacy-count'",
-                [&explicit_null],
+                "UPDATE download_tasks SET payload=?1 WHERE id=?2",
+                params![payload, task.id],
             )?;
-            let error = store.pending_tasks_for_owner("owner").unwrap_err();
-            assert!(error.downcast_ref::<serde_json::Error>().is_some());
-            let error = store.task("legacy-count").unwrap_err();
-            assert!(error.downcast_ref::<serde_json::Error>().is_some());
+            assert!(
+                store
+                    .task(&task.id)
+                    .unwrap_err()
+                    .downcast_ref::<serde_json::Error>()
+                    .is_some()
+            );
+            assert!(
+                store
+                    .pending_tasks_for_owner("owner")
+                    .unwrap_err()
+                    .downcast_ref::<serde_json::Error>()
+                    .is_some()
+            );
             let retained: String = store.connection.query_row(
-                "SELECT payload FROM download_tasks WHERE id='legacy-count'",
-                [],
+                "SELECT payload FROM download_tasks WHERE id=?1",
+                [&task.id],
                 |row| row.get(0),
             )?;
-            assert_eq!(retained, explicit_null);
+            assert_eq!(retained, payload);
         }
-        assert_retained(&store)?;
     }
-
-    let store = fixture()?;
-    let full_sequence =
-        r#"["legacy-count","book","own\u0065r",[0],"paused",true,0,null,0,2,500,100]"#;
-    let expected = DownloadTask {
-        status: DownloadStatus::Paused,
-        include_images: true,
-        retry_count: 2,
-        retry_not_before: 500,
-        updated_at: 100,
-        ..expected
-    };
+    let sequence = r#"["current-task","book","owner",[0],"pending",false,0,null,100]"#;
     store.connection.execute(
-        "INSERT INTO download_tasks (id,book_id,status,updated_at,payload)
-         VALUES ('legacy-count','book','paused',100,?1)",
-        [full_sequence],
+        "UPDATE download_tasks SET payload=?1 WHERE id=?2",
+        params![sequence, task.id],
     )?;
-    let selected = store.task("legacy-count")?.unwrap();
-    assert_eq!(selected.completed_count, 0);
-    assert_eq!(selected, expected);
-    assert_eq!(
-        store.pending_tasks_for_owner("owner")?,
-        vec![expected.clone()]
-    );
-
-    let mut current_sequence: serde_json::Value = serde_json::from_str(full_sequence)?;
-    current_sequence
-        .as_array_mut()
-        .unwrap()
-        .push(serde_json::json!(1));
-    let counted = serde_json::to_string(&current_sequence)?;
-    store.connection.execute(
-        "UPDATE download_tasks SET payload=?1 WHERE id='legacy-count'",
-        [&counted],
-    )?;
-    let counted_task = DownloadTask {
-        completed_count: 1,
-        ..expected
-    };
-    assert_eq!(store.task("legacy-count")?, Some(counted_task.clone()));
-    assert_eq!(store.pending_tasks_for_owner("owner")?, vec![counted_task]);
-
-    current_sequence[12] = serde_json::Value::Null;
-    let explicit_null = serde_json::to_string(&current_sequence)?;
-    store.connection.execute(
-        "UPDATE download_tasks SET payload=?1 WHERE id='legacy-count'",
-        [&explicit_null],
-    )?;
-    let error = store.task("legacy-count").unwrap_err();
-    assert!(error.downcast_ref::<serde_json::Error>().is_some());
-    let error = store.pending_tasks_for_owner("owner").unwrap_err();
-    assert!(error.downcast_ref::<serde_json::Error>().is_some());
-    let retained: String = store.connection.query_row(
-        "SELECT payload FROM download_tasks WHERE id='legacy-count'",
-        [],
-        |row| row.get(0),
-    )?;
-    assert_eq!(retained, explicit_null);
+    assert!(store.task(&task.id).is_err());
+    assert!(store.pending_tasks_for_owner("owner").is_err());
     assert_retained(&store)
 }
 
@@ -838,7 +795,7 @@ fn setting_inventory_bool_utf16_and_decode_sql_errors_keep_original_data() -> Re
         {
             let mut connection = Connection::open(&path)?;
             connection.pragma_update(None, "encoding", encoding)?;
-            migrate(&mut connection)?;
+            initialize_schema(&mut connection)?;
         }
         let store = Store::open(&path)?;
         let key = "shelf.override:book";
