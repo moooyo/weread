@@ -46,6 +46,7 @@ export global LibraryModel {
     in-out property <[BookTile]> books;
     in-out property <string> summary;
     in-out property <string> status;
+    in-out property <bool> download-notice;
     in-out property <string> view-mode: "cover";
     in-out property <string> sort: "default";
     in-out property <bool> selecting;
@@ -257,8 +258,14 @@ export component LibraryScreen inherits Rectangle {
             Text { x: Theme.page-margin; text: Strings.offline-banner; color: Theme.secondary; font-family: Theme.ui-font; font-size: 14px; vertical-alignment: center; }
         }
         if LibraryModel.status != "": Rectangle {
-            height: 32px;
-            Text { x: Theme.page-margin; text: LibraryModel.status; color: Theme.secondary; font-family: Theme.ui-font; font-size: 14px; vertical-alignment: center; }
+            height: LibraryModel.download-notice ? 48px : 32px;
+            Text { x: Theme.page-margin; width: parent.width - Theme.page-margin * 2 - (LibraryModel.download-notice ? 32px : 0px); text: LibraryModel.status; color: Theme.secondary; font-family: Theme.ui-font; font-size: 14px; vertical-alignment: center; overflow: elide; }
+            if LibraryModel.download-notice: Icon { kind: "next"; x: parent.width - Theme.page-margin - self.width; y: (parent.height - self.height) / 2; }
+            if LibraryModel.download-notice: TouchArea {
+                accessible-role: button;
+                accessible-label: LibraryModel.status;
+                clicked => { LibraryModel.event("download-status", ""); }
+            }
         }
         content := Rectangle {
             vertical-stretch: 1;
@@ -267,7 +274,6 @@ export component LibraryScreen inherits Rectangle {
             if LibraryModel.books.length == 0: VerticalLayout {
                 padding: Theme.page-margin; alignment: center; spacing: 20px;
                 Text { text: Strings.empty-library; font-family: Theme.serif-font; font-size: 24px; font-weight: 700; horizontal-alignment: center; }
-                Text { text: Strings.empty-library-hint; color: Theme.secondary; font-family: Theme.ui-font; font-size: 16px; horizontal-alignment: center; wrap: word-wrap; }
                 HorizontalLayout { alignment: center; spacing: 16px;
                     ActionButton { text: Strings.login-title; primary: true; clicked => { LibraryModel.event("login", ""); } }
                     ActionButton { text: Strings.import-book; clicked => { LibraryModel.event("import", ""); } }

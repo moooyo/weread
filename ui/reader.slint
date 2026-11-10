@@ -323,7 +323,7 @@ component FontPicker inherits Rectangle {
     property <int> page: 0;
     property <int> per-page: 3;
     property <int> page-count: max(1, ceil(ReaderModel.fonts.length / root.per-page));
-    height: (Theme.scribe ? 96px : min(ReaderModel.fonts.length, root.per-page) * 72px) + (root.page-count > 1 ? 112px : 56px);
+    height: (Theme.scribe ? 96px : min(ReaderModel.fonts.length, root.per-page) * 72px) + (root.page-count > 1 ? 56px : 0px);
     VerticalLayout {
         spacing: 12px;
         Rectangle {
@@ -362,7 +362,6 @@ component FontPicker inherits Rectangle {
             count: root.page-count;
             turn(value) => { root.page = clamp(root.page + value, 0, root.page-count - 1); }
         }
-        Text { text: Strings.font-import-hint; height: 44px; font-family: Theme.ui-font; font-size: Theme.scribe ? 15px : 14px; color: Theme.secondary; wrap: word-wrap; }
     }
 }
 
@@ -433,42 +432,39 @@ component SubtoolLink inherits Rectangle {
 
 component TurnCard inherits Rectangle {
     in property <string> label;
-    in property <string> description;
     in property <bool> selected;
     callback clicked();
-    height: Theme.scribe ? 64px : 48px;
+    height: 48px;
     border-width: root.selected ? 2px : 1px;
     border-color: root.selected ? Theme.ink : Theme.line;
     border-radius: 8px;
     background: root.selected || touch.pressed ? Theme.ink : Theme.paper;
     accessible-role: button;
-    accessible-label: root.label + " " + root.description;
+    accessible-label: root.label;
     if Theme.scribe: VerticalLayout {
         padding-left: 12px; padding-right: 12px; alignment: center; spacing: 2px;
         Text { text: root.label; font-family: Theme.ui-font; font-size: 16px; font-weight: root.selected ? 700 : 400; color: root.selected || touch.pressed ? Theme.paper : Theme.ink; overflow: elide; }
-        Text { text: root.description; font-family: Theme.ui-font; font-size: 14px; color: root.selected || touch.pressed ? Theme.paper : Theme.secondary; overflow: elide; }
     }
     if !Theme.scribe: HorizontalLayout {
         padding-left: 14px; padding-right: 14px; spacing: 8px;
         Text { text: root.label; font-family: Theme.ui-font; font-size: 15px; font-weight: root.selected ? 700 : 400; color: root.selected || touch.pressed ? Theme.paper : Theme.ink; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
-        Text { text: root.description; font-family: Theme.ui-font; font-size: 14px; color: root.selected || touch.pressed ? Theme.paper : Theme.secondary; vertical-alignment: center; overflow: elide; }
     }
     touch := TouchArea { clicked => { root.clicked(); } }
 }
 
 component PageTurnChoices inherits Rectangle {
-    height: Theme.scribe ? 64px : 160px;
+    height: Theme.scribe ? 48px : 160px;
     if Theme.scribe: HorizontalLayout {
         spacing: 12px;
-        for option in [{id: "default", label: Strings.left-prev-center-menu-right-next, description: Strings.default-sort}, {id: "mirrored", label: Strings.mirrored, description: Strings.left-handed}, {id: "swipe", label: Strings.swipe-only, description: Strings.tap-opens-menu}]: TurnCard {
-            label: option.label; description: option.description; selected: ReaderModel.tap-mode == option.id;
+        for option in [{id: "default", label: Strings.left-prev-center-menu-right-next}, {id: "mirrored", label: Strings.mirrored}, {id: "swipe", label: Strings.swipe-only}]: TurnCard {
+            label: option.label; selected: ReaderModel.tap-mode == option.id;
             clicked => { ReaderModel.event("reader.tap-mode", option.id); }
         }
     }
     if !Theme.scribe: VerticalLayout {
         spacing: 8px;
-        for option in [{id: "default", label: Strings.left-prev-center-menu-right-next, description: Strings.default-sort}, {id: "mirrored", label: Strings.mirrored, description: Strings.left-handed}, {id: "swipe", label: Strings.swipe-only, description: Strings.tap-opens-menu}]: TurnCard {
-            label: option.label; description: option.description; selected: ReaderModel.tap-mode == option.id;
+        for option in [{id: "default", label: Strings.left-prev-center-menu-right-next}, {id: "mirrored", label: Strings.mirrored}, {id: "swipe", label: Strings.swipe-only}]: TurnCard {
+            label: option.label; selected: ReaderModel.tap-mode == option.id;
             clicked => { ReaderModel.event("reader.tap-mode", option.id); }
         }
     }
@@ -492,7 +488,7 @@ component MenuHeaderTitle inherits Rectangle {
 component ReaderMenu inherits Rectangle {
     property <[int]> font-values-pw: [16, 18, 20, 22, 24, 26, 28, 30, 32];
     property <[int]> font-values-sc: [18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38];
-    property <length> content-height: ReaderModel.subtool == "font" ? (Theme.scribe ? 96px : min(ReaderModel.fonts.length, 3) * 72px) + (ReaderModel.fonts.length > 3 ? 184px : 128px) : ReaderModel.subtool == "indent" ? (Theme.scribe ? 180px : 276px) : ReaderModel.subtool == "turn" ? (Theme.scribe ? 296px : 376px) : ReaderModel.tool == "type" ? (Theme.scribe ? 390px : 344px) : ReaderModel.tool == "notes" ? (Theme.scribe ? 336px : 220px) : ReaderModel.tool == "light" ? 256px : 164px;
+    property <length> content-height: ReaderModel.subtool == "font" ? (Theme.scribe ? 96px : min(ReaderModel.fonts.length, 3) * 72px) + (ReaderModel.fonts.length > 3 ? 128px : 72px) : ReaderModel.subtool == "indent" ? (Theme.scribe ? 180px : 276px) : ReaderModel.subtool == "turn" ? (Theme.scribe ? 280px : 376px) : ReaderModel.tool == "type" ? (Theme.scribe ? 390px : 344px) : ReaderModel.tool == "notes" ? (Theme.scribe ? 336px : 220px) : ReaderModel.tool == "light" ? 256px : 164px;
     TouchArea { clicked => { ReaderModel.event("reader.menu", "false"); } }
     Rectangle {
         x: 0px; y: 0px; width: root.width;
@@ -651,7 +647,7 @@ component ReaderMenu inherits Rectangle {
                     spacing: 8px;
                     Text { text: Strings.tap-zones; height: 24px; font-family: Theme.ui-font; font-size: 16px; }
                     PageTurnChoices { }
-                    HorizontalLayout { height: 32px; spacing: 8px; Text { text: Strings.full-refresh; font-family: Theme.ui-font; font-size: 16px; vertical-alignment: center; } Text { text: Strings.refresh-explanation; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; } }
+                    Text { text: Strings.full-refresh; height: 32px; font-family: Theme.ui-font; font-size: 16px; vertical-alignment: center; }
                     SegmentedControl { width: Theme.scribe ? 480px : parent.width; radius: 24px; value: ReaderModel.refresh-choice; options: [{id: "1", label: Strings.every-page}, {id: "6", label: Strings.six-pages}, {id: "12", label: Strings.twelve-pages}, {id: "0", label: Strings.never}]; chosen(value) => { ReaderModel.event("reader.refresh", value); } }
                 }
             }
@@ -972,7 +968,7 @@ component SyncConflictPopup inherits Rectangle {
 component ArticleMenu inherits Rectangle {
     property <[int]> font-values-pw: [15, 16, 17, 18, 19, 20, 22, 24, 26];
     property <[int]> font-values-sc: [16, 18, 20, 22, 24, 26, 28, 30, 32];
-    property <length> content-height: ArticleModel.tool == "images" ? 176px : ArticleModel.tool == "type" ? (Theme.scribe ? 220px : 316px) : 0px;
+    property <length> content-height: ArticleModel.tool == "images" ? 160px : ArticleModel.tool == "type" ? (Theme.scribe ? 220px : 316px) : 0px;
     TouchArea { clicked => { ArticleModel.event("article.menu", "false"); } }
     Rectangle {
         x: 0px; y: 0px; width: root.width;
@@ -1018,7 +1014,7 @@ component ArticleMenu inherits Rectangle {
             height: root.content-height - 12px;
             if ArticleModel.tool == "images": VerticalLayout {
                 spacing: 0px;
-                ToggleRow { text: Strings.auto-images; subtitle: Strings.images-off-hint; checked: ArticleModel.auto-images; toggled => { ArticleModel.event("article.auto-images", "toggle"); } }
+                ToggleRow { text: Strings.auto-images; checked: ArticleModel.auto-images; toggled => { ArticleModel.event("article.auto-images", "toggle"); } }
                 Rectangle { height: 1px; background: Theme.line; }
                 HorizontalLayout {
                     height: 72px; spacing: 12px;
@@ -1032,7 +1028,7 @@ component ArticleMenu inherits Rectangle {
             }
             if ArticleModel.tool == "type": VerticalLayout {
                 spacing: Theme.scribe ? 16px : 8px;
-                HorizontalLayout { height: 28px; spacing: 8px; Text { text: Strings.article-typography; font-family: Theme.ui-font; font-size: 18px; font-weight: 700; horizontal-stretch: 1; } Text { text: Strings.article-independent-typography; font-family: Theme.ui-font; font-size: Theme.scribe ? 15px : 14px; color: Theme.secondary; } }
+                Text { text: Strings.article-typography; height: 28px; font-family: Theme.ui-font; font-size: 18px; font-weight: 700; }
                 ScaleControl { values: Theme.scribe ? root.font-values-sc : root.font-values-pw; value: ArticleModel.font-size; label: Strings.font-size; chosen(value) => { ArticleModel.event("article.font-size-select", "" + value); } step(value) => { ArticleModel.event("article.font-size", "" + value); } }
                 if Theme.scribe: HorizontalLayout {
                     spacing: 24px;
@@ -1332,7 +1328,6 @@ export component ReaderScreen inherits Rectangle {
                         alignment: center;
                         spacing: 8px;
                         Text { text: Strings.load-image; font-family: Theme.ui-font; font-size: 18px; color: image-touch.pressed ? Theme.paper : Theme.ink; horizontal-alignment: center; wrap: word-wrap; }
-                        Text { text: Strings.images-off-hint; font-family: Theme.ui-font; font-size: 14px; color: image-touch.pressed ? Theme.paper : Theme.secondary; horizontal-alignment: center; wrap: word-wrap; }
                     }
                     accessible-role: button;
                     accessible-label: Strings.load-image;
@@ -1538,7 +1533,7 @@ export component ArticleScreen inherits Rectangle {
                         alignment: center; spacing: 8px;
                         Rectangle { height: Theme.scribe ? 40px : 34px; Icon { x: (parent.width - self.width) / 2; y: 0px; width: Theme.scribe ? 40px : 34px; height: self.width; kind: "picture"; } }
                         Text { text: Strings.load-image; font-family: Theme.ui-font; font-size: 17px; font-weight: 700; horizontal-alignment: center; }
-                        Text { text: (block.meta == "" ? "" : block.meta + " · ") + Strings.images-off-hint; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; horizontal-alignment: center; }
+                        if block.meta != "": Text { text: block.meta; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; horizontal-alignment: center; }
                     }
                     if !block.loaded: DashedOutline { stroke-color: Theme.ink; stroke: 2px; radius: 6px; }
                     image-touch := SwipeTouchArea { enabled: !block.loaded; tapped => { ArticleModel.event("article.load-image", block.id); } swiped(value) => { ArticleModel.event("article.turn", "" + value); } }

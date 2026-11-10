@@ -3,6 +3,7 @@ mod auth;
 mod auxiliary;
 mod backend;
 mod book_images;
+mod download_recovery;
 mod library;
 mod lighting;
 mod lighting_worker;
@@ -70,6 +71,9 @@ mod catalog_settlement_tests;
 
 #[cfg(test)]
 mod screen_shelf_budget_tests;
+
+#[cfg(test)]
+mod cover_refresh_tests;
 
 #[cfg(test)]
 mod chapter_access_consumer_tests;
@@ -424,6 +428,7 @@ pub struct App {
     settings_status: String,
     downloads: VecDeque<DownloadTask>,
     current_download: Option<DownloadTask>,
+    download_notice: Option<download_recovery::DownloadNotice>,
     download_ui_changes: BTreeMap<String, DownloadUiChanges>,
     download_ui_refresh_at: Instant,
     task_wake: task_wake::TaskWakeMaintenance,
@@ -432,6 +437,7 @@ pub struct App {
     pending_catalog_downloads: BTreeSet<String>,
     pending_catalog_images: BTreeMap<String, bool>,
     pending_covers: BTreeSet<String>,
+    cover_ui_changes: BTreeSet<String>,
     deferred_cover_refill: Option<Route>,
     pending_articles: BTreeSet<String>,
     pending_article_requests: BTreeMap<String, u64>,
@@ -665,6 +671,7 @@ impl App {
             settings_status: String::new(),
             downloads,
             current_download: None,
+            download_notice: None,
             download_ui_changes: BTreeMap::new(),
             download_ui_refresh_at: Instant::now(),
             task_wake: task_wake::TaskWakeMaintenance::default(),
@@ -673,6 +680,7 @@ impl App {
             pending_catalog_downloads: BTreeSet::new(),
             pending_catalog_images: BTreeMap::new(),
             pending_covers: BTreeSet::new(),
+            cover_ui_changes: BTreeSet::new(),
             deferred_cover_refill: None,
             pending_articles: BTreeSet::new(),
             pending_article_requests: BTreeMap::new(),
@@ -696,6 +704,7 @@ impl App {
             } else if !options.initial_screen.is_empty() {
                 state.prepare_screen(&options.initial_screen)?;
             }
+            state.restore_download_notice();
             state.render()?;
             state.query_reader_light();
             if configured && !state.force_offline {
@@ -911,6 +920,7 @@ impl App {
             self.render()?;
         } else {
             self.flush_download_ui(Instant::now())?;
+            self.flush_cover_ui();
             self.refill_deferred_visible_covers();
         }
         Ok(())
@@ -1074,9 +1084,11 @@ impl App {
             self.store.save_task(&task)?;
         }
         self.downloads.clear();
+        self.download_notice = None;
         self.download_ui_changes.clear();
         self.retire_task_wake_guard();
         self.pending_covers.clear();
+        self.cover_ui_changes.clear();
         self.deferred_cover_refill = None;
         self.pending_articles.clear();
         self.pending_article_requests.clear();
@@ -1471,6 +1483,7 @@ impl App {
         };
         ui.global::<Theme>().set_scribe(self.profile.is_scribe());
         let shell = ui.global::<ShellModel>();
+        self.render_download_notice();
         shell.set_route(self.route.name().into());
         shell.set_online(self.online);
         shell.set_demo(self.demo);
@@ -1500,8 +1513,10 @@ impl App {
             Route::Settings => self.render_settings()?,
             Route::Article(_) => self.render_article()?,
         }
+        self.render_download_notice();
         self.download_ui_changes.clear();
         self.download_ui_refresh_at = Instant::now() + Duration::from_secs(1);
+        self.cover_ui_changes.clear();
         Ok(())
     }
 

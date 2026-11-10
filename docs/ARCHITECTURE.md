@@ -12,11 +12,60 @@ Book-resource authentication uses an explicit origin boundary: HTTPS port 443 on
 
 Converted chapter resources may use the physically observed `CB_{book_id}_` root-member namespace. Plans provide the current book's exact prefix; only its unambiguous filename aliases can bind qualified HTML references. Exact paths remain authoritative, queries and case remain distinct, and raw path collisions are rejected before content deduplication can hide them. This is a scoped project contract established by private-device diagnosis, with synthetic fixtures and no private identifiers in source.
 
-Accepted download-performance work keeps a serial chapter/checkpoint order while permitting two independent EPUB shards within a chapter. Requests share the existing authentication budget; Cookie changes cause a fresh serial read and disable further task parallelism. Reader/JSON gzip retains decoded-size limits, and verified TXT hints live only in their client/account/book/task scope. Image preparation uses an 8 MiB task PNG cache with cancellation closure and per-chapter bindings; worker-produced metadata is hash-bound before UI commit. Body/cursor/count updates are transactional, terminal writes compare the persistent task snapshot, and background UI updates avoid rebuilding covers. Cross-chapter prefetch and HTTP/2 remain later decisions. [Performance](DOWNLOAD_PERFORMANCE.md) distinguishes remote component measurements from device gates.
+Accepted download-performance work permits two independent EPUB shards within a chapter. Requests share the existing authentication budget; Cookie changes cause a fresh serial shard read and disable subsequent task shard parallelism. Reader/JSON gzip retains decoded-size limits, and verified TXT hints live only in their client/account/book/task scope. Image preparation uses an 8 MiB task PNG cache with cancellation closure and per-chapter bindings; worker-produced metadata is hash-bound before UI commit. Body/cursor/count updates are transactional, terminal writes compare the persistent task snapshot, and background UI updates avoid rebuilding covers. [Performance](DOWNLOAD_PERFORMANCE.md) distinguishes the original remote component measurements from device gates.
+
+The accepted 2026-11-10 [download and Library changes](DOWNLOAD_AND_LIBRARY_POLISH.md) supersede serial-only chapter acquisition. Chapter concurrency is a locally saved preference, defaulting to eight and bounded from one through sixteen, captured when a task starts or resumes. Fetches overlap while image preparation and durable checkpoints retain their original order. Cover completions patch only current visible rows in one mailbox batch, using non-flashing dirty-region UI refreshes rather than whole-page model reconstruction. The Reader/Article image policy remains separate. HTTP/2 and Reader-session reuse remain later decisions.
+
+The physical follow-up found ordinary long-catalog Reader pages above the
+speculative 512 KiB limit. The correction separates Reader acquisition from
+chapter-shard limits: a task learns its large-page mode, and a single permit
+shared across download tasks covers the full Reader response and parsing until
+HTML is released. Small Reader pages and chapter shards retain the bounded
+parallel path. A single oversized body can be retried alone; its successful
+checkpoint restores the configured window. Complete cached image chapters are
+marked in bodyless plans and revalidated at consumption. A single-use resource
+proof permits their cached SQL checkpoint; it does not weaken UID, account,
+full-content, body, or task-plan comparisons.
+
+Error `-10102` has no verified dedicated meaning in the reviewed official
+client. A client recovery policy is confined to chapter-download reads: the
+same unadvanced checkpoint can retry after 60, 120, and 240 seconds, with a
+persisted deadline and attempt budget. Progress resets the consecutive-failure
+budget; cancellation clears it; exhaustion requires explicit continuation.
+Waiting and interrupted states stay visible without rebuilding the Library on
+every tick. This does not change global reading-report retries, purchase flows,
+or the existing content-permission rules.
+
+The user's later 2026-11-10 instruction supersedes request-error-driven
+task-wide pause with [independent chapter completion and retry](INDEPENDENT_CHAPTER_DOWNLOADS.md).
+Normalized schema-3 chapter state owns each UID's completion, bounded retries,
+and deadline. Successful results commit in completion order while a single
+writer preserves transactional content, resource-proof, and progress checks.
+`completed_count` is distinct from the contiguous `next_index` compatibility
+prefix. Retry waits release worker and payload credits; active explicit retry
+resets only blocked ordinals through a bounded coalescing control signal.
+Account/lifecycle fences and user cancellation retain their original scope.
+Large Reader pages use a shared 16 MiB reservation pool and at most two actual
+parser workers, with an exclusive legacy 24 MiB transport allowance. No Reader
+session or entitlement proof is reused across chapters. The later bounded
+Scribe 2022 / firmware 5.19.5 follow-up installed `dd8ac6c3` and confirmed schema
+3. Its native synthetic comparison supports a four/eight-worker saturation
+range for the measured fixture, not a production optimum or a default change.
+The default remains eight, the reservation pool remains 16 MiB, and the parser
+limit remains two. Physical and sampling failures are recorded in the
+implementation record separately from the earlier `985efefc` observations.
+
+The later [Reader budget experiment](READER_BUDGET_EXPERIMENT.md) exercised
+16/32 MiB pools and two/four parser permits in eighteen native Scribe samples.
+It found no reliable total-time gain from the larger pool and higher elapsed
+times with four permits in the measured workload. The accepted production
+16 MiB/two-permit policy and default eight chapter workers therefore remain
+unchanged. This is measured configuration evidence, not a device-wide upper
+limit or a general claim for all network conditions.
 
 The application has its own package identity, executable, data directory, UI, and launcher. Reusing a GUI framework or a device adapter does not turn it into a plugin of another application.
 
-Resource admission uses RAII credits retained through active work, queued results, and UI processing: eight metadata credits, two public-image credits within that budget, one login credit, one download-packet credit acquired before chapter-data acquisition or cloning, and one independent opportunistic progress credit. Download plans retain only bounded remaining-task metadata. A cached checkpoint sends identity and cursor data under the packet credit; persistence verifies the actual durable task, chapter, full-content ownership, and nonblank text before advancing the cursor. Only the current visible chapter is read when needed. Download preparation remains serial, with its permit held by the actual blocking worker. Busy and cancellation outcomes settle application state immediately without an unlimited control queue or receiver ownership cycle. Account and sleep fences discard actual stale packets rather than releasing credits while their buffers remain alive.
+Resource admission uses RAII credits retained through active work, queued results, and UI processing: eight metadata credits, two public-image credits within that budget, one login credit, bounded download-fetch credits acquired before chapter-data acquisition or cloning, one ordered download-packet credit, and one independent opportunistic progress credit. Download plans retain only bounded remaining-task metadata. A cached checkpoint sends identity and cursor data under the packet credit; persistence verifies the actual durable task, chapter, full-content ownership, and nonblank text before advancing the cursor. Only the current visible chapter is read when needed. Download preparation remains serial, with its permit held by the actual blocking worker. Busy and cancellation outcomes settle application state immediately without an unlimited control queue or receiver ownership cycle. Account and sleep fences discard actual stale packets rather than releasing credits while their buffers remain alive.
 
 Fixed reviewed HTTPS/443 destinations retain capped first-party connection reuse. One shared arbitrary-resource client disables idle retention, with transport choice checked again for each redirect hop independently of cookie permission. Catalog admission prices new-row and inherited-owner metadata before copying; existing bodies remain in SQL during stable-UID reindexing. Cached underline and thought reads admit encoded bytes and record count in SQL before deserialization. The UI pages lightweight thought descriptors before loading bounded visible previews. Cache integrity proofs are operation-local, use streaming reads, and check original publication-destination identity before scoped cleanup can mutate it.
 
@@ -65,7 +114,7 @@ subdivision, cell-chain, row, sample, and reserve operations can stop early;
 only a complete successful staging result replaces the caller image. The
 existing outline-mask target limits remain independent of this fill policy.
 
-Stopping hardware workers remain owned until joined. Terminal cleanup independently stops producers, joins hardware workers, and checks native command quiescence even when persistence or a synchronous result handler fails. Cache cleanup identities survive publication and deletion failures; bounded diagnostics and compact confirmed-report evidence limit incidental operational history. [Resource lifetime review](RESOURCE_LEAK_REVIEW.md) separates integration, round results, and verification evidence. These changes do not authorize cross-chapter prefetch or a new download pipeline.
+Stopping hardware workers remain owned until joined. Terminal cleanup independently stops producers, joins hardware workers, and checks native command quiescence even when persistence or a synchronous result handler fails. Cache cleanup identities survive publication and deletion failures; bounded diagnostics and compact confirmed-report evidence limit incidental operational history. [Resource lifetime review](RESOURCE_LEAK_REVIEW.md) separates integration, round results, and verification evidence. Its original scope did not authorize cross-chapter prefetch; the separate 2026-11-10 user request and implementation record now govern that change.
 
 Operational session state also has explicit count and byte limits, applied atomically without evicting credentials or replaying elapsed-time writes. Local import checks both retained records and repeated decoding work. Its ZIP entry limit must apply before the dependency creates a central-directory index. The development source therefore retains the already resolved MIT-licensed `zip` 4.6.1 and a narrowly scoped bounded constructor under `vendor/zip`; the upstream source checksum and patch record justify this exact local revision. The bounded entry point reuses the parser's ZIP64 and candidate-fallback behavior. This is a reviewed resource boundary, with no upstream version upgrade or new project-license decision.
 

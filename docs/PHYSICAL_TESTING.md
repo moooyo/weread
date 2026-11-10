@@ -1,6 +1,6 @@
 # Physical Kindle testing
 
-Development is continuing. The observations in this document do not complete acceptance of the latest source or establish a supported model/firmware matrix. Historical artifact identifiers remain attached to their own results; no new run date is assigned here.
+Development is continuing. The observations in this document do not complete acceptance of the latest source or establish a supported model/firmware matrix. Historical artifact identifiers and dates remain attached to their own results.
 
 ## Identified physical environment
 
@@ -10,6 +10,81 @@ Development is continuing. The observations in this document do not complete acc
 - Scope: supervised device iterations and private daily-trial observations, separate from the Scribe 2022 firmware 5.20.1 VM experiments.
 
 No device address, credential, serial number, private note text, or account content is part of this record. Offline demonstration results do not establish live-account authentication, content entitlements, or upstream writes.
+
+## Relaxed Reader budget comparison
+
+The 2026-11-11 user-authorized comparison ran a separate native ARM harness on
+the identified Scribe 2022 / firmware 5.19.5. All eighteen cases passed: three
+fresh processes for each of six pool/parser/chapter-worker combinations. Each
+used the same 32 synthetic chapters, approximately 1.35 MiB Reader pages, gzip,
+and 90 ms fixture delay, with the loopback server on the Kindle itself.
+
+At sixteen chapter workers, the 16 MiB/two-parser baseline took a median
+2.569 s; 32 MiB/two took 2.567 s, with overlapping ranges. The larger pool
+actually reached sixteen Reader HTTP requests, but fixture-process sampled peak
+RSS median increased from 25.23 to 36.84 MiB. Four parser permits increased
+median elapsed by approximately 5.5-6.9%. The default-eight comparison showed
+no reliable gain. The [full record](READER_BUDGET_EXPERIMENT.md) preserves raw
+repetitions, the first-wave barrier qualification, CPU/RSS scope, and limits.
+
+Only a scratch executable and synthetic logs were staged. The installed
+`dd8ac6c3` application, launcher, data, and settings were retained. Native
+metadata matched, owned processes and scratch were removed, transports closed,
+and exact lease release occurred at 01:20:25.081063 +08:00, followed by an
+independent absence check. These source-fixture results do not establish full
+application/UI memory, live-service throughput, or a hardware performance limit.
+
+## Bounded independent-chapter follow-up
+
+The 2026-11-10/11 follow-up used this same Scribe 2022 / firmware 5.19.5.
+The native ARM Reader fixture compared one fixed-order sample at 1/2/4/8/16
+chapter workers: 3,620/2,004/1,330/1,340/1,402 ms for sixteen synthetic chapters.
+Actual Reader HTTP peaks were 1/2/4/8/8. Four and eight differ by only 10 ms;
+this is not a statistical or production optimum. The fixture excludes the
+application UI, images, persistence, and real upstream conditions.
+
+After a fresh coherent private backup, production ARM `dd8ac6c3` replaced
+`985efefc`; launcher `a5fec72f` and frame guard `a235b41c` remained unchanged.
+The first ten-second startup attempt still observed schema 2 and its
+stop script exposed the device's integer-only `sleep` utility. An immediate
+identity-bound recovery corrected that script and verified native restoration
+and exact lease release at 2026-11-11 00:04:30.682944 +08:00.
+
+A separate fresh window confirmed schema 3 and captured 24.36 seconds at eight
+workers. One bound task advanced from 288 to 309 complete selected chapters:
+21 durable completions, 0.8621 chapters/second. Sampled RSS peaked at 241,632 KiB;
+the process-lifetime HWM was 246,812 KiB. CPU was 82.88% of one core. Reader
+reservations reached 16 MiB/eight admitted pages, with two parser workers.
+Admitted pages include fetch/wait/parse lifetime; actual Reader-only HTTP
+concurrency is unavailable in production logs. The download's HTTP and chapter
+read lifetime peaks were eight.
+
+The exact window contained 194 Reader-session HTTP-426 log events and 31
+`-10102` occurrences. At t1, 31 chapters were waiting and 187 were blocked, with
+the task still Running and ready work retained. Those are event/state counts,
+not an upstream error explanation or a full-book completion claim. No sampled
+completion count exceeded its contiguous prefix, so this window does not
+independently establish physical out-of-order publication. The controlled
+source/controller regressions remain the evidence for that case.
+
+Four-worker sampling qualification did not complete. The initial follow-up
+checked for a new download record before the new process had started work;
+the corrected attempt later failed its full process/display identity gate.
+These failures remain separate from application download evidence and cannot
+be used to rank production concurrency. The last attempt's exact new log
+segment still records a four-worker start, 30 checkpoints over a 29,643 ms task
+lifetime, and cold progress from 309 to 339 complete chapters. It does not
+provide the planned fixed-window process measurements or establish startup
+failure. Original concurrency eight and native
+dark metadata were restored. The later windows exactly released their leases
+at 00:10:03.618297 and 00:14:03.544744 +08:00, with independent absence checks.
+
+[Independent chapter downloads](INDEPENDENT_CHAPTER_DOWNLOADS.md) retains
+artifact identities, anonymous numeric receipts, and the open physical gates.
+Raw logs, task/account bindings, database copies, and backups remain private on
+the designated worker. This source does not inherit the earlier user visual
+and touch acceptance, nor does the bounded run establish sustained throughput,
+automatic-retry completion, a statistically optimal setting, or other devices.
 
 ## Current native reading corrections
 

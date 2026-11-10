@@ -1,4 +1,9 @@
 use super::*;
+
+#[path = "download_cache_reuse_tests.rs"]
+mod cache_reuse_tests;
+#[path = "download_recovery_tests.rs"]
+mod recovery_tests;
 use crate::{
     book_assets::{PreparedChapterImages, prepare_chapter_metadata, prepare_downloaded},
     jobs::JobResult,
@@ -98,7 +103,7 @@ fn seed_remote(state: &mut App, count: u32) -> Result<()> {
 
 fn begin_task(state: &mut App, indices: Vec<u32>, include_images: bool) -> Result<DownloadTask> {
     let task = DownloadTask {
-        id: "fixture-download".into(),
+        id: unique_id("fixture-download"),
         book_id: "fixture-book".into(),
         account_key: state
             .jobs
@@ -113,6 +118,10 @@ fn begin_task(state: &mut App, indices: Vec<u32>, include_images: bool) -> Resul
         ..DownloadTask::default()
     };
     state.store.save_task(&task)?;
+    state
+        .store
+        .prepare_download_chapter_states(&task, task.updated_at)?;
+    let task = state.store.task(&task.id)?.unwrap();
     state.current_download = Some(task.clone());
     state.download_request = 51;
     state.download_ui_refresh_at = Instant::now() + Duration::from_secs(60);
@@ -145,7 +154,12 @@ fn packet_event(
             result: JobResult::Downloaded {
                 task_id: task.id.clone(),
                 chapter,
-                next_index: task.next_index + 1,
+                next_index: task
+                    .chapters
+                    .iter()
+                    .position(|selected| *selected == index)
+                    .unwrap()
+                    + 1,
                 html: html.map(str::to_owned),
                 metadata,
                 images,
@@ -166,7 +180,6 @@ fn access_packet_event(
     let (mut packet, reply) = packet_event(state, index, text, html, None)?;
     if let JobResult::Downloaded {
         chapter,
-        next_index,
         html,
         metadata,
         ..
@@ -174,9 +187,6 @@ fn access_packet_event(
     {
         chapter.content_status = status;
         chapter.cached = status == ContentStatus::Full;
-        if status != ContentStatus::Full {
-            *next_index = state.current_download.as_ref().unwrap().next_index;
-        }
         if status == ContentStatus::Locked && text.is_empty() {
             chapter.body = None;
             *html = None;
@@ -263,6 +273,8 @@ fn run_background_checkpoints(
         JobResult::DownloadProgress {
             task_id: task.id,
             completed: 2,
+            waiting: 0,
+            blocked: 0,
             total: 3,
             title: "Fixture chapter 1".into(),
         },
@@ -454,6 +466,76 @@ fn run_reader_image_complement(
 #[test]
 fn active_reader_image_complement_reflows_immediately_without_double_counting_text() -> Result<()> {
     on_ui_thread(run_reader_image_complement)
+}
+
+fn run_incomplete_images_keep_text(
+    _: &AppWindow,
+    application: &Rc<RefCell<App>>,
+    _: &Path,
+) -> Result<()> {
+    let mut state = application.borrow_mut();
+    seed_remote(&mut state, 2)?;
+    let task = begin_task(&mut state, vec![0, 1], true)?;
+    let text = "A stable paragraph with a missing requested image.";
+    let html = format!("<p>{text}</p><img src='images/missing.png'>");
+    let (packet, mut reply) = packet_event(&state, 0, text, Some(&html), None)?;
+    state.handle_job(packet)?;
+    assert!(matches!(
+        reply.try_recv(),
+        Ok(Err(source::SourceError::ContentUnverified))
+    ));
+    let body = state.store.chapter("fixture-book", 0)?.unwrap();
+    assert_eq!(body.body.as_deref(), Some(text));
+    assert!(body.cached);
+    assert_eq!(body.content_status, ContentStatus::Full);
+    assert_eq!(state.store.task(&task.id)?.unwrap().completed_count, 0);
+    assert!(
+        !state
+            .book_assets
+            .chapter(&state.store, "fixture-book", &body.id)?
+            .unwrap()
+            .complete
+    );
+    let personal = fixture_personal_records(&state)?;
+    let (checkpoint, mut retry) = tokio::sync::oneshot::channel();
+    let failed = event(
+        &state,
+        JobResult::DownloadChapterFailed {
+            task_id: task.id.clone(),
+            chapter_id: body.id,
+            chapter_index: 0,
+            ordinal: 0,
+            error: source::SourceError::ContentUnverified,
+            checkpoint,
+        },
+    );
+    state.handle_job(failed)?;
+    assert!(matches!(
+        retry.try_recv(),
+        Ok(Ok(DownloadChapterRetry::Blocked))
+    ));
+    let next = "An independently complete image-free chapter.";
+    let (packet, mut reply) = packet_event(&state, 1, next, Some(&format!("<p>{next}</p>")), None)?;
+    state.handle_job(packet)?;
+    assert!(matches!(reply.try_recv(), Ok(Ok(()))));
+    let saved = state.store.task(&task.id)?.unwrap();
+    assert_eq!(saved.completed_count, 1);
+    assert_eq!(saved.next_index, 0);
+    assert_eq!(saved.status, DownloadStatus::Running);
+    assert_eq!(
+        state.store.chapter_body("fixture-book", 0)?.as_deref(),
+        Some(text)
+    );
+    assert_eq!(state.store.annotations("fixture-book")?, vec![personal.0]);
+    assert_eq!(state.store.bookmarks("fixture-book")?, vec![personal.1]);
+    assert_eq!(state.store.position("fixture-book")?, Some(personal.2));
+    Ok(())
+}
+
+#[test]
+fn incomplete_image_publication_keeps_full_text_without_completing_or_stopping_later_chapters()
+-> Result<()> {
+    on_ui_thread(run_incomplete_images_keep_text)
 }
 
 fn run_rejected_checkpoint(ui: &AppWindow, application: &Rc<RefCell<App>>, _: &Path) -> Result<()> {
@@ -759,6 +841,8 @@ fn run_list_retry_layout(ui: &AppWindow, application: &Rc<RefCell<App>>, _: &Pat
         JobResult::DownloadProgress {
             task_id: task.id.clone(),
             completed: 1,
+            waiting: 0,
+            blocked: 0,
             total: 2,
             title: "Fixture chapter 0".into(),
         },
@@ -773,6 +857,8 @@ fn run_list_retry_layout(ui: &AppWindow, application: &Rc<RefCell<App>>, _: &Pat
         JobResult::DownloadProgress {
             task_id: task.id,
             completed: 1,
+            waiting: 0,
+            blocked: 0,
             total: 2,
             title: "Fixture chapter 0".into(),
         },
@@ -859,25 +945,60 @@ fn run_access_terminal_feedback(
             .set_dialog_kind("downloading".into());
         ui.global::<ShellModel>()
             .set_task_label("Fixture content check in progress".into());
+        let (checkpoint, mut retry) = tokio::sync::oneshot::channel();
+        let failure = event(
+            &state,
+            JobResult::DownloadChapterFailed {
+                task_id: task.id.clone(),
+                chapter_id: "fixture-chapter-0".into(),
+                chapter_index: 0,
+                ordinal: 0,
+                error,
+                checkpoint,
+            },
+        );
+        state.handle_job(failure)?;
+        assert!(matches!(
+            retry.try_recv(),
+            Ok(Ok(DownloadChapterRetry::Blocked))
+        ));
+        assert_eq!(
+            state.current_download.as_ref().unwrap().status,
+            DownloadStatus::Running
+        );
         let terminal = event(
             &state,
-            JobResult::DownloadFailed {
+            JobResult::DownloadIncomplete {
                 task_id: task.id.clone(),
-                error,
+                completed: 0,
+                blocked: 1,
+                total: 1,
             },
         );
         state.handle_job(terminal)?;
         let saved = state.store.task(&task.id)?.unwrap();
-        assert_eq!(saved.status, DownloadStatus::Paused);
+        assert_eq!(saved.status, DownloadStatus::Failed);
         assert_eq!(saved.next_index, 0);
-        assert_eq!(saved.error.as_deref(), Some(redacted_error.as_str()));
+        assert!(saved.error.is_none());
+        assert_eq!(
+            state.store.download_chapter_states(&task.id)?[0]
+                .error
+                .as_deref(),
+            Some(redacted_error.as_str())
+        );
         assert_eq!(state.route, route);
         assert!(state.online);
         assert!(state.current_download.is_none());
         assert!(state.downloads.is_empty());
-        assert!(ui.global::<ShellModel>().get_task_label().is_empty());
-        assert!(ui.global::<ShellModel>().get_dialog_kind().is_empty());
-        assert!(!ui.global::<ShellModel>().get_toast().is_empty());
+        assert!(!ui.global::<ShellModel>().get_task_label().is_empty());
+        assert_eq!(
+            ui.global::<ShellModel>().get_dialog_kind().as_str(),
+            "confirm"
+        );
+        assert_eq!(
+            ui.global::<ShellModel>().get_dialog_primary().as_str(),
+            tr("download_retry_chapters")
+        );
         assert_ne!(
             ui.global::<ShellModel>().get_toast().as_str(),
             tr("session_expired").as_str()
@@ -893,8 +1014,7 @@ fn run_access_terminal_feedback(
 }
 
 #[test]
-fn access_failures_pause_for_explicit_refresh_without_expiring_login_or_network_retry() -> Result<()>
-{
+fn access_failures_block_only_the_chapter_and_offer_retry_without_expiring_login() -> Result<()> {
     on_ui_thread(run_access_terminal_feedback)
 }
 

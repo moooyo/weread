@@ -46,7 +46,38 @@ Authenticated book resources use the primary WeRead origin and the individually 
 
 [Download performance](docs/DOWNLOAD_PERFORMANCE.md) records implemented priority-1/2 page compression, task TXT hints, two-shard reads with serial fallback, prepared-image reuse, and UI/checkpoint/cache improvements. That source passed 334 remote library tests and three explicit controlled benchmarks. Its physical continuation completed the transfer workflow but included 25 previews; those results do not prove full-book completeness or a Kindle speedup. See [Content access](docs/CONTENT_ACCESS.md) for the correction and separate acceptance gates.
 
-[Further download research](docs/DOWNLOAD_PERFORMANCE_NEXT.md) records newly reviewed official Reader-state reuse, bounded pipeline design, and recovery-cache opportunities. These remain research proposals, with no verified EPUB/TXT bulk-download route or additional device speed claim.
+[Download settings and Library polish](docs/DOWNLOAD_AND_LIBRARY_POLISH.md) records the 2026-11-10 request for chapter-download concurrency in **Settings > Downloads and storage**, with a default of eight and a range of one through sixteen. The setting is saved locally and applies when a task starts or resumes. Cover arrivals update visible rows in batches without repeated full-screen flashes, and redundant explanations have been removed. The physical follow-up identified a long-catalog fallback and upstream error `-10102`. The corrected candidate keeps large Reader pages behind a shared admission gate, adds bounded download-only recovery with persistent feedback, and skips verified complete chapters in image-enabled queued and resumed tasks. It passed 1,534 library tests, 52 Main tests, 133 standard desktop checks, and 34 recovery-interface checks. ARM `985efefc` was installed for that round with existing data preserved. The scoped Scribe repeat retained the configured window of eight and automatically resumed after source rejection, advancing the cached count from 71 to 305 before the user requested observation to end. Native control and the device lease were returned. The service can still return `-10102`; its dedicated meaning and full-book completion are not claimed. Earlier Library/default-eight/touch observations retain their own artifact scope.
+
+[Further download research](docs/DOWNLOAD_PERFORMANCE_NEXT.md) records reviewed official Reader-state reuse and recovery-cache opportunities. Those protocol and persistent-cache ideas remain proposals; the later user-authorized chapter concurrency has its own implementation record above. There is no verified EPUB/TXT bulk-file route or additional device speed claim.
+
+[Independent chapter downloads](docs/INDEPENDENT_CHAPTER_DOWNLOADS.md) records the
+later user decision to complete and retry chapters independently, without a
+request-error policy that pauses the entire book. The new source saves results
+in completion order, preserves per-chapter state across restart, permits retry
+of blocked chapters while peers remain active, and admits large Reader pages
+through a shared byte budget with two parser workers. It upgrades task metadata
+to schema 3. Remote verification passed 1,603 library tests, 52 Main tests,
+133 standard desktop checks, and 44 independent-chapter interface checks.
+The matching ARM development bundle is built. The subsequent bounded physical
+follow-up installed ARM `dd8ac6c3`, retained private pre-upgrade backups, and
+confirmed schema 3 on Scribe 2022 / firmware 5.19.5. A 24.36-second eight-worker
+window saved 21 chapters. A native synthetic comparison reached its fastest
+single sample at four workers, only 10 ms ahead of eight; sixteen still reached
+eight simultaneous Reader requests under the byte budget. Upstream HTTP 426
+and `-10102`, plus incomplete four-worker sampling qualification, prevent a
+production optimum claim. The default remains eight. All follow-up device
+windows ended with native restoration, original-setting restoration, and exact
+lease release; the implementation record retains the failed sampling checks
+and remaining physical gates.
+
+[Reader budget experiment](docs/READER_BUDGET_EXPERIMENT.md) records the later
+user-authorized native comparison of 16/32 MiB pools and two/four parser permits.
+All eighteen Scribe 2022 / 5.19.5 cases passed. At sixteen chapter workers,
+doubling only the pool changed median total elapsed by less than 0.1% while
+increasing fixture-process sampled peak RSS by about 46%; four parser permits
+increased elapsed by approximately 5.5-6.9%. Default-eight samples likewise
+showed no reliable speedup. Production limits and the installed build remain
+unchanged, with workload and timing qualifications retained in the record.
 
 [Content access and preview recovery](docs/CONTENT_ACCESS.md) separates verified chapter text from previews and unverified legacy caches. Limited content remains readable, but does not count as a full download or a completed reading position. After obtaining reading rights in the phone application, use **Refresh access and complete content** in book details or the Reader notice. This only revalidates existing rights; it does not purchase a book or a membership. Migration preserves cached text, positions, bookmarks, and notes, and incompatible text is retained for safe recovery. The correction's verification and live unlock acceptance are recorded separately from the earlier transport results.
 

@@ -498,7 +498,8 @@ class Verifier:
                 action(300, "auxiliary", "settings.open", "sync"), action(500, "auxiliary", "settings.toggle", "report_time"),
                 action(700, "auxiliary", "settings.open", "notes"), action(900, "auxiliary", "settings.toggle", "popular"), action(1_100, "auxiliary", "settings.increase", "edge_region"), action(1_300, "auxiliary", "settings.increase", "popup_height"),
                 action(1_500, "auxiliary", "settings.open", "storage"), action(1_700, "auxiliary", "settings.toggle", "download_article_images"),
-                action(1_900, "auxiliary", "settings.page", "1"), action(2_100, "auxiliary", "settings.page", "-1"), action(2_300, "auxiliary", "settings.open", "storage"),
+                action(1_900, "auxiliary", "settings.increase", "download_concurrency"), action(2_100, "auxiliary", "settings.increase", "download_concurrency"), action(2_300, "auxiliary", "settings.decrease", "download_concurrency"),
+                action(2_500, "auxiliary", "settings.page", "1"), action(2_700, "auxiliary", "settings.page", "-1"), action(2_900, "auxiliary", "settings.open", "storage"),
             ],
         )
         self.assertion(f"{key}/controls-persisted", lambda: settings_persistence(saved.database), saved)
@@ -781,8 +782,9 @@ def settings_persistence(database: Path) -> dict[str, Any]:
     require(preferences["edge_region"] == 25, "The edge-region stepper did not add its defined five-percent step")
     require(preferences["popup_height"] == 66, "The popup-height stepper did not add its defined four-percent step")
     require(preferences["download_article_images"] is True, "The article-image preference was not saved")
+    require(preferences["download_concurrency"] == 9, "The chapter-download stepper did not retain its default-eight adjustment")
     require(preferences["report_time"] is True, "An unavailable remote reporting toggle accepted an offline mutation")
-    return {key: preferences[key] for key in ("popular", "edge_region", "popup_height", "download_article_images", "report_time")}
+    return {key: preferences[key] for key in ("popular", "edge_region", "popup_height", "download_article_images", "download_concurrency", "report_time")}
 
 
 def imported_book(database: Path) -> dict[str, Any]:

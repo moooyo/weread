@@ -7,6 +7,21 @@ use std::sync::{Condvar, Mutex};
 use std::thread;
 use std::time::Instant;
 
+#[path = "concurrent_access_refresh_tests.rs"]
+mod concurrent_access_refresh_tests;
+
+#[path = "chapter_prefetch_tests.rs"]
+mod chapter_prefetch_tests;
+
+#[path = "download_rejection_tests.rs"]
+mod download_rejection_tests;
+
+#[path = "download_cache_reuse_tests.rs"]
+mod download_cache_reuse_tests;
+
+#[path = "large_catalog_concurrency_tests.rs"]
+mod large_catalog_concurrency_tests;
+
 const SHARDS: [&str; 3] = [
     "136D662D62D94B3AF8CEFB644E5DA3D8aSGVsWR",
     "F3BB6E9F13A09F4EC190181148A2520F8sIlYHJ",
@@ -825,7 +840,7 @@ fn out_of_order_rotations_force_one_serial_restart_and_remain_serial_for_the_tas
         let content = client.chapter_with_hints("fixture-book", "2", &mut hints).await.unwrap();
         assert_eq!(content.plain_text, "Hello, reader!");
     });
-    assert!(hints.serial_epub);
+    assert!(hints.serial_epub.load(Ordering::SeqCst));
     assert_eq!(readers.load(Ordering::SeqCst), 3);
     assert_eq!(
         client.session().cookies["wr_skey"],
@@ -993,7 +1008,7 @@ fn mock_latency_download_network_benchmark() {
         let client = fixture.client();
         let mut hints = ChapterReadHints::default();
         hints.bind(&client, "fixture-book");
-        hints.serial_epub = serial;
+        hints.serial_epub.store(serial, Ordering::SeqCst);
         let started = Instant::now();
         runtime().block_on(async {
             for chapter in 0..CHAPTERS {

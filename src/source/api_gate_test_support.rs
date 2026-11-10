@@ -61,6 +61,11 @@ impl Reply {
         }
     }
 
+    pub(crate) fn with_status(mut self, status: u16) -> Self {
+        self.status = status;
+        self
+    }
+
     pub(crate) fn cookie(mut self, cookie: impl Into<String>) -> Self {
         self.headers.push(("Set-Cookie".into(), cookie.into()));
         self

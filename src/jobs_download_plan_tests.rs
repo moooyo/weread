@@ -163,3 +163,117 @@ fn mismatched_plan_submission_does_not_cancel_a_current_task() {
     assert!(jobs.cancel_download(&first.id).is_some());
     runtime.block_on(tokio::task::yield_now());
 }
+
+fn chapter_states(count: usize) -> Vec<domain::DownloadChapterState> {
+    (0..count)
+        .map(|ordinal| domain::DownloadChapterState {
+            chapter_uid: format!("uid-{ordinal}"),
+            chapter_index: ordinal as u32,
+            ordinal,
+            ..Default::default()
+        })
+        .collect()
+}
+
+#[test]
+fn persisted_out_of_order_completions_are_separate_from_waiting_and_blocked_chapters() {
+    let task = task(4);
+    let mut states = chapter_states(4);
+    states[1].status = domain::DownloadChapterStatus::Complete;
+    states[2].status = domain::DownloadChapterStatus::RetryWait;
+    states[2].retry_count = 2;
+    states[2].retry_not_before = 2_000_000_000;
+    states[2].error = Some("source.api.-10102".into());
+    states[3].status = domain::DownloadChapterStatus::Blocked;
+    states[3].retry_count = 4;
+    states[3].error = Some("source.api.-10102".into());
+    let plan = DownloadPlan::from_headers_with_states(&task, &headers(4, true), &states).unwrap();
+    assert_eq!(plan.next_index, 0);
+    assert_eq!(plan.chapters.keys().copied().collect::<Vec<_>>(), [0, 2, 3]);
+    assert_eq!(
+        plan.states[1].status,
+        domain::DownloadChapterStatus::Complete
+    );
+    assert_eq!(
+        plan.states[2].status,
+        domain::DownloadChapterStatus::RetryWait
+    );
+    assert_eq!(plan.states[2].retry_not_before, 2_000_000_000);
+    assert_eq!(
+        plan.states[3].status,
+        domain::DownloadChapterStatus::Blocked
+    );
+}
+
+#[test]
+fn stale_complete_evidence_returns_only_its_chapter_to_pending() {
+    let task = task(3);
+    let mut states = chapter_states(3);
+    for state in &mut states {
+        state.status = domain::DownloadChapterStatus::Complete;
+    }
+    let mut headers = headers(3, true);
+    headers[0].content_account_key = "another-account".into();
+    headers[2].cached = false;
+    let plan = DownloadPlan::from_headers_with_states(&task, &headers, &states).unwrap();
+    assert_eq!(
+        plan.states[0].status,
+        domain::DownloadChapterStatus::Pending
+    );
+    assert_eq!(
+        plan.states[1].status,
+        domain::DownloadChapterStatus::Complete
+    );
+    assert_eq!(
+        plan.states[2].status,
+        domain::DownloadChapterStatus::Pending
+    );
+    assert!(!plan.chapters[&0].cached_full);
+    assert!(!plan.chapters[&2].cached_full);
+}
+
+#[test]
+fn reconciled_image_completion_remains_complete_without_another_transport_packet() {
+    let mut task = task(1);
+    task.include_images = true;
+    task.next_index = 1;
+    let mut states = chapter_states(1);
+    states[0].status = domain::DownloadChapterStatus::Complete;
+    let plan = DownloadPlan::from_headers_with_states(&task, &headers(1, true), &states).unwrap();
+    assert_eq!(
+        plan.states[0].status,
+        domain::DownloadChapterStatus::Complete
+    );
+    assert!(plan.chapters.is_empty());
+}
+
+#[test]
+fn chapter_state_identity_and_metadata_are_checked_before_scheduling() {
+    let task = task(2);
+    let headers = headers(2, true);
+    let states = chapter_states(2);
+    assert!(DownloadPlan::from_headers_with_states(&task, &headers, &states[..1]).is_err());
+    for field in 0..4 {
+        let mut malformed = states.clone();
+        match field {
+            0 => malformed[1].ordinal = 0,
+            1 => malformed[1].chapter_uid = "wrong-uid".into(),
+            2 => malformed[1].retry_not_before = -1,
+            3 => malformed[1].error = Some("e".repeat(MAX_DOWNLOAD_IDENTIFIER_BYTES + 1)),
+            _ => unreachable!(),
+        }
+        assert!(DownloadPlan::from_headers_with_states(&task, &headers, &malformed).is_err());
+    }
+    assert!(matches!(
+        DownloadPlan::from_headers_and_states(&task, &headers, Some(&states), 128),
+        Err(SourceError::ResponseTooLarge)
+    ));
+
+    let plan = DownloadPlan::from_headers_with_states(&task, &headers, &states).unwrap();
+    let mut another_task = task.clone();
+    another_task.id = "another-task-for-the-same-book".into();
+    assert!(matches!(
+        plan.validate_for(&another_task),
+        Err(SourceError::InvalidResponse("download_plan"))
+    ));
+}

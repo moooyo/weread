@@ -313,10 +313,67 @@ fn next_terminal(
         let event = next_event(runtime, receiver);
         match &event.result {
             JobResult::DownloadProgress { .. } => drop(event),
-            JobResult::DownloadFinished { .. } | JobResult::DownloadFailed { .. } => return event,
+            JobResult::DownloadFinished { .. }
+            | JobResult::DownloadIncomplete { .. }
+            | JobResult::DownloadFailed { .. } => return event,
             other => panic!("Unexpected SVG worker terminal sequence: {other:?}"),
         }
     }
+}
+
+fn acknowledge_quota_failure(
+    runtime: &tokio::runtime::Runtime,
+    receiver: &mpsc::Receiver<JobEvent>,
+    jobs: &Jobs,
+    task: &DownloadTask,
+    request: u64,
+) -> JobEvent {
+    let event = next_event(runtime, receiver);
+    assert!(jobs.accepts(&event));
+    assert_eq!(event.request, request);
+    assert!(event.credits.is_some());
+    assert_eq!(jobs.active_download().as_deref(), Some(task.id.as_str()));
+    assert_eq!(jobs.download_resource_capacity_for_tests(), (0, 1));
+    assert_eq!(
+        jobs.download_fetch_capacity_for_tests(),
+        crate::preferences::MAX_DOWNLOAD_CONCURRENCY as usize
+    );
+    let JobEvent {
+        result, credits, ..
+    } = event;
+    let JobResult::DownloadChapterFailed {
+        task_id,
+        chapter_id,
+        chapter_index,
+        ordinal,
+        error: SourceError::ResponseTooLarge,
+        checkpoint,
+    } = result
+    else {
+        panic!(
+            "The quota failure published a checkpoint or changed its error category: {result:?}"
+        );
+    };
+    assert_eq!(task_id, task.id);
+    assert_eq!(chapter_id, UID);
+    assert_eq!(chapter_index, 0);
+    assert_eq!(ordinal, 0);
+    checkpoint
+        .send(Ok(crate::domain::DownloadChapterRetry::Blocked))
+        .unwrap();
+    // The failed chapter retains only its queue credit until the owner ACKs.
+    drop((task_id, chapter_id, credits));
+    let terminal = next_terminal(runtime, receiver);
+    assert!(matches!(
+        &terminal.result,
+        JobResult::DownloadIncomplete {
+            task_id,
+            completed: 0,
+            blocked: 1,
+            total: 1,
+        } if task_id == &task.id
+    ));
+    terminal
 }
 
 fn calibrated_client(
@@ -503,19 +560,10 @@ fn full_mathml_jobs_guard_quota_rejects_before_worker_and_preserves_store_state(
         let plan =
             DownloadPlan::from_headers(&task, &store.chapter_headers(BOOK).unwrap()).unwrap();
         assert!(jobs.download(request, task.clone(), plan).is_none());
-        let terminal = next_terminal(&runtime, &receiver);
+        let terminal = acknowledge_quota_failure(&runtime, &receiver, &jobs, &task, request);
         assert_eq!(terminal.request, request);
         assert!(jobs.accepts(&terminal));
         assert!(terminal.credits.is_some());
-        match &terminal.result {
-            JobResult::DownloadFailed {
-                task_id,
-                error: SourceError::ResponseTooLarge,
-            } => {
-                assert_eq!(task_id, &task.id);
-            }
-            other => panic!("The real Full SVG guard producer returned another path: {other:?}"),
-        }
         assert!(jobs.active_download().is_none());
         assert_eq!(jobs.download_resource_capacity_for_tests(), (0, 1));
         assert_eq!(scope.stats().summary_builds, 0);

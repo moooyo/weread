@@ -151,12 +151,11 @@ export component AppWindow inherits Window {
                     Rectangle { height: 1px; background: Theme.line; }
                     RadioChoiceRow { text: Strings.text-only; selected: !ShellModel.dialog-images; clicked => { ShellModel.event("dialog-images", "false"); } }
                     RadioChoiceRow { text: Strings.text-with-images; selected: ShellModel.dialog-images; clicked => { ShellModel.event("dialog-images", "true"); } }
-                    Text { text: Strings.download-awake; color: Theme.secondary; font-family: Theme.ui-font; font-size: 14px; wrap: word-wrap; }
                 }
                 if ShellModel.dialog-kind == "downloading": VerticalLayout {
                     spacing: 12px;
                     Text { text: ShellModel.dialog-chapter; font-family: Theme.ui-font; font-size: 17px; wrap: word-wrap; }
-                    Text { text: ShellModel.task-label; font-family: Theme.ui-font; font-size: 17px; font-weight: 700; }
+                    Text { text: ShellModel.task-label; font-family: Theme.ui-font; font-size: 17px; font-weight: 700; wrap: word-wrap; }
                     ProgressTrack { value: ShellModel.dialog-progress; height: 12px; }
                 }
                 if ShellModel.dialog-kind == "jump": Rectangle {

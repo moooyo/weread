@@ -115,6 +115,7 @@ impl App {
         self.catalog_requests.clear();
         self.book_requests.clear();
         self.pending_covers.clear();
+        self.cover_ui_changes.clear();
         self.pending_articles.clear();
         self.pending_article_images.clear();
         self.article.image_work.pause_pending();

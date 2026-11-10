@@ -425,9 +425,10 @@ fn legacy_utf16_migration_keeps_body_bytes_and_original_nonempty_classification(
         .query_map([], |row| row.get::<_, String>(0))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     drop(statement);
-    // Recreate the actual version-one column boundary in this private fixture.
+    // Recreate the actual version-one table and column boundaries in this fixture.
     store.connection.execute_batch(
-        "ALTER TABLE chapters DROP COLUMN content_account_key;
+        "DROP TABLE task_chapter_states;
+        ALTER TABLE chapters DROP COLUMN content_account_key;
         ALTER TABLE chapters DROP COLUMN content_status; PRAGMA user_version=1",
     )?;
     drop(store);

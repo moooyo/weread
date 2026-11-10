@@ -11,10 +11,12 @@ use serde::{Serialize, de::DeserializeOwned};
 
 use crate::domain::{
     Annotation, Book, BookMetadata, BookStatisticsMetadata, Bookmark, Chapter, ContentStatus,
-    DownloadStatus, DownloadTask, ReadingPosition, ReadingSession, StorageSummary,
+    DownloadChapterCommit, DownloadChapterProgress, DownloadChapterRetry, DownloadChapterState,
+    DownloadChapterStatus, DownloadStatus, DownloadTask, ReadingPosition, ReadingSession,
+    StorageSummary,
 };
 
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 const MAX_CATALOG_HEADERS: usize = 8192;
 const MAX_CATALOG_HEADER_BYTES: i64 = 64 * 1024 * 1024;
 const CATALOG_INDEX_OFFSET: i64 = u32::MAX as i64 + 1;
@@ -23,6 +25,13 @@ const MAX_ENCODED_SETTING_BYTES: usize = 64 * 1024 * 1024;
 // Rust's White_Space set, expressed as a scalar SQL predicate. GLOB inspects
 // borrowed SQLite text instead of materializing a trimmed chapter-sized copy.
 const NONBLANK_BODY_PATTERN: &str = "*[^\u{9}\u{a}\u{b}\u{c}\u{d}\u{20}\u{85}\u{a0}\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}]*";
+
+#[path = "store_chapter_state.rs"]
+mod chapter_state;
+
+#[cfg(test)]
+#[path = "store_chapter_state_tests.rs"]
+mod chapter_state_tests;
 
 #[cfg(test)]
 #[path = "store_resource_tests.rs"]
@@ -2611,7 +2620,20 @@ impl Store {
                 [book_id],
             )?;
         }
-        for task in tasks {
+        let task_state_held =
+            tasks
+                .iter()
+                .try_fold(catalog_held, |held, task| -> Result<usize> {
+                    let (bytes, _) = task_borrowed_price(task)?;
+                    inventory_sum(&[held, bytes])
+                })?;
+        for mut task in tasks {
+            chapter_state::reconcile_catalog_states_on(
+                &transaction,
+                self.text_encoding,
+                &mut task,
+                task_state_held,
+            )?;
             persist_task_on(&transaction, &task)?;
         }
         transaction.execute_batch("DROP TABLE weread_catalog_map")?;
@@ -3140,46 +3162,7 @@ impl Store {
     ) -> Result<bool> {
         let transaction = self.connection.unchecked_transaction()?;
         let validated = validate_download_chapter_on(&transaction, task, chapter, next_index)?;
-        ensure!(
-            transaction.execute(
-                "UPDATE chapters SET body=?4,content_status=?5,content_account_key=?6
-                 WHERE book_id=?1 AND chapter_index=?2 AND source_id=?3",
-                params![
-                    chapter.book_id,
-                    chapter.index,
-                    chapter.id,
-                    validated.body,
-                    chapter.content_status.as_str(),
-                    chapter.content_account_key
-                ],
-            )? == 1,
-            "download checkpoint chapter disappeared"
-        );
-        if validated.was_full != validated.is_full {
-            let delta = if validated.is_full { 1_i64 } else { -1_i64 };
-            ensure!(
-                transaction.execute(
-                    "UPDATE books SET cached_chapters=cached_chapters+?2
-                     WHERE id=?1 AND cached_chapters+?2>=0",
-                    params![task.book_id, delta],
-                )? == 1,
-                "download checkpoint cached count is inconsistent"
-            );
-        }
-        if let Some(boundary) = validated.marker_boundary {
-            // Marker characters did not belong to the authorized source text.
-            // Prefix annotations were checked before the body replacement.
-            transaction.execute(
-                "UPDATE positions SET char_offset=?3
-                 WHERE book_id=?1 AND chapter_index=?2 AND char_offset>?3",
-                params![chapter.book_id, chapter.index, boundary],
-            )?;
-            transaction.execute(
-                "UPDATE bookmarks SET char_offset=?3
-                 WHERE book_id=?1 AND chapter_index=?2 AND char_offset>?3",
-                params![chapter.book_id, chapter.index, boundary],
-            )?;
-        }
+        write_download_chapter_on(&transaction, task, chapter, &validated)?;
         let next_cursor =
             i64::try_from(next_index).context("download cursor exceeds SQLite range")?;
         ensure!(
@@ -3208,6 +3191,54 @@ impl Store {
         updated_at: i64,
     ) -> Result<()> {
         ensure!(
+            !task.include_images,
+            "an image checkpoint requires freshly verified resources"
+        );
+        self.commit_cached_checkpoint(
+            task,
+            chapter_uid,
+            chapter_index,
+            next_index,
+            current_account_key,
+            updated_at,
+        )
+    }
+
+    /// Keep image reuse separate from the text-only cached entry point. The
+    /// private proof fields can only come from actual resource verification.
+    pub(crate) fn commit_verified_cached_image_download_checkpoint(
+        &self,
+        task: &DownloadTask,
+        proof: crate::book_assets::VerifiedChapterImages,
+        chapter_index: u32,
+        next_index: usize,
+        current_account_key: &str,
+        updated_at: i64,
+    ) -> Result<()> {
+        ensure!(
+            task.include_images && proof.book_id() == task.book_id,
+            "verified image checkpoint has a mismatched task or book"
+        );
+        self.commit_cached_checkpoint(
+            task,
+            proof.chapter_uid(),
+            chapter_index,
+            next_index,
+            current_account_key,
+            updated_at,
+        )
+    }
+
+    fn commit_cached_checkpoint(
+        &self,
+        task: &DownloadTask,
+        chapter_uid: &str,
+        chapter_index: u32,
+        next_index: usize,
+        current_account_key: &str,
+        updated_at: i64,
+    ) -> Result<()> {
+        ensure!(
             task.id.len() <= 4096
                 && task.book_id.len() <= 4096
                 && chapter_uid.len() <= 4096
@@ -3220,7 +3251,6 @@ impl Store {
         validate_identifier(chapter_uid)?;
         ensure!(
             task.status == DownloadStatus::Running
-                && !task.include_images
                 && task.next_index < task.chapters.len()
                 && task.chapters.get(task.next_index) == Some(&chapter_index)
                 && task.next_index.checked_add(1) == Some(next_index)
@@ -3253,7 +3283,7 @@ impl Store {
                    AND json_extract(t.payload,'$.chapters')=json(:plan)
                    AND json_type(t.payload,:chapter_path)='integer'
                    AND json_extract(t.payload,:chapter_path)=:chapter_index
-                   AND json_extract(t.payload,'$.include_images')=0
+                   AND json_extract(t.payload,'$.include_images')=:include_images
                    AND json_extract(t.payload,'$.updated_at')=:old_updated_at
                    AND json_extract(t.payload,'$.error') IS :error
                    AND EXISTS(SELECT 1 FROM chapters AS c JOIN books AS b ON b.id=c.book_id
@@ -3274,6 +3304,7 @@ impl Store {
                     ":chapter_path": &chapter_path,
                     ":chapter_index": chapter_index,
                     ":chapter_uid": chapter_uid,
+                    ":include_images": task.include_images,
                     ":error": task.error.as_deref(),
                     ":nonblank": NONBLANK_BODY_PATTERN,
                 },
@@ -4458,7 +4489,8 @@ impl Store {
                 && previous.account_key == task.account_key
                 && previous.chapters == task.chapters
                 && previous.include_images == task.include_images
-                && previous.next_index == task.next_index,
+                && previous.next_index == task.next_index
+                && previous.completed_count == task.completed_count,
             "a guarded task transition cannot change its scope or cursor"
         );
         let transaction = self.connection.unchecked_transaction()?;
@@ -4537,6 +4569,10 @@ impl Store {
             "download cursor exceeds task length"
         );
         ensure!(
+            task.completed_count <= task.chapters.len(),
+            "download completion count exceeds task length"
+        );
+        ensure!(
             task.chapters.iter().collect::<HashSet<_>>().len() == task.chapters.len(),
             "download task contains duplicate chapters"
         );
@@ -4546,6 +4582,7 @@ impl Store {
                 "incomplete task cannot be marked complete"
             );
             validate_completed_task_on(&self.connection, self.text_encoding, task)?;
+            chapter_state::validate_normalized_completion_on(&self.connection, task)?;
         }
         Ok(())
     }
@@ -4561,6 +4598,38 @@ impl Store {
         } else {
             task_inventory_by_id_on(&self.connection, self.text_encoding, id)
         }
+    }
+
+    /// Inspect one recent independent or legacy recovery candidate.
+    /// Its identifier is admitted before copying and its payload uses the same
+    /// task inventory gate as a selected task; no historical JSON scan occurs.
+    pub fn latest_download_notice_candidate(&self) -> Result<Option<DownloadTask>> {
+        let transaction = self.connection.unchecked_transaction()?;
+        let maximum = self.text_encoding.maximum_encoded(4096)?;
+        let selected: Option<Option<String>> = transaction
+            .query_row(
+                "SELECT CASE WHEN typeof(id)='text' AND COALESCE(octet_length(id),0)<=?1
+                        THEN id ELSE NULL END FROM download_tasks AS t
+                 WHERE status IN ('pending','running','paused','failed')
+                   AND (status IN ('paused','failed') OR EXISTS(
+                     SELECT 1 FROM task_chapter_states AS s WHERE s.task_id=t.id
+                       AND s.status IN ('retry_wait','blocked')))
+                 ORDER BY updated_at DESC,rowid DESC LIMIT 1",
+                [maximum],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let result = match selected {
+            None => None,
+            Some(None) => return Err(StoreInventoryUnavailable.into()),
+            Some(Some(id)) => {
+                inventory_admit("task notice identifier", id.len(), 4096)?;
+                validate_identifier(&id)?;
+                task_inventory_by_id_on(&transaction, self.text_encoding, &id)?
+            }
+        };
+        transaction.commit()?;
+        Ok(result)
     }
 
     pub fn tasks(&self) -> Result<Vec<DownloadTask>> {
@@ -5971,6 +6040,34 @@ fn validate_download_chapter_on(
         )
         .optional()?
         .context("download checkpoint has a stale task, owner, or catalog")?;
+    validate_download_content_on(connection, task, chapter, old)
+}
+
+fn validate_download_content_on(
+    connection: &Connection,
+    task: &DownloadTask,
+    chapter: &Chapter,
+    old: (Option<String>, String, String, String),
+) -> Result<ValidatedDownloadChapter> {
+    let is_full = has_full_body(chapter);
+    ensure!(
+        task.book_id == chapter.book_id
+            && chapter.content_account_key == task.account_key
+            && chapter.cached == is_full,
+        "download content does not match its task or owner"
+    );
+    if chapter.content_status == ContentStatus::Full {
+        ensure!(is_full, "full content has no readable body");
+    }
+    if chapter.content_status != ContentStatus::Locked || chapter.body.is_some() {
+        ensure!(
+            chapter
+                .body
+                .as_deref()
+                .is_some_and(|body| !body.trim().is_empty()),
+            "download checkpoint has no readable body"
+        );
+    }
     let (old_body, old_status, old_owner, source) = old;
     ensure!(
         source != "weread" || !task.account_key.is_empty(),
@@ -6021,6 +6118,54 @@ fn validate_download_chapter_on(
         is_full,
         marker_boundary,
     })
+}
+
+fn write_download_chapter_on(
+    connection: &Connection,
+    task: &DownloadTask,
+    chapter: &Chapter,
+    validated: &ValidatedDownloadChapter,
+) -> Result<()> {
+    ensure!(
+        connection.execute(
+            "UPDATE chapters SET body=?4,content_status=?5,content_account_key=?6
+             WHERE book_id=?1 AND chapter_index=?2 AND source_id=?3",
+            params![
+                chapter.book_id,
+                chapter.index,
+                chapter.id,
+                validated.body,
+                chapter.content_status.as_str(),
+                chapter.content_account_key
+            ],
+        )? == 1,
+        "download checkpoint chapter disappeared"
+    );
+    if validated.was_full != validated.is_full {
+        let delta = if validated.is_full { 1_i64 } else { -1_i64 };
+        ensure!(
+            connection.execute(
+                "UPDATE books SET cached_chapters=cached_chapters+?2
+                 WHERE id=?1 AND cached_chapters+?2>=0",
+                params![task.book_id, delta],
+            )? == 1,
+            "download checkpoint cached count is inconsistent"
+        );
+    }
+    if let Some(boundary) = validated.marker_boundary {
+        // The removed preview marker was not authorized source text.
+        connection.execute(
+            "UPDATE positions SET char_offset=?3
+             WHERE book_id=?1 AND chapter_index=?2 AND char_offset>?3",
+            params![chapter.book_id, chapter.index, boundary],
+        )?;
+        connection.execute(
+            "UPDATE bookmarks SET char_offset=?3
+             WHERE book_id=?1 AND chapter_index=?2 AND char_offset>?3",
+            params![chapter.book_id, chapter.index, boundary],
+        )?;
+    }
+    Ok(())
 }
 
 fn validate_identifier(id: &str) -> Result<()> {
@@ -7986,7 +8131,7 @@ fn task_owner_matches(payload: &str, owner: &str) -> Result<bool> {
                     self,
                     mut sequence: A,
                 ) -> std::result::Result<bool, A::Error> {
-                    // Preserve the struct sequence form accepted by serde.
+                    // Bound the legacy and current sequence forms accepted by DownloadTask.
                     sequence.next_element::<IgnoredAny>()?;
                     sequence.next_element::<IgnoredAny>()?;
                     let matched = sequence
@@ -7995,7 +8140,7 @@ fn task_owner_matches(payload: &str, owner: &str) -> Result<bool> {
                             denied: self.denied,
                         })?
                         .unwrap_or(self.owner.is_empty());
-                    for _ in 0..6 {
+                    for _ in 0..10 {
                         sequence.next_element::<IgnoredAny>()?;
                     }
                     Ok(matched)
@@ -8012,7 +8157,11 @@ fn task_owner_matches(payload: &str, owner: &str) -> Result<bool> {
                     "include_images",
                     "next_index",
                     "error",
+                    "retry_cursor",
+                    "retry_count",
+                    "retry_not_before",
                     "updated_at",
+                    "completed_count",
                 ],
                 Object {
                     owner: self.owner,
@@ -8091,7 +8240,7 @@ fn catalog_task_inventory_on(
     task_inventory_core_on(
         connection,
         encoding,
-        "SELECT rowid,typeof(payload)='text',COALESCE(octet_length(payload),0),CASE WHEN typeof(updated_at)='integer' THEN updated_at END FROM download_tasks NOT INDEXED WHERE book_id=?2 AND status IN ('pending','running','paused') LIMIT ?1",
+        "SELECT rowid,typeof(payload)='text',COALESCE(octet_length(payload),0),CASE WHEN typeof(updated_at)='integer' THEN updated_at END FROM download_tasks NOT INDEXED WHERE book_id=?2 AND status IN ('pending','running','paused','failed') LIMIT ?1",
         params![limit, book],
         true,
         None,
@@ -9039,6 +9188,7 @@ fn persist_task_on(connection: &Connection, task: &DownloadTask) -> Result<()> {
     inventory_admit("task persistence metadata", bytes, limits.metadata_bytes)?;
     inventory_admit("task persistence scratch", bytes, limits.scratch_bytes)?;
     inventory_admit("task persistence work", work, limits.work_bytes)?;
+    chapter_state::clean_states_before_task_write_on(connection, task)?;
     connection.execute("INSERT INTO download_tasks (id, book_id, status, updated_at, payload) VALUES (?1,?2,?3,?4,?5) ON CONFLICT(id) DO UPDATE SET book_id=excluded.book_id, status=excluded.status, updated_at=excluded.updated_at, payload=excluded.payload", params![task.id, task.book_id, task.status.as_str(), task.updated_at, serde_json::to_string(task)?])?;
     Ok(())
 }
@@ -9354,6 +9504,26 @@ fn migrate_with_encoding(connection: &mut Connection, encoding: TextEncoding) ->
         transaction.pragma_update(None, "user_version", 2)?;
         transaction.commit()?;
     }
+    if version < 3 {
+        let transaction = connection.transaction()?;
+        transaction.execute_batch(
+            "CREATE TABLE task_chapter_states (
+                task_id TEXT NOT NULL REFERENCES download_tasks(id) ON DELETE CASCADE,
+                chapter_uid TEXT NOT NULL,
+                ordinal INTEGER NOT NULL CHECK(ordinal>=0 AND ordinal<8192),
+                chapter_index INTEGER NOT NULL CHECK(chapter_index>=0 AND chapter_index<=4294967295),
+                status TEXT NOT NULL CHECK(status IN ('pending','complete','retry_wait','blocked')),
+                retry_count INTEGER NOT NULL DEFAULT 0 CHECK(retry_count>=0 AND retry_count<=4),
+                retry_not_before INTEGER NOT NULL DEFAULT 0,
+                error TEXT,
+                PRIMARY KEY(task_id,chapter_uid),
+                UNIQUE(task_id,ordinal)
+             );
+             CREATE INDEX task_chapter_retry ON task_chapter_states(task_id,status,retry_not_before);",
+        )?;
+        transaction.pragma_update(None, "user_version", 3)?;
+        transaction.commit()?;
+    }
     Ok(())
 }
 
@@ -9480,7 +9650,7 @@ mod tests {
         let version: i64 = store
             .connection
             .pragma_query_value(None, "user_version", |row| row.get(0))?;
-        assert_eq!(version, 2);
+        assert_eq!(version, SCHEMA_VERSION);
         let remote = store.chapter("book-1", 0)?.unwrap();
         assert_eq!(remote.content_status, ContentStatus::Unknown);
         assert_eq!(remote.content_account_key, "");

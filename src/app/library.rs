@@ -576,6 +576,48 @@ impl App {
         self.book_assets.complete_many(&self.store, book, uids)
     }
 
+    fn verify_download_images(
+        &self,
+        book: &str,
+        uids: &[&str],
+    ) -> Result<crate::book_assets::VerifiedBookImages> {
+        #[cfg(test)]
+        if let Some(work) = BULK_IMAGE_TEST_WORK.with(Cell::get) {
+            return self
+                .book_assets
+                .verify_complete_book_with_verification_budget(&self.store, book, uids, work);
+        }
+        self.book_assets
+            .verify_complete_book(&self.store, book, uids)
+    }
+
+    pub(super) fn reconcile_download_chapters(
+        &self,
+        task: &DownloadTask,
+        headers: &[Chapter],
+        updated_at: i64,
+    ) -> Result<Vec<DownloadChapterState>> {
+        if !task.include_images {
+            return self.store.prepare_download_chapter_states(task, updated_at);
+        }
+        let selected: BTreeSet<_> = task.chapters.iter().copied().collect();
+        let image_uids = headers
+            .iter()
+            .filter(|chapter| {
+                selected.contains(&chapter.index)
+                    && chapter.cached
+                    && chapter.content_status == ContentStatus::Full
+                    && chapter.content_account_key == task.account_key
+            })
+            .map(|chapter| chapter.id.as_str())
+            .collect::<Vec<_>>();
+        // One fresh operation checks cached content and images for the whole
+        // selection. Verified completions never drop out of the durable count.
+        let proof = self.verify_download_images(&task.book_id, &image_uids)?;
+        self.store
+            .prepare_download_chapter_states_with_verified_images(task, proof, updated_at)
+    }
+
     pub(super) fn requested_review_cache_key(&self, request: u64, book_id: &str) -> Option<&str> {
         let context = self.review_context.as_ref()?;
         (context.request == request
@@ -801,7 +843,7 @@ impl App {
         Ok(())
     }
 
-    fn library_page_size(&self) -> usize {
+    pub(super) fn library_page_size(&self) -> usize {
         if self.prefs.view_mode != "list" {
             return self.profile.cover_page_size();
         }
@@ -820,7 +862,13 @@ impl App {
                 + 48
                 + 48
                 + if self.online { 0 } else { 36 }
-                + if has_status { 32 } else { 0 },
+                + if self.download_notice_visible() {
+                    48
+                } else if has_status {
+                    32
+                } else {
+                    0
+                },
         );
         self.profile
             .list_page_size()
@@ -854,6 +902,7 @@ impl App {
 
     pub(super) fn library_action(&mut self, action: &str, value: &str) -> Result<()> {
         match action {
+            "download-status" if self.download_notice_visible() => self.open_download_notice()?,
             "search" => {
                 if self.search_purpose != "books" {
                     self.query.clear();
@@ -1541,14 +1590,27 @@ impl App {
         if self.current_download.as_ref().is_some_and(|task| {
             task.book_id == book_id
                 && task.account_key == owner
-                && task
-                    .chapters
-                    .iter()
-                    .skip(task.next_index)
-                    .any(|index| selected.contains(index))
+                && task.chapters.iter().any(|index| selected.contains(index))
         }) {
             self.show_toast("content_refreshing");
             return Ok(());
+        }
+        if let Some(task) = self.download_notice_task_for_book(book_id)? {
+            if task.account_key == owner
+                && self
+                    .store
+                    .download_chapter_states(&task.id)?
+                    .iter()
+                    .any(|chapter| {
+                        chapter.status == DownloadChapterStatus::Blocked
+                            && selected.contains(&chapter.chapter_index)
+                    })
+            {
+                self.online = true;
+                self.queue_explicit_chapter_retry(task)?;
+                self.show_toast("content_refreshing");
+                return Ok(());
+            }
         }
         let pending = match self.store.pending_tasks_for_owner(&owner) {
             Ok(tasks) => tasks,
@@ -1561,7 +1623,7 @@ impl App {
         };
         self.download_inventory_unavailable = false;
         self.online = true;
-        if let Some(mut task) = pending.into_iter().find(|task| {
+        if let Some(task) = pending.into_iter().find(|task| {
             task.book_id == book_id
                 && task.account_key == owner
                 && content_download_blocked(task.error.as_deref())
@@ -1570,14 +1632,8 @@ impl App {
                     .get(task.next_index)
                     .is_some_and(|index| selected.contains(index))
         }) {
-            task.status = DownloadStatus::Pending;
-            task.error = None;
-            task.updated_at = Utc::now().timestamp();
-            self.store.save_task(&task)?;
-            self.downloads.retain(|queued| queued.id != task.id);
-            self.downloads.push_front(task);
+            self.queue_explicit_chapter_retry(task)?;
             self.show_toast("content_refreshing");
-            self.start_next_download()?;
         } else {
             self.enqueue_download_options(book_id, indices, self.prefs.download_images)?;
         }
@@ -1610,6 +1666,9 @@ impl App {
             return Ok(());
         }
         let requested: BTreeSet<_> = indices.into_iter().collect();
+        if self.reuse_download_notice(book_id, &requested, include_images)? {
+            return Ok(());
+        }
         let mut scheduled = BTreeSet::new();
         if let Some(task) = self.current_download.as_ref().filter(|task| {
             task.account_key == account_key
@@ -1617,7 +1676,7 @@ impl App {
                 && (!include_images || task.include_images)
                 && !content_download_blocked(task.error.as_deref())
         }) {
-            scheduled.extend(task.chapters.iter().skip(task.next_index).copied());
+            scheduled.extend(task.chapters.iter().copied());
         }
         for task in self.downloads.iter().filter(|task| {
             task.account_key == account_key
@@ -1626,7 +1685,7 @@ impl App {
                 && (!include_images || task.include_images)
                 && !content_download_blocked(task.error.as_deref())
         }) {
-            scheduled.extend(task.chapters.iter().skip(task.next_index).copied());
+            scheduled.extend(task.chapters.iter().copied());
         }
         let candidates = chapters
             .iter()
@@ -1715,7 +1774,13 @@ impl App {
         let Some(owner) = self.chapter_content_owner() else {
             return Ok(());
         };
-        while let Some(mut task) = self.downloads.pop_front() {
+        // Chapter deadlines belong to the scheduler. Starting a task never
+        // withholds another ready chapter because the first gap is waiting.
+        let queued = self.downloads.len();
+        for _ in 0..queued {
+            let Some(mut task) = self.downloads.pop_front() else {
+                break;
+            };
             if !task.status.is_pending()
                 || task.account_key != owner
                 || content_download_blocked(task.error.as_deref())
@@ -1725,7 +1790,7 @@ impl App {
             let original = task.clone();
             let prepared = (|| -> Result<Option<(DownloadTask, crate::jobs::DownloadPlan)>> {
                 let chapters = self.store.chapter_metadata(&task.book_id)?;
-                let Some(source) = self.store.book_source(&task.book_id)? else {
+                let Some(_) = self.store.book_source(&task.book_id)? else {
                     return Ok(None);
                 };
                 if chapters.is_empty() {
@@ -1734,37 +1799,28 @@ impl App {
                     self.store.save_task(&task)?;
                     return Ok(None);
                 }
-                let mut known_prefix = task.next_index;
-                let mut image_uids = Vec::new();
-                for (cursor, index) in task.chapters.iter().take(task.next_index).enumerate() {
-                    let chapter = chapters.iter().find(|chapter| chapter.index == *index);
-                    if !chapter.is_some_and(|chapter| {
-                        chapter.cached
-                            && chapter_content_status_for_source(&source, chapter, Some(&owner))
-                                == ContentStatus::Full
-                    }) {
-                        known_prefix = cursor;
-                        break;
+                // Admit the body-free catalog and selection before durable
+                // recovery work, then inspect selected cached images once.
+                if let Err(error) = crate::jobs::DownloadPlan::from_headers(&task, &chapters) {
+                    if matches!(error, source::SourceError::ResponseTooLarge) {
+                        return Err(error.into());
                     }
-                    if task.include_images {
-                        image_uids.push(chapter.unwrap().id.as_str());
-                    }
+                    task.status = DownloadStatus::Failed;
+                    task.error = Some(error.to_string());
+                    task.updated_at = Utc::now().timestamp();
+                    self.store.save_task(&task)?;
+                    self.error_message(&error);
+                    return Ok(None);
                 }
-                let mut rewind = known_prefix;
-                if task.include_images {
-                    // Prefix permissions are checked before one aligned image
-                    // operation. A quota/IO failure has no guessed false result.
-                    let complete = self.complete_download_images(&task.book_id, &image_uids)?;
-                    anyhow::ensure!(
-                        complete.len() == image_uids.len(),
-                        "unaligned prefix image completeness"
-                    );
-                    if let Some(cursor) = complete.iter().position(|complete| !complete) {
-                        rewind = cursor;
-                    }
-                }
-                task.next_index = rewind;
-                let plan = match crate::jobs::DownloadPlan::from_headers(&task, &chapters) {
+                let updated_at = Utc::now().timestamp();
+                let states = self.reconcile_download_chapters(&task, &chapters, updated_at)?;
+                task = self
+                    .store
+                    .task(&task.id)?
+                    .ok_or_else(|| anyhow::anyhow!("A prepared download task disappeared"))?;
+                let plan = match crate::jobs::DownloadPlan::from_headers_with_states(
+                    &task, &chapters, &states,
+                ) {
                     Ok(plan) => plan,
                     Err(source::SourceError::ResponseTooLarge) => {
                         return Err(source::SourceError::ResponseTooLarge.into());
@@ -1778,10 +1834,15 @@ impl App {
                         return Ok(None);
                     }
                 };
+                let previous = task.clone();
                 task.status = DownloadStatus::Running;
                 task.error = None;
+                task.retry_not_before = 0;
                 task.updated_at = Utc::now().timestamp();
-                self.store.save_task(&task)?;
+                anyhow::ensure!(
+                    self.store.save_task_if_current(&previous, &task)?,
+                    "A download task changed during preparation"
+                );
                 Ok(Some((task, plan)))
             })();
             let (task, plan) = match prepared {
@@ -1790,34 +1851,42 @@ impl App {
                 Err(error) => {
                     // The original durable cursor and queue item still own this
                     // intent. No failed validation can discard the popped task.
-                    self.downloads.push_front(original);
+                    self.downloads
+                        .push_front(self.store.task(&original.id)?.unwrap_or(original));
                     if Self::inventory_capacity(&error) || Self::view_capacity(&error) {
                         self.download_inventory_unavailable = true;
                     }
                     return Err(error);
                 }
             };
-            if let Some(ui) = self.ui.upgrade() {
-                ui.global::<ShellModel>().set_task_label(
-                    i18n::format(
-                        "downloading_chapter",
-                        &[
-                            ("current", task.next_index.to_string()),
-                            ("total", task.chapters.len().to_string()),
-                        ],
-                    )
-                    .into(),
-                );
-            }
+            let notice_reflow = !self.download_notice_visible();
+            let reopen_download_dialog = self.clear_download_notice_for_start(&task.id)?;
+            let progress = self.store.download_chapter_progress(&task.id)?;
+            self.download_feedback(
+                task.completed_count,
+                task.chapters.len(),
+                progress.retry_wait_count,
+                progress.blocked_count,
+            );
             self.download_request = self.request();
-            let cancellation = self
-                .jobs
-                .download(self.download_request, task.clone(), plan);
+            let cancellation = self.jobs.download_with_concurrency(
+                self.download_request,
+                task.clone(),
+                plan,
+                self.prefs.download_concurrency,
+            );
             self.current_download = Some(task);
             self.settle_job_submission(cancellation);
             self.start_task_wake_guard();
+            if reopen_download_dialog {
+                self.reopen_running_download_dialog();
+            }
+            if notice_reflow && self.route == Route::Library && self.prefs.view_mode == "list" {
+                self.render_library()?;
+            }
             break;
         }
+        self.render_download_notice();
         Ok(())
     }
 
@@ -1848,9 +1917,13 @@ impl App {
             Err(error) => return Err(error),
         };
         self.schedule_download_retry();
-        if !pending.iter().any(|task| {
-            task.account_key == owner && transient_download_error(task.error.as_deref())
-        }) {
+        let eligible = |task: &DownloadTask| {
+            task.account_key == owner
+                && (transient_download_error(task.error.as_deref())
+                    || download_recovery::recorded_rejection(task)
+                    || task.error.is_none())
+        };
+        if !pending.iter().any(eligible) {
             return Ok(());
         }
         let mut queued = self
@@ -1859,10 +1932,7 @@ impl App {
             .map(|task| task.id.clone())
             .collect::<BTreeSet<_>>();
         for task in pending {
-            if task.account_key == owner
-                && transient_download_error(task.error.as_deref())
-                && queued.insert(task.id.clone())
-            {
+            if eligible(&task) && queued.insert(task.id.clone()) {
                 self.downloads.push_back(task);
             }
         }
@@ -1913,12 +1983,7 @@ impl App {
                 .count();
         }
         self.pending_downloads = items;
-        self.confirm_action(
-            "download",
-            "download_all",
-            "background_download_hint",
-            "begin_download",
-        );
+        self.confirm_action("download", "download_all", "", "begin_download");
         if let Some(ui) = self.ui.upgrade() {
             let shell = ui.global::<ShellModel>();
             shell.set_dialog_kind("download".into());
@@ -1934,7 +1999,7 @@ impl App {
                 )
                 .into(),
             );
-            shell.set_dialog_size(tr("download_size_unavailable").into());
+            shell.set_dialog_size("".into());
             shell.set_dialog_chapter("".into());
         }
         Ok(())
@@ -2029,13 +2094,26 @@ impl App {
                 }
             }
             "dialog-secondary" => {
-                if self.dialog_action == "downloading" {
+                if matches!(
+                    self.dialog_action.as_str(),
+                    "download-wait" | "download-continue"
+                ) {
+                    self.cancel_download_notice()?;
+                }
+                if matches!(
+                    self.dialog_action.as_str(),
+                    "downloading" | "download-retry-active"
+                ) {
                     if let Some(task) = self.current_download.take() {
                         self.settle_job_submission(self.jobs.cancel_download(&task.id));
                         let mut task = task;
                         task.status = DownloadStatus::Cancelled;
+                        task.error = None;
+                        task.updated_at = Utc::now().timestamp();
+                        download_recovery::reset_recovery(&mut task);
                         self.store.save_task(&task)?;
                         self.retire_task_wake_guard();
+                        self.clear_download_notice(&task.id)?;
                         self.start_next_download()?;
                     }
                 }
@@ -2050,6 +2128,9 @@ impl App {
                 let intent = self.dialog_action.clone();
                 self.close_dialog();
                 match intent.as_str() {
+                    "download-retry-active" => self.retry_active_download_chapters()?,
+                    "download-continue" => self.continue_download_notice()?,
+                    "download-wait" => {}
                     value if value.starts_with("delete-note:") => {
                         self.store
                             .delete_annotation(value.trim_start_matches("delete-note:"))?;
@@ -2170,7 +2251,7 @@ impl App {
                                 let shell = ui.global::<ShellModel>();
                                 shell.set_dialog_kind("downloading".into());
                                 shell.set_dialog_title(tr("download").into());
-                                shell.set_dialog_body(tr("background_download_hint").into());
+                                shell.set_dialog_body("".into());
                                 shell.set_dialog_primary(tr("background_download").into());
                                 shell.set_dialog_secondary(tr("cancel_download").into());
                             }

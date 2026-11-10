@@ -144,15 +144,19 @@ impl ReaderAccess {
         self.binding.is_none()
     }
 
+    pub(super) fn is_current(&self, account_key: &Option<String>, generation: u64) -> bool {
+        self.binding.as_ref().is_some_and(|binding| {
+            binding.account_key == *account_key && binding.generation == generation
+        })
+    }
+
     pub(super) fn content_status(
         &self,
         text: &str,
         account_key: &Option<String>,
         generation: u64,
     ) -> ContentStatus {
-        if !self.binding.as_ref().is_some_and(|binding| {
-            binding.account_key == *account_key && binding.generation == generation
-        }) {
+        if !self.is_current(account_key, generation) {
             return ContentStatus::Unknown;
         }
         self.status_for_text(text)

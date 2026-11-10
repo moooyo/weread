@@ -1,19 +1,25 @@
 //! Trusted-origin cookie rotation and bounded recovery for read-only requests.
 use super::client::{
-    cookie_header, merge_response_cookies, network_error, response_json, response_text, success,
-    validate_api,
+    cookie_header, merge_response_cookies, network_error, response_json,
+    response_text_limited_observed, success, validate_api,
 };
 use super::login::auth_budget::{AuthSessionView, CookieValue};
+use super::reader_admission::DownloadReaderContext;
 use super::{AuthSession, Result, SourceError, WeReadClient};
+use crate::download_diagnostics::{DownloadDiagnostics, ResponsePhase};
 use reqwest::{Method, Request, RequestBuilder, Response, StatusCode, Url, header::HeaderMap};
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 /// One recovery opportunity shared by all requests making up a logical read.
 pub(super) struct WebReadAuth {
     recovery_available: bool,
     pub(super) restart_reader: bool,
     pub(super) recovery_failed: bool,
+    pub(super) response_limit: Option<usize>,
+    pub(super) download_diagnostics: Option<Arc<DownloadDiagnostics>>,
+    pub(super) download_reader: Option<DownloadReaderContext>,
 }
 
 impl Default for WebReadAuth {
@@ -22,6 +28,9 @@ impl Default for WebReadAuth {
             recovery_available: true,
             restart_reader: false,
             recovery_failed: false,
+            response_limit: None,
+            download_diagnostics: None,
+            download_reader: None,
         }
     }
 }
@@ -102,6 +111,29 @@ impl WeReadClient {
             .await
     }
 
+    /// Override this request's response budget without changing the chapter's
+    /// shard budget or its shared authentication-recovery allowance.
+    pub(super) async fn web_text_read_with_limit(
+        &self,
+        request: RequestBuilder,
+        auth: &mut WebReadAuth,
+        restart_reader: bool,
+        response_limit: Option<usize>,
+    ) -> (Result<String>, bool) {
+        let mut response_budget_exceeded = false;
+        let result = self
+            .web_read_with_limit(
+                request,
+                auth,
+                restart_reader,
+                parse_web_text,
+                response_limit,
+                &mut response_budget_exceeded,
+            )
+            .await;
+        (result, response_budget_exceeded)
+    }
+
     /// Two shards share a snapshot and the logical chapter's recovery budget.
     /// These futures are joined in place, so cancellation leaves no workers.
     pub(super) async fn web_text_pair(
@@ -117,8 +149,18 @@ impl WeReadClient {
         }
         let (sent, generation) = self.web_session_snapshot().await;
         let (first, second) = tokio::join!(
-            self.web_text_attempt(&first, &sent),
-            self.web_text_attempt(&second, &sent),
+            self.web_text_attempt(
+                &first,
+                &sent,
+                auth.response_limit,
+                auth.download_diagnostics.as_ref(),
+            ),
+            self.web_text_attempt(
+                &second,
+                &sent,
+                auth.response_limit,
+                auth.download_diagnostics.as_ref(),
+            ),
         );
         let session_changed = first.session_changed
             || second.session_changed
@@ -142,7 +184,16 @@ impl WeReadClient {
         })
     }
 
-    async fn web_text_attempt(&self, request: &Request, sent: &AuthSession) -> WebTextAttempt {
+    async fn web_text_attempt(
+        &self,
+        request: &Request,
+        sent: &AuthSession,
+        response_limit: Option<usize>,
+        diagnostics: Option<&Arc<DownloadDiagnostics>>,
+    ) -> WebTextAttempt {
+        let phase = chapter_response_phase(request.url().path());
+        let diagnostics = phase.and(diagnostics);
+        let http_read = diagnostics.map(|diagnostics| diagnostics.http_read());
         let response = match self.execute_web(request, sent).await {
             Ok(response) => response,
             Err(error) => {
@@ -154,7 +205,10 @@ impl WeReadClient {
         };
         let status = response.status();
         let headers = response.headers().clone();
-        let result = response_text(response).await.and_then(parse_web_text);
+        let text =
+            response_text_limited_observed(response, response_limit, diagnostics, phase).await;
+        drop(http_read);
+        let result = text.and_then(parse_web_text);
         if let Err(SourceError::Api(_)) = &result {
             let error = result
                 .as_ref()
@@ -199,16 +253,52 @@ impl WeReadClient {
         T: Send,
         F: Fn(String) -> Result<T> + Send,
     {
+        let response_limit = auth.response_limit;
+        let mut response_budget_exceeded = false;
+        self.web_read_with_limit(
+            request,
+            auth,
+            restart_reader,
+            parse,
+            response_limit,
+            &mut response_budget_exceeded,
+        )
+        .await
+    }
+
+    async fn web_read_with_limit<T, F>(
+        &self,
+        request: RequestBuilder,
+        auth: &mut WebReadAuth,
+        restart_reader: bool,
+        parse: F,
+        response_limit: Option<usize>,
+        response_budget_exceeded: &mut bool,
+    ) -> Result<T>
+    where
+        T: Send,
+        F: Fn(String) -> Result<T> + Send,
+    {
+        *response_budget_exceeded = false;
         let template = request.build().map_err(network_error)?;
         if !self.trusted_web_url(template.url()) {
             return Err(SourceError::InvalidResponse("web_request_origin"));
         }
         let (mut sent, mut renewal_generation) = self.web_session_snapshot().await;
         loop {
+            let phase = chapter_response_phase(template.url().path());
+            let diagnostics = phase.and(auth.download_diagnostics.as_ref());
+            let http_read = diagnostics.map(|diagnostics| diagnostics.http_read());
             let response = self.execute_web(&template, &sent).await?;
             let status = response.status();
             let headers = response.headers().clone();
-            let result = response_text(response).await.and_then(&parse);
+            let text =
+                response_text_limited_observed(response, response_limit, diagnostics, phase).await;
+            drop(http_read);
+            // Only transport admission selects adaptive Reader acquisition.
+            // Parser, Cookie and renewal budget errors retain their own cause.
+            *response_budget_exceeded = matches!(&text, Err(SourceError::ResponseTooLarge));
+            let result = text.and_then(&parse);
             if result.as_ref().err().is_some_and(renewable_web_auth_error) {
                 let error = result
                     .as_ref()
@@ -252,7 +342,12 @@ impl WeReadClient {
                 .err()
                 .is_some_and(SourceError::requires_login)
             {
-                self.observe_web_headers(&sent, template.url(), status, &headers)?;
+                if let Err(error) =
+                    self.observe_web_headers(&sent, template.url(), status, &headers)
+                {
+                    *response_budget_exceeded = false;
+                    return Err(error);
+                }
             }
             return result;
         }
@@ -513,6 +608,16 @@ fn same_web_credentials(left: &AuthSession, right: &AuthSession) -> bool {
         && ["wr_vid", "wr_skey", "wr_gid", "wr_rt"]
             .iter()
             .all(|name| left.cookies.get(*name) == right.cookies.get(*name))
+}
+
+fn chapter_response_phase(path: &str) -> Option<ResponsePhase> {
+    if path.starts_with("/web/reader/") {
+        Some(ResponsePhase::Reader)
+    } else if path.starts_with("/web/book/chapter/") {
+        Some(ResponsePhase::Shard)
+    } else {
+        None
+    }
 }
 
 fn web_operation(path: &str) -> &'static str {

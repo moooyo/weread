@@ -319,7 +319,7 @@ export component LoginScreen inherits Rectangle {
         padding-bottom: Theme.scribe ? 24px : 12px;
         spacing: Theme.scribe ? 20px : 6px;
         Rectangle {
-            height: Theme.scribe ? 120px : 108px;
+            height: Theme.scribe ? 84px : 72px;
             VerticalLayout {
                 padding-right: Theme.scribe ? 0px : 48px;
                 spacing: 4px;
@@ -338,15 +338,6 @@ export component LoginScreen inherits Rectangle {
                     font-weight: 700;
                     horizontal-alignment: Theme.scribe ? center : left;
                     height: Theme.scribe ? 56px : 48px;
-                }
-                Text {
-                    text: Strings.login-subtitle;
-                    font-family: Theme.ui-font;
-                    font-size: Theme.scribe ? 18px : 17px;
-                    color: Theme.secondary;
-                    horizontal-alignment: Theme.scribe ? center : left;
-                    wrap: word-wrap;
-                    height: 32px;
                 }
             }
         }
@@ -410,88 +401,6 @@ export component LoginScreen inherits Rectangle {
                         quiet: true;
                         enabled: !LoginModel.busy;
                         clicked => { LoginModel.event("refresh", ""); }
-                    }
-                }
-            }
-        }
-        if LoginModel.step == "qr": Rectangle {
-            height: Theme.scribe ? 176px : 168px;
-            border-width: Theme.scribe ? 0px : 2px;
-            border-color: Theme.ink;
-            border-radius: 6px;
-            if Theme.scribe: Rectangle { x: 0px; y: 0px; width: parent.width; height: 1px; background: Theme.line; }
-            VerticalLayout {
-                padding-left: Theme.scribe ? 0px : 18px;
-                padding-right: Theme.scribe ? 0px : 18px;
-                padding-top: Theme.scribe ? 24px : 12px;
-                padding-bottom: Theme.scribe ? 0px : 12px;
-                spacing: Theme.scribe ? 18px : 8px;
-                Text {
-                    text: Strings.login-first-use;
-                    font-family: Theme.ui-font;
-                    font-size: 17px;
-                    font-weight: 700;
-                    height: 24px;
-                    horizontal-alignment: Theme.scribe ? center : left;
-                }
-                if Theme.scribe: HorizontalLayout {
-                    spacing: 24px;
-                    for step[index] in [Strings.login-first-step, Strings.login-second-step, Strings.login-third-step-scribe]: Rectangle {
-                        horizontal-stretch: 1;
-                        HorizontalLayout {
-                            spacing: 12px;
-                            Rectangle {
-                                width: 30px;
-                                Rectangle {
-                                    x: 0px; y: 0px; width: 30px; height: 30px;
-                                    border-radius: 15px;
-                                    background: Theme.ink;
-                                    Text {
-                                        text: "" + (index + 1);
-                                        font-family: Theme.ui-font;
-                                        font-size: 16px;
-                                        font-weight: 700;
-                                        color: Theme.paper;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                    }
-                                }
-                            }
-                            Text {
-                                text: step;
-                                horizontal-stretch: 1;
-                                font-family: Theme.ui-font;
-                                font-size: 16px;
-                                color: Theme.ink;
-                                wrap: word-wrap;
-                                vertical-alignment: top;
-                            }
-                        }
-                    }
-                }
-                if !Theme.scribe: VerticalLayout {
-                    spacing: 0px;
-                    for step[index] in [Strings.login-first-step, Strings.login-second-step, Strings.login-third-step]: Rectangle {
-                        height: index == 0 ? 54px : 27px;
-                        HorizontalLayout {
-                            spacing: 4px;
-                            Text {
-                                text: "" + (index + 1) + ".";
-                                width: 18px;
-                                font-family: Theme.ui-font;
-                                font-size: 16px;
-                                color: Theme.ink;
-                            }
-                            Text {
-                                text: step;
-                                horizontal-stretch: 1;
-                                font-family: Theme.ui-font;
-                                font-size: 16px;
-                                color: Theme.ink;
-                                wrap: word-wrap;
-                                vertical-alignment: top;
-                            }
-                        }
                     }
                 }
             }
@@ -713,14 +622,6 @@ export component LoginScreen inherits Rectangle {
                 horizontal-stretch: 1;
                 clicked => { LoginModel.event("demo", ""); }
             }
-        }
-        Text {
-            text: Strings.login-local;
-            font-family: Theme.ui-font;
-            font-size: 14px;
-            color: Theme.secondary;
-            horizontal-alignment: center;
-            height: 24px;
         }
     }
     IconButton {

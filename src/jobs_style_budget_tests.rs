@@ -45,12 +45,9 @@ fn actual_full_jobs_style_quota_preserves_state_and_recovers_checkpoint_credit()
         let plan =
             DownloadPlan::from_headers(&task, &store.chapter_headers(BOOK).unwrap()).unwrap();
         assert!(jobs.download(request, task.clone(), plan).is_none());
-        let terminal = next_terminal(&runtime, &receiver);
+        let terminal = acknowledge_quota_failure(&runtime, &receiver, &jobs, &task, request);
         assert!(jobs.accepts(&terminal));
         assert_eq!(terminal.request, request);
-        assert!(matches!(&terminal.result,
-            JobResult::DownloadFailed { task_id, error: SourceError::ResponseTooLarge }
-            if task_id == &task.id));
         assert!(terminal.credits.is_some());
         assert_eq!(jobs.download_resource_capacity_for_tests(), (0, 1));
         assert_eq!(scope.stats().usage.style_scans, 0);

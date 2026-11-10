@@ -27,6 +27,7 @@ pub enum RefreshReason {
     OverlayClosed(RefreshRect),
     Progress,
     ReaderTurn,
+    CoversLoaded,
     ImageLoaded(RefreshRect),
 }
 
@@ -124,6 +125,10 @@ impl RefreshScheduler {
                     (Kind::Partial, None)
                 }
             }
+            // Covers arrive independently after navigation. Their changed tiles
+            // use the renderer's dirty regions without spending the content or
+            // Reader refresh budget on a full-screen flash.
+            RefreshReason::CoversLoaded => (Kind::Ui, None),
             RefreshReason::ImageLoaded(rect) => (Kind::Full, Some(rect)),
         };
         Some(RefreshPlan { kind, rect })
@@ -184,6 +189,30 @@ mod tests {
             scheduler
                 .plan(RefreshReason::Progress, Duration::from_secs(1))
                 .is_some()
+        );
+    }
+
+    #[test]
+    fn cover_batches_never_flash_or_consume_the_content_refresh_budget() {
+        let mut scheduler = RefreshScheduler::default();
+        for _ in 0..5 {
+            scheduler.plan(RefreshReason::Content, Duration::ZERO);
+        }
+        for _ in 0..32 {
+            assert_eq!(
+                scheduler.plan(RefreshReason::CoversLoaded, Duration::ZERO),
+                Some(RefreshPlan {
+                    kind: RefreshKind::Ui,
+                    rect: None,
+                })
+            );
+        }
+        assert_eq!(
+            scheduler
+                .plan(RefreshReason::Content, Duration::ZERO)
+                .unwrap()
+                .kind,
+            RefreshKind::Full
         );
     }
 

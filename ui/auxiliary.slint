@@ -352,7 +352,7 @@ export component PublicationScreen inherits Rectangle {
                 alignment: center;
                 spacing: 12px;
                 Text { text: Strings.empty-publications; font-family: Theme.serif-font; font-size: 24px; font-weight: 700; horizontal-alignment: center; }
-                Text { text: AuxiliaryModel.publications-status == "" ? Strings.empty-publications-hint : AuxiliaryModel.publications-status; font-family: Theme.ui-font; font-size: 16px; color: Theme.secondary; horizontal-alignment: center; wrap: word-wrap; }
+                if AuxiliaryModel.publications-status != "": Text { text: AuxiliaryModel.publications-status; font-family: Theme.ui-font; font-size: 16px; color: Theme.secondary; horizontal-alignment: center; wrap: word-wrap; }
             }
         }
         if AuxiliaryModel.publications-status != "" && AuxiliaryModel.publications-rows.length > 0: Text {
@@ -802,7 +802,6 @@ export component SettingsScreen inherits Rectangle {
                                 alignment: center;
                                 spacing: 4px;
                                 Text { text: AuxiliaryModel.settings-account-name; font-family: Theme.ui-font; font-size: 19px; font-weight: 700; overflow: elide; }
-                                Text { text: AuxiliaryModel.settings-account-detail; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; overflow: elide; }
                             }
                             Rectangle { horizontal-stretch: 1; }
                             ActionButton { text: AuxiliaryModel.settings-account-active ? Strings.renew : Strings.login-title; clicked => { AuxiliaryModel.event(AuxiliaryModel.settings-account-active ? "settings.renew" : "settings.action", AuxiliaryModel.settings-account-active ? "" : "login"); } }
@@ -818,7 +817,7 @@ export component SettingsScreen inherits Rectangle {
                 }
                 if AuxiliaryModel.settings-subpage == "": Rectangle { height: 16px; }
                 if AuxiliaryModel.settings-subpage == "": SettingItem {
-                    entry: {id: "exit", title: Strings.exit-app, subtitle: "", value: Strings.exit-app-hint, kind: "action", checked: false, enabled: true, options: [], selected-value: ""};
+                    entry: {id: "exit", title: Strings.exit-app, subtitle: "", value: "", kind: "action", checked: false, enabled: true, options: [], selected-value: ""};
                     action => { AuxiliaryModel.event("settings.exit", ""); }
                 }
                 if AuxiliaryModel.settings-subpage == "": SettingItem {

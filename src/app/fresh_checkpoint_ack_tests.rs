@@ -85,6 +85,10 @@ fn seed(state: &mut App) -> Result<DownloadTask> {
         ..Default::default()
     };
     state.store.save_task(&task)?;
+    state
+        .store
+        .prepare_download_chapter_states(&task, task.updated_at)?;
+    let task = state.store.task(&task.id)?.unwrap();
     state.current_download = Some(task.clone());
     state.download_request = state.request();
     state.pending_read = Some((BOOK.into(), 0));

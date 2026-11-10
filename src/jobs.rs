@@ -1,9 +1,11 @@
 //! Background source work. This module owns no UI objects, SQL, or data files.
+use crate::download_diagnostics::{DownloadDiagnostics, DownloadRun, SUMMARY_INTERVAL, Stage};
+use crate::preferences::{DEFAULT_DOWNLOAD_CONCURRENCY, MAX_DOWNLOAD_CONCURRENCY};
 use crate::{domain, source};
 use source::{
-    AuthSession, ChapterContent, ChapterReadHints, LoginFlow, QrLoginChallenge, QrLoginState,
-    ReadStatistics, RemoteBook, RemoteChapter, RemoteReview, RemoteUnderline, ShelfSnapshot,
-    SourceCapabilities, SourceError, StatisticsPeriod, WeReadClient,
+    AuthSession, ChapterContent, LoginFlow, QrLoginChallenge, QrLoginState, ReadStatistics,
+    RemoteBook, RemoteChapter, RemoteReview, RemoteUnderline, ShelfSnapshot, SourceCapabilities,
+    SourceError, StatisticsPeriod, WeReadClient,
 };
 use std::collections::{BTreeMap, HashSet};
 use std::future::Future;
@@ -30,18 +32,34 @@ const MAX_DOWNLOAD_METADATA_BYTES: usize = 64 * 1024 * 1024;
 /// Cached text stays in SQL until its owner accepts a credited checkpoint.
 #[derive(Debug)]
 pub struct DownloadPlan {
+    task_id: String,
     book_id: String,
     account_key: String,
+    include_images: bool,
     indices: Vec<u32>,
     next_index: usize,
     chapters: BTreeMap<u32, DownloadPlanEntry>,
+    states: Vec<DownloadPlanState>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct DownloadPlanEntry {
     id: String,
     title: String,
     cached_full: bool,
+    cached_images: bool,
+}
+
+#[derive(Clone, Debug)]
+struct DownloadPlanState {
+    status: domain::DownloadChapterStatus,
+    retry_not_before: i64,
+}
+
+impl DownloadPlanEntry {
+    fn reusable(&self, include_images: bool) -> bool {
+        self.cached_full && (!include_images || self.cached_images)
+    }
 }
 
 impl DownloadPlan {
@@ -57,16 +75,31 @@ impl DownloadPlan {
         headers: &[domain::Chapter],
         maximum_bytes: usize,
     ) -> source::Result<Self> {
+        Self::from_headers_and_states(task, headers, None, maximum_bytes)
+    }
+
+    /// Use the owner's freshly reconciled per-chapter persistence snapshot.
+    pub fn from_headers_with_states(
+        task: &domain::DownloadTask,
+        headers: &[domain::Chapter],
+        states: &[domain::DownloadChapterState],
+    ) -> source::Result<Self> {
+        Self::from_headers_and_states(task, headers, Some(states), MAX_DOWNLOAD_METADATA_BYTES)
+    }
+
+    fn from_headers_and_states(
+        task: &domain::DownloadTask,
+        headers: &[domain::Chapter],
+        persisted: Option<&[domain::DownloadChapterState]>,
+        maximum_bytes: usize,
+    ) -> source::Result<Self> {
         validate_download_task(task)?;
         if headers.len() > MAX_DOWNLOAD_CHAPTERS {
             return Err(SourceError::ResponseTooLarge);
         }
-        let remaining: HashSet<_> = task
-            .chapters
-            .iter()
-            .skip(task.next_index)
-            .copied()
-            .collect();
+        if persisted.is_some_and(|states| states.len() != task.chapters.len()) {
+            return Err(SourceError::InvalidResponse("download_states"));
+        }
         let mut bytes = 0usize;
         // Admit all temporarily retained metadata and the selected copies before
         // building owned index entries. There is never a body-bearing plan.
@@ -79,10 +112,44 @@ impl DownloadPlan {
                 .len()
                 .checked_mul(2 * std::mem::size_of::<u32>())
                 .ok_or(SourceError::ResponseTooLarge)?,
+            task.chapters
+                .len()
+                .checked_mul(std::mem::size_of::<DownloadPlanState>() + std::mem::size_of::<bool>())
+                .ok_or(SourceError::ResponseTooLarge)?,
+            task.chapters.len().div_ceil(u64::BITS as usize) * std::mem::size_of::<u64>(),
+            // Borrowed maps and duplicate sets are bounded metadata too.
+            headers
+                .len()
+                .checked_mul(256)
+                .ok_or(SourceError::ResponseTooLarge)?,
             std::mem::size_of::<Self>(),
         ] {
             reserve_download_metadata(&mut bytes, part, maximum_bytes)?;
         }
+        if let Some(states) = persisted {
+            for (ordinal, state) in states.iter().enumerate() {
+                if state.ordinal != ordinal
+                    || state.chapter_index != task.chapters[ordinal]
+                    || !valid_download_identifier(&state.chapter_uid)
+                    || state.retry_not_before < 0
+                    || state.error.as_ref().is_some_and(|error| {
+                        error.len() > MAX_DOWNLOAD_IDENTIFIER_BYTES
+                            || error.chars().any(char::is_control)
+                    })
+                {
+                    return Err(SourceError::InvalidResponse("download_states"));
+                }
+                for part in [
+                    state.chapter_uid.len(),
+                    state.error.as_ref().map_or(0, String::len),
+                    std::mem::size_of::<domain::DownloadChapterState>(),
+                ] {
+                    reserve_download_metadata(&mut bytes, part, maximum_bytes)?;
+                }
+            }
+        }
+        let mut seen_indices = HashSet::new();
+        let mut seen_ids = HashSet::new();
         for header in headers {
             if header.body.is_some() {
                 return Err(SourceError::InvalidResponse("download_plan_body"));
@@ -91,6 +158,8 @@ impl DownloadPlan {
                 || !valid_download_identifier(&header.id)
                 || header.content_account_key.len() > MAX_DOWNLOAD_IDENTIFIER_BYTES
                 || header.content_account_key.chars().any(char::is_control)
+                || !seen_indices.insert(header.index)
+                || !seen_ids.insert(header.id.as_str())
             {
                 return Err(SourceError::InvalidResponse("download_header"));
             }
@@ -103,6 +172,60 @@ impl DownloadPlan {
             ] {
                 reserve_download_metadata(&mut bytes, part, maximum_bytes)?;
             }
+        }
+        let by_index = headers
+            .iter()
+            .map(|header| (header.index, header))
+            .collect::<BTreeMap<_, _>>();
+        let states = task
+            .chapters
+            .iter()
+            .enumerate()
+            .map(|(ordinal, index)| {
+                let state = persisted.and_then(|states| states.get(ordinal));
+                if let Some(state) = state {
+                    let header = by_index
+                        .get(index)
+                        .ok_or(SourceError::InvalidResponse("missing_chapter"))?;
+                    if state.chapter_uid != header.id {
+                        return Err(SourceError::InvalidResponse("download_states"));
+                    }
+                    let reusable = header.cached
+                        && header.content_status == domain::ContentStatus::Full
+                        && header.content_account_key == task.account_key;
+                    // The owner reconciles image proofs before supplying these
+                    // states. Stale text evidence returns only this chapter to
+                    // pending instead of losing the other completions.
+                    let status =
+                        if state.status == domain::DownloadChapterStatus::Complete && !reusable {
+                            domain::DownloadChapterStatus::Pending
+                        } else {
+                            state.status
+                        };
+                    Ok(DownloadPlanState {
+                        status,
+                        retry_not_before: state.retry_not_before,
+                    })
+                } else {
+                    Ok(DownloadPlanState {
+                        status: if ordinal < task.next_index {
+                            domain::DownloadChapterStatus::Complete
+                        } else {
+                            domain::DownloadChapterStatus::Pending
+                        },
+                        retry_not_before: 0,
+                    })
+                }
+            })
+            .collect::<source::Result<Vec<_>>>()?;
+        let remaining = task
+            .chapters
+            .iter()
+            .zip(&states)
+            .filter(|(_, state)| state.status != domain::DownloadChapterStatus::Complete)
+            .map(|(index, _)| *index)
+            .collect::<HashSet<_>>();
+        for header in headers {
             if remaining.contains(&header.index) {
                 for part in [
                     header.id.len(),
@@ -113,16 +236,12 @@ impl DownloadPlan {
                 }
             }
         }
+        reserve_download_metadata(&mut bytes, task.id.len(), maximum_bytes)?;
         reserve_download_metadata(&mut bytes, task.book_id.len(), maximum_bytes)?;
         reserve_download_metadata(&mut bytes, task.account_key.len(), maximum_bytes)?;
 
-        let mut seen_indices = HashSet::new();
-        let mut seen_ids = HashSet::new();
         let mut selected = BTreeMap::new();
         for header in headers {
-            if !seen_indices.insert(header.index) || !seen_ids.insert(header.id.as_str()) {
-                return Err(SourceError::InvalidResponse("download_header"));
-            }
             if remaining.contains(&header.index) {
                 selected.insert(header.index, header);
             }
@@ -142,23 +261,47 @@ impl DownloadPlan {
                             && header.content_status == domain::ContentStatus::Full
                             && !header.content_account_key.is_empty()
                             && header.content_account_key == task.account_key,
+                        cached_images: false,
                     },
                 )
             })
             .collect();
         Ok(Self {
+            task_id: task.id.clone(),
             book_id: task.book_id.clone(),
             account_key: task.account_key.clone(),
+            include_images: task.include_images,
             indices: task.chapters.clone(),
             next_index: task.next_index,
             chapters,
+            states,
         })
+    }
+
+    /// Record only a fresh, complete image-cache decision for this exact UID.
+    /// The UI verifies the actual resources again before acknowledging reuse.
+    pub(crate) fn mark_complete_cached_images(
+        &mut self,
+        index: u32,
+        chapter_id: &str,
+    ) -> source::Result<()> {
+        let entry = self
+            .chapters
+            .get_mut(&index)
+            .ok_or(SourceError::InvalidResponse("cached_download_chapter"))?;
+        if !self.include_images || !entry.cached_full || entry.id != chapter_id {
+            return Err(SourceError::InvalidResponse("cached_download_chapter"));
+        }
+        entry.cached_images = true;
+        Ok(())
     }
 
     fn validate_for(&self, task: &domain::DownloadTask) -> source::Result<()> {
         validate_download_task(task)?;
-        if self.book_id != task.book_id
+        if self.task_id != task.id
+            || self.book_id != task.book_id
             || self.account_key != task.account_key
+            || self.include_images != task.include_images
             || self.indices != task.chapters
             || self.next_index != task.next_index
         {
@@ -312,7 +455,7 @@ pub enum JobResult {
         checkpoint: tokio::sync::oneshot::Sender<source::Result<()>>,
     },
     /// Reuse a cached body without transporting it or loading the book corpus.
-    /// The receiver verifies current SQL evidence before advancing the cursor.
+    /// The receiver verifies current SQL evidence before recording completion.
     CachedDownloaded {
         task_id: String,
         chapter_id: String,
@@ -320,14 +463,39 @@ pub enum JobResult {
         next_index: usize,
         checkpoint: tokio::sync::oneshot::Sender<source::Result<()>>,
     },
+    /// Clear a due chapter's stale error before starting its next attempt.
+    DownloadChapterStarted {
+        task_id: String,
+        chapter_id: String,
+        chapter_index: u32,
+        ordinal: usize,
+        checkpoint: tokio::sync::oneshot::Sender<source::Result<()>>,
+    },
+    /// Failure policy and its deadline become durable before this worker exits.
+    DownloadChapterFailed {
+        task_id: String,
+        chapter_id: String,
+        chapter_index: u32,
+        ordinal: usize,
+        error: SourceError,
+        checkpoint: tokio::sync::oneshot::Sender<source::Result<domain::DownloadChapterRetry>>,
+    },
     DownloadProgress {
         task_id: String,
         completed: usize,
+        waiting: usize,
+        blocked: usize,
         total: usize,
         title: String,
     },
     DownloadFinished {
         task_id: String,
+    },
+    DownloadIncomplete {
+        task_id: String,
+        completed: usize,
+        blocked: usize,
+        total: usize,
     },
     DownloadFailed {
         task_id: String,
@@ -345,10 +513,11 @@ struct ActiveDownload {
     task_id: String,
     cancelled: Arc<AtomicBool>,
     image_cache: Arc<crate::book_assets::PreparedImageCache>,
+    retries: Arc<DownloadRetryControl>,
     abort: Option<AbortHandle>,
 }
 
-/// Owns one serial chapter task and any independent metadata requests.
+/// Owns one bounded chapter task and any independent metadata requests.
 pub struct Jobs {
     handle: Handle,
     sender: Sender<JobEvent>,
@@ -362,6 +531,8 @@ pub struct Jobs {
     metadata_requests: Arc<Semaphore>,
     cover_requests: Arc<Semaphore>,
     download_preparation: Arc<Semaphore>,
+    download_fetches: Arc<Semaphore>,
+    download_reader_pages: Arc<source::ReaderAdmission>,
     download_packets: Arc<Semaphore>,
     download_progress: Arc<Semaphore>,
     login_requests: Arc<Semaphore>,
@@ -388,6 +559,8 @@ impl Jobs {
             metadata_requests: Arc::new(Semaphore::new(MAX_METADATA_REQUESTS)),
             cover_requests: Arc::new(Semaphore::new(MAX_COVER_REQUESTS)),
             download_preparation: Arc::new(Semaphore::new(1)),
+            download_fetches: Arc::new(Semaphore::new(MAX_DOWNLOAD_CONCURRENCY as usize)),
+            download_reader_pages: Arc::new(source::ReaderAdmission::new()),
             download_packets: Arc::new(Semaphore::new(1)),
             download_progress: Arc::new(Semaphore::new(1)),
             login_requests: Arc::new(Semaphore::new(1)),
@@ -441,6 +614,16 @@ impl Jobs {
             self.download_packets.available_permits(),
             self.download_preparation.available_permits(),
         )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn download_fetch_capacity_for_tests(&self) -> usize {
+        self.download_fetches.available_permits()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn download_reader_gate_for_tests(&self) -> Arc<source::ReaderAdmission> {
+        self.download_reader_pages.clone()
     }
 
     pub fn replace_session(&self, session: AuthSession) -> source::Result<()> {
@@ -802,12 +985,23 @@ impl Jobs {
             .cancel();
     }
 
-    /// Replaces the active serial task. Persistence is performed by the receiver.
+    /// Replace the active task with the default bound. The receiver persists it.
     pub fn download(
         &self,
         request: u64,
         task: domain::DownloadTask,
         plan: DownloadPlan,
+    ) -> Option<JobEvent> {
+        self.download_with_concurrency(request, task, plan, DEFAULT_DOWNLOAD_CONCURRENCY)
+    }
+
+    /// Capture the preference for this start/resume. Running tasks keep their limit.
+    pub fn download_with_concurrency(
+        &self,
+        request: u64,
+        task: domain::DownloadTask,
+        plan: DownloadPlan,
+        concurrency: u32,
     ) -> Option<JobEvent> {
         if let Err(error) = plan.validate_for(&task) {
             return Some(JobEvent::new(
@@ -820,15 +1014,28 @@ impl Jobs {
             ));
         }
         let cancellation = self.cancel_active_download(None);
+        let concurrency = concurrency.clamp(1, MAX_DOWNLOAD_CONCURRENCY);
+        let diagnostics = DownloadDiagnostics::new(
+            concurrency,
+            plan.states
+                .iter()
+                .filter(|state| state.status != domain::DownloadChapterStatus::Complete)
+                .count(),
+            task.include_images,
+        );
+        let run = DownloadRun::new(diagnostics.clone());
         let token = self.download_token.fetch_add(1, Ordering::SeqCst) + 1;
         let cancelled = Arc::new(AtomicBool::new(false));
         let image_cache = Arc::new(crate::book_assets::PreparedImageCache::default());
+        let retries = Arc::new(DownloadRetryControl::new(task.chapters.len()));
         let epoch = self.account_epoch.load(Ordering::SeqCst);
         let live_epoch = self.account_epoch.clone();
         let client = self.current_client();
         let sender = self.sender.clone();
         let active = self.download.clone();
         let preparation = self.download_preparation.clone();
+        let fetches = self.download_fetches.clone();
+        let reader_pages = self.download_reader_pages.clone();
         let packets = self.download_packets.clone();
         let progress = self.download_progress.clone();
         *active
@@ -840,11 +1047,13 @@ impl Jobs {
             task_id: task.id.clone(),
             cancelled: cancelled.clone(),
             image_cache: image_cache.clone(),
+            retries: retries.clone(),
             abort: None,
         });
         let active_for_job = active.clone();
         let handle = self.handle.spawn(async move {
-            let result = download_chapters(
+            let mut run = run;
+            let operation = download_chapters(
                 &client,
                 &task,
                 plan,
@@ -855,12 +1064,31 @@ impl Jobs {
                 &cancelled,
                 &image_cache,
                 &preparation,
+                &fetches,
+                &reader_pages,
+                concurrency as usize,
+                &diagnostics,
                 &packets,
                 &progress,
                 &sender,
                 &active_for_job,
-            )
-            .await;
+                &retries,
+            );
+            let result = {
+                tokio::pin!(operation);
+                let mut summary = tokio::time::interval_at(
+                    tokio::time::Instant::now() + SUMMARY_INTERVAL,
+                    SUMMARY_INTERVAL,
+                );
+                summary.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                loop {
+                    tokio::select! {
+                        result = &mut operation => break result,
+                        _ = summary.tick() => diagnostics.report("periodic"),
+                    }
+                }
+            };
+            retries.close();
             if epoch != live_epoch.load(Ordering::SeqCst) || cancelled.load(Ordering::SeqCst) {
                 let mut slot = active_for_job
                     .lock()
@@ -871,6 +1099,11 @@ impl Jobs {
                 }
                 return;
             }
+            run.finish(match &result {
+                Ok(DownloadOutcome::Complete) => "completed",
+                Ok(DownloadOutcome::Incomplete { .. }) => "incomplete",
+                Err(_) => "failed",
+            });
             // Terminal results also own a credit. There is only one active
             // download, and no mutex or uncredited payload is held while waiting.
             let terminal_credit = match packets.acquire_owned().await {
@@ -884,7 +1117,17 @@ impl Jobs {
                 image_cache.cancel();
                 if epoch == live_epoch.load(Ordering::SeqCst) && !cancelled.load(Ordering::SeqCst) {
                     let result = match result {
-                        Ok(()) => JobResult::DownloadFinished { task_id: task.id },
+                        Ok(DownloadOutcome::Complete) => {
+                            JobResult::DownloadFinished { task_id: task.id }
+                        }
+                        Ok(DownloadOutcome::Incomplete { completed, blocked }) => {
+                            JobResult::DownloadIncomplete {
+                                task_id: task.id,
+                                completed,
+                                blocked,
+                                total: task.chapters.len(),
+                            }
+                        }
                         Err(error) => JobResult::DownloadFailed {
                             task_id: task.id,
                             error,
@@ -910,6 +1153,24 @@ impl Jobs {
 
     pub fn cancel_download(&self, task_id: &str) -> Option<JobEvent> {
         self.cancel_active_download(Some(task_id))
+    }
+
+    /// Wake exact blocked chapters after their owner durably resets them.
+    /// Requests coalesce in a fixed-size bitmap for this run and account only.
+    pub fn retry_download_chapters(&self, request: u64, task_id: &str, ordinals: &[usize]) -> bool {
+        let slot = self
+            .download
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(active) = slot.as_ref().filter(|active| {
+            active.task_id == task_id
+                && active.request == request
+                && active.account_epoch == self.account_epoch()
+                && !active.cancelled.load(Ordering::SeqCst)
+        }) else {
+            return false;
+        };
+        active.retries.request(ordinals)
     }
 
     pub fn active_download(&self) -> Option<String> {
@@ -940,6 +1201,7 @@ impl Jobs {
         }
         if let Some(active) = slot.take() {
             active.cancelled.store(true, Ordering::SeqCst);
+            active.retries.close();
             active.image_cache.cancel();
             if let Some(abort) = active.abort {
                 abort.abort();
@@ -1085,249 +1347,9 @@ where
     task.await.map_err(|_| SourceError::CheckpointFailed)?
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn download_chapters(
-    client: &WeReadClient,
-    task: &domain::DownloadTask,
-    plan: DownloadPlan,
-    token: u64,
-    request: u64,
-    epoch: u64,
-    live_epoch: &Arc<AtomicU64>,
-    cancelled: &Arc<AtomicBool>,
-    image_cache: &Arc<crate::book_assets::PreparedImageCache>,
-    preparation: &Arc<Semaphore>,
-    packets: &Arc<Semaphore>,
-    progress: &Arc<Semaphore>,
-    sender: &Sender<JobEvent>,
-    active: &Mutex<Option<ActiveDownload>>,
-) -> source::Result<()> {
-    if task.next_index > task.chapters.len() {
-        return Err(SourceError::InvalidResponse("download_cursor"));
-    }
-    if task.next_index == task.chapters.len() {
-        return Ok(());
-    }
-    if cancelled.load(Ordering::SeqCst) || epoch != live_epoch.load(Ordering::SeqCst) {
-        return Err(SourceError::Unsupported("download_cancelled"));
-    }
-    let mut resource_catalog = None;
-    let mut last_progress: Option<Instant> = None;
-    let mut read_hints = ChapterReadHints::default();
-    for (cursor, index) in task.chapters.iter().enumerate().skip(task.next_index) {
-        if cancelled.load(Ordering::SeqCst) || epoch != live_epoch.load(Ordering::SeqCst) {
-            return Err(SourceError::Unsupported("download_cancelled"));
-        }
-        // A cancelled previous task can still own a queued packet. Await its
-        // actual destruction before fetching or cloning another large result.
-        let packet_credit = packets
-            .clone()
-            .acquire_owned()
-            .await
-            .map_err(|_| SourceError::Unsupported("download_cancelled"))?;
-        if cancelled.load(Ordering::SeqCst) || epoch != live_epoch.load(Ordering::SeqCst) {
-            return Err(SourceError::Unsupported("download_cancelled"));
-        }
-        let original = plan
-            .chapters
-            .get(index)
-            .ok_or(SourceError::InvalidResponse("missing_chapter"))?;
-        let reuse_cached = !task.include_images && original.cached_full;
-        let permit = if !reuse_cached {
-            // Acquire before obtaining HTML or image payloads. Cancellation of
-            // an older task cannot start another large worker while its
-            // uninterruptible decoder still owns the single shared permit.
-            Some(
-                preparation
-                    .clone()
-                    .acquire_owned()
-                    .await
-                    .map_err(|_| SourceError::Unsupported("download_cancelled"))?,
-            )
-        } else {
-            None
-        };
-        if cancelled.load(Ordering::SeqCst) || epoch != live_epoch.load(Ordering::SeqCst) {
-            return Err(SourceError::Unsupported("download_cancelled"));
-        }
-        let mut chapter = domain::Chapter {
-            id: original.id.clone(),
-            book_id: task.book_id.clone(),
-            index: *index,
-            title: original.title.clone(),
-            cached: false,
-            body: None,
-            content_status: domain::ContentStatus::Unknown,
-            content_account_key: task.account_key.clone(),
-        };
-        let mut html = None;
-        let mut metadata = None;
-        let mut images = None;
-        if let Some(permit) = permit {
-            if task.include_images && resource_catalog.is_none() {
-                resource_catalog = Some(client.catalog(&task.book_id).await?);
-            }
-            let content = match client
-                .chapter_with_hints(&task.book_id, &chapter.id, &mut read_hints)
-                .await
-            {
-                Ok(content) => content,
-                Err(SourceError::UnlockRequired) => ChapterContent {
-                    html: String::new(),
-                    plain_text: String::new(),
-                    style: None,
-                    format: source::ContentFormat::Text,
-                    content_status: domain::ContentStatus::Locked,
-                },
-                Err(error) => return Err(error),
-            };
-            chapter.content_status = content.content_status;
-            chapter.content_account_key = task.account_key.clone();
-            let canonical = content.plain_text;
-            if canonical.trim().is_empty() {
-                if chapter.content_status != domain::ContentStatus::Locked {
-                    return Err(SourceError::InvalidResponse("empty_chapter"));
-                }
-                chapter.body = None;
-                chapter.cached = false;
-            } else {
-                let downloaded = if task.include_images
-                    && chapter.content_status == domain::ContentStatus::Full
-                {
-                    let resources = resource_catalog
-                        .as_ref()
-                        .and_then(|catalog| catalog.iter().find(|remote| remote.uid == chapter.id))
-                        .map(|chapter| chapter.resource_url.as_str())
-                        .filter(|url| !url.is_empty());
-                    let plan = source::images::make_plan(
-                        &task.book_id,
-                        &chapter.id,
-                        &content.html,
-                        resources,
-                    )?;
-                    Some(source::images::acquire(client, &plan).await?)
-                } else {
-                    None
-                };
-                let image_cache = Arc::clone(image_cache);
-                let (prepared_html, canonical, prepared_metadata, prepared_images) =
-                    run_download_preparation(
-                        permit,
-                        cancelled.clone(),
-                        live_epoch.clone(),
-                        epoch,
-                        move || {
-                            let metadata = crate::book_assets::prepare_chapter_metadata(
-                                &content.html,
-                                &canonical,
-                            )?;
-                            let images = downloaded
-                                .map(|downloaded| {
-                                    crate::book_assets::prepare_downloaded_with_cache(
-                                        downloaded,
-                                        &image_cache,
-                                    )
-                                })
-                                .transpose()?;
-                            Ok::<_, anyhow::Error>((content.html, canonical, metadata, images))
-                        },
-                    )
-                    .await?;
-                html = Some(prepared_html);
-                metadata = Some(prepared_metadata);
-                images = prepared_images;
-                chapter.body = Some(canonical);
-                chapter.cached = chapter.content_status == domain::ContentStatus::Full;
-            }
-        }
-        let content_status = if reuse_cached {
-            domain::ContentStatus::Full
-        } else {
-            chapter.content_status
-        };
-        let next_index =
-            if (reuse_cached || chapter.cached) && content_status == domain::ContentStatus::Full {
-                cursor + 1
-            } else {
-                cursor
-            };
-        let (checkpoint, committed) = tokio::sync::oneshot::channel();
-        {
-            let slot = active
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if !slot.as_ref().is_some_and(|active| active.token == token)
-                || cancelled.load(Ordering::SeqCst)
-                || epoch != live_epoch.load(Ordering::SeqCst)
-            {
-                return Err(SourceError::Unsupported("download_cancelled"));
-            }
-            // The receiver commits resources, body and cursor before allowing another packet.
-            let result = if reuse_cached {
-                JobResult::CachedDownloaded {
-                    task_id: task.id.clone(),
-                    chapter_id: chapter.id,
-                    chapter_index: chapter.index,
-                    next_index,
-                    checkpoint,
-                }
-            } else {
-                JobResult::Downloaded {
-                    task_id: task.id.clone(),
-                    chapter,
-                    next_index,
-                    html,
-                    metadata,
-                    images,
-                    checkpoint,
-                }
-            };
-            sender
-                .send(JobEvent::new(request, epoch, result).retain(packet_credit, None))
-                .map_err(|_| SourceError::Unsupported("event_receiver_closed"))?;
-        }
-        committed
-            .await
-            .map_err(|_| SourceError::Unsupported("checkpoint_cancelled"))??;
-        match content_status {
-            domain::ContentStatus::Full => {}
-            domain::ContentStatus::Preview | domain::ContentStatus::Locked => {
-                return Err(SourceError::UnlockRequired);
-            }
-            domain::ContentStatus::Unknown => return Err(SourceError::ContentUnverified),
-        }
-        if last_progress.is_none_or(|instant| instant.elapsed() >= Duration::from_secs(1)) {
-            // Visual progress is optional and uses one separate, global queue
-            // credit. It must neither block the next packet nor build a queue
-            // after route/account cancellation.
-            if let Ok(progress_credit) = progress.clone().try_acquire_owned() {
-                let slot = active
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                if slot.as_ref().is_some_and(|active| active.token == token)
-                    && !cancelled.load(Ordering::SeqCst)
-                    && epoch == live_epoch.load(Ordering::SeqCst)
-                {
-                    last_progress = Some(Instant::now());
-                    let _ = sender.send(
-                        JobEvent::new(
-                            request,
-                            epoch,
-                            JobResult::DownloadProgress {
-                                task_id: task.id.clone(),
-                                completed: cursor + 1,
-                                total: task.chapters.len(),
-                                title: original.title.clone(),
-                            },
-                        )
-                        .retain(progress_credit, None),
-                    );
-                }
-            }
-        }
-    }
-    Ok(())
-}
+#[path = "jobs_download_scheduler.rs"]
+mod download_scheduler;
+use download_scheduler::{DownloadOutcome, DownloadRetryControl, download_chapters};
 
 #[cfg(test)]
 #[path = "jobs_queued_credit_tests.rs"]
@@ -2181,7 +2203,7 @@ mod tests {
     }
 
     #[test]
-    fn repeated_download_cancellation_releases_waiters_on_the_shared_preparation_gate() {
+    fn repeated_download_cancellation_releases_waiters_on_the_shared_fetch_gate() {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -2190,9 +2212,9 @@ mod tests {
         let jobs = Jobs::new(runtime.handle().clone(), sender, None).unwrap();
         runtime.block_on(async {
             let _held = jobs
-                .download_preparation
+                .download_fetches
                 .clone()
-                .acquire_owned()
+                .acquire_many_owned(MAX_DOWNLOAD_CONCURRENCY)
                 .await
                 .unwrap();
             let slot = jobs.download.clone();
@@ -2257,7 +2279,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let plan = DownloadPlan::from_headers(&task, &chapters).unwrap();
-        jobs.download(7, task, plan);
+        jobs.download_with_concurrency(7, task, plan, 1);
         let mut checkpoints = Vec::new();
         let mut progress = 0;
         loop {
@@ -2316,7 +2338,7 @@ mod tests {
             },
         ];
         let plan = DownloadPlan::from_headers(&task, &headers).unwrap();
-        jobs.download(9, task, plan);
+        jobs.download_with_concurrency(9, task, plan, 1);
         let event = receiver.recv_timeout(Duration::from_secs(5)).unwrap();
         let JobEvent {
             result, credits, ..
@@ -2344,6 +2366,219 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn stale_cached_evidence_blocks_only_its_chapter_and_allows_its_peer_to_commit() {
+        fn receive_data(receiver: &mpsc::Receiver<JobEvent>) -> JobEvent {
+            loop {
+                let event = receiver.recv_timeout(Duration::from_secs(5)).unwrap();
+                if !matches!(&event.result, JobResult::DownloadProgress { .. }) {
+                    return event;
+                }
+            }
+        }
+
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let (sender, receiver) = mpsc::channel();
+        let jobs = Jobs::new(runtime.handle().clone(), sender, None).unwrap();
+        let task = domain::DownloadTask {
+            id: "stale-cached-evidence".into(),
+            book_id: "cached-evidence-book".into(),
+            account_key: "cached-evidence-account".into(),
+            chapters: vec![0, 1],
+            ..Default::default()
+        };
+        let headers = (0..2)
+            .map(|index| domain::Chapter {
+                id: format!("cached-evidence-{index}"),
+                book_id: task.book_id.clone(),
+                index,
+                cached: true,
+                content_status: domain::ContentStatus::Full,
+                content_account_key: task.account_key.clone(),
+                ..Default::default()
+            })
+            .collect::<Vec<_>>();
+        let plan = DownloadPlan::from_headers(&task, &headers).unwrap();
+        assert!(jobs.download_with_concurrency(10, task, plan, 2).is_none());
+        let JobEvent {
+            result, credits, ..
+        } = receive_data(&receiver);
+        let JobResult::CachedDownloaded {
+            chapter_index: rejected,
+            checkpoint,
+            ..
+        } = result
+        else {
+            panic!("Expected the initial cached evidence check");
+        };
+        checkpoint.send(Err(SourceError::ContentChanged)).unwrap();
+        drop(credits);
+
+        let JobEvent {
+            result, credits, ..
+        } = receive_data(&receiver);
+        let JobResult::DownloadChapterFailed {
+            chapter_index,
+            ordinal,
+            error: SourceError::ContentChanged,
+            checkpoint,
+            ..
+        } = result
+        else {
+            panic!("Stale cached evidence did not reach independent failure handling");
+        };
+        assert_eq!(chapter_index, rejected);
+        assert_eq!(ordinal, rejected as usize);
+        assert!(credits.as_ref().unwrap()._second.is_none());
+        checkpoint
+            .send(Ok(domain::DownloadChapterRetry::Blocked))
+            .unwrap();
+        drop(credits);
+
+        let JobEvent {
+            result, credits, ..
+        } = receive_data(&receiver);
+        let JobResult::CachedDownloaded {
+            chapter_index,
+            next_index,
+            checkpoint,
+            ..
+        } = result
+        else {
+            panic!("The other cached chapter was discarded after a local rejection");
+        };
+        assert_ne!(chapter_index, rejected);
+        assert_eq!(next_index, chapter_index as usize + 1);
+        checkpoint.send(Ok(())).unwrap();
+        drop(credits);
+        let terminal = receive_data(&receiver);
+        assert!(matches!(
+            &terminal.result,
+            JobResult::DownloadIncomplete {
+                completed: 1,
+                blocked: 1,
+                total: 2,
+                ..
+            }
+        ));
+        drop(terminal);
+        assert_eq!(jobs.download_resource_capacity_for_tests(), (1, 1));
+        assert_eq!(
+            jobs.download_fetch_capacity_for_tests(),
+            MAX_DOWNLOAD_CONCURRENCY as usize
+        );
+        assert!(jobs.active_download().is_none());
+    }
+
+    #[test]
+    fn a_retry_start_content_conflict_does_not_stop_the_next_chapter() {
+        fn receive_data(receiver: &mpsc::Receiver<JobEvent>) -> JobEvent {
+            loop {
+                let event = receiver.recv_timeout(Duration::from_secs(5)).unwrap();
+                if !matches!(&event.result, JobResult::DownloadProgress { .. }) {
+                    return event;
+                }
+            }
+        }
+
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let (sender, receiver) = mpsc::channel();
+        let jobs = Jobs::new(runtime.handle().clone(), sender, None).unwrap();
+        let task = domain::DownloadTask {
+            id: "retry-start-conflict".into(),
+            book_id: "retry-start-book".into(),
+            account_key: "retry-start-account".into(),
+            chapters: vec![0, 1],
+            ..Default::default()
+        };
+        let headers = (0..2)
+            .map(|index| domain::Chapter {
+                id: format!("retry-start-{index}"),
+                book_id: task.book_id.clone(),
+                index,
+                cached: true,
+                content_status: domain::ContentStatus::Full,
+                content_account_key: task.account_key.clone(),
+                ..Default::default()
+            })
+            .collect::<Vec<_>>();
+        let states = headers
+            .iter()
+            .enumerate()
+            .map(|(ordinal, chapter)| domain::DownloadChapterState {
+                chapter_uid: chapter.id.clone(),
+                chapter_index: chapter.index,
+                ordinal,
+                status: if ordinal == 0 {
+                    domain::DownloadChapterStatus::RetryWait
+                } else {
+                    domain::DownloadChapterStatus::Pending
+                },
+                ..Default::default()
+            })
+            .collect::<Vec<_>>();
+        let plan = DownloadPlan::from_headers_with_states(&task, &headers, &states).unwrap();
+        assert!(jobs.download_with_concurrency(11, task, plan, 1).is_none());
+        let JobEvent {
+            result, credits, ..
+        } = receive_data(&receiver);
+        let JobResult::DownloadChapterStarted {
+            chapter_index: 0,
+            checkpoint,
+            ..
+        } = result
+        else {
+            panic!("A due retry did not ask for durable admission");
+        };
+        checkpoint.send(Err(SourceError::ContentChanged)).unwrap();
+        drop(credits);
+        let JobEvent {
+            result, credits, ..
+        } = receive_data(&receiver);
+        let JobResult::DownloadChapterFailed {
+            chapter_index: 0,
+            error: SourceError::ContentChanged,
+            checkpoint,
+            ..
+        } = result
+        else {
+            panic!("A retry-start conflict incorrectly stopped the run");
+        };
+        checkpoint
+            .send(Ok(domain::DownloadChapterRetry::Blocked))
+            .unwrap();
+        drop(credits);
+        let JobEvent {
+            result, credits, ..
+        } = receive_data(&receiver);
+        let JobResult::CachedDownloaded {
+            chapter_index: 1,
+            checkpoint,
+            ..
+        } = result
+        else {
+            panic!("The unaffected chapter did not retain its completion path");
+        };
+        checkpoint.send(Ok(())).unwrap();
+        drop(credits);
+        let terminal = receive_data(&receiver);
+        assert!(matches!(
+            &terminal.result,
+            JobResult::DownloadIncomplete {
+                completed: 1,
+                blocked: 1,
+                total: 2,
+                ..
+            }
+        ));
+        drop(terminal);
+        assert_eq!(jobs.download_resource_capacity_for_tests(), (1, 1));
+        assert_eq!(
+            jobs.download_fetch_capacity_for_tests(),
+            MAX_DOWNLOAD_CONCURRENCY as usize
+        );
     }
 
     #[test]

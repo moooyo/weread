@@ -404,10 +404,6 @@ fn begin_cached_task(state: &mut App) -> Result<DownloadTask> {
         .as_ref()
         .and_then(library::download_account_key)
         .unwrap();
-    cache_sql(state)?.execute(
-        "UPDATE chapters SET content_status='full',content_account_key=?2 WHERE book_id=?1",
-        params![BOOK, owner],
-    )?;
     let task = DownloadTask {
         id: "app-cached-task".into(),
         book_id: BOOK.into(),
@@ -419,6 +415,14 @@ fn begin_cached_task(state: &mut App) -> Result<DownloadTask> {
         ..Default::default()
     };
     state.store.save_task(&task)?;
+    state
+        .store
+        .prepare_download_chapter_states(&task, task.updated_at)?;
+    let task = state.store.task(&task.id)?.unwrap();
+    cache_sql(state)?.execute(
+        "UPDATE chapters SET content_status='full',content_account_key=?2 WHERE book_id=?1",
+        params![BOOK, task.account_key],
+    )?;
     state.download_request = state.request();
     state.current_download = Some(task.clone());
     Ok(task)
@@ -439,7 +443,12 @@ fn cached_event(
                 task_id: task.id.clone(),
                 chapter_id: uid.into(),
                 chapter_index: index,
-                next_index: task.next_index + 1,
+                next_index: task
+                    .chapters
+                    .iter()
+                    .position(|selected| *selected == index)
+                    .unwrap()
+                    + 1,
                 checkpoint,
             },
         ),
@@ -612,7 +621,7 @@ fn run_cached_event_fences() -> Result<()> {
         assert!(!state.handle_job(event)?);
         assert!(matches!(
             reply.try_recv(),
-            Ok(Err(source::SourceError::CheckpointFailed))
+            Ok(Err(source::SourceError::ContentChanged))
         ));
         assert_eq!(state.store.task(&task.id)?.unwrap(), task);
         let saved: String = connection.query_row(

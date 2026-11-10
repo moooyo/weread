@@ -373,10 +373,13 @@ fn planning_case() -> Result<()> {
         // completed cursor cannot fetch text, even if it is later polled.
         state.start_next_download()?;
         assert_one_snapshot(&session, true);
-        assert_eq!(work().status_checks, count);
+        // Recovery checks Full/body/owner evidence in the normalized Store
+        // transaction instead of repeating an App-side status walk.
+        assert_eq!(work().status_checks, 0);
         let running = state.current_download.as_ref().unwrap();
         assert_eq!(running.id, task.id);
         assert_eq!(running.next_index, count);
+        assert_eq!(running.completed_count, count);
         assert_eq!(running.status, DownloadStatus::Running);
         assert_eq!(
             state.jobs.active_download().as_deref(),

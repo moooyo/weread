@@ -5,6 +5,7 @@ pub mod cache;
 pub mod demo;
 pub mod diagnostics;
 pub mod domain;
+mod download_diagnostics;
 pub mod i18n;
 #[path = "import.rs"]
 pub mod importer;

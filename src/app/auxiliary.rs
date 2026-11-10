@@ -2102,6 +2102,15 @@ impl App {
             }
             "storage" => vec![
                 setting(
+                    "download_concurrency",
+                    "download_concurrency",
+                    "stepper",
+                    preferences.download_concurrency.to_string(),
+                    false,
+                    true,
+                    "",
+                ),
+                setting(
                     "download_images",
                     "download_images",
                     "toggle",
@@ -2162,7 +2171,7 @@ impl App {
                     String::new(),
                     false,
                     true,
-                    "import_hint",
+                    "",
                 ),
             ],
             "display" => {

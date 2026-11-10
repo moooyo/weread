@@ -91,6 +91,65 @@ pub struct ChapterManifest {
     pub complete: bool,
 }
 
+/// A single-use result of a fresh body and image verification operation.
+/// Consume it immediately at the matching SQL checkpoint; never cache it.
+pub(crate) struct VerifiedChapterImages {
+    book_id: String,
+    chapter_uid: String,
+}
+
+impl VerifiedChapterImages {
+    pub(crate) fn book_id(&self) -> &str {
+        &self.book_id
+    }
+
+    pub(crate) fn chapter_uid(&self) -> &str {
+        &self.chapter_uid
+    }
+}
+
+/// A single-use batch proof for an immediate task recovery transaction.
+/// The book identity is retained once and the admitted UID set owns no bodies.
+pub(crate) struct VerifiedBookImages {
+    book_id: String,
+    chapter_uids: BTreeSet<String>,
+    retained_metadata_bytes: usize,
+}
+
+impl VerifiedBookImages {
+    pub(crate) fn book_id(&self) -> &str {
+        &self.book_id
+    }
+
+    pub(crate) fn contains(&self, chapter_uid: &str) -> bool {
+        self.chapter_uids.contains(chapter_uid)
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.chapter_uids.len()
+    }
+
+    pub(crate) fn retained_metadata_bytes(&self) -> usize {
+        self.retained_metadata_bytes
+    }
+}
+
+/// A completed publication binds the image proof to the exact incoming body.
+/// Only successful publication of a complete manifest can construct it.
+pub(crate) struct VerifiedChapterPublication {
+    book_id: String,
+    chapter_uid: String,
+    text_sha256: String,
+}
+
+impl VerifiedChapterPublication {
+    pub(crate) fn matches_body(&self, book: &str, chapter_uid: &str, text: &str) -> bool {
+        self.book_id == book
+            && self.chapter_uid == chapter_uid
+            && digest_matches_text(&Sha256::digest(text.as_bytes()).into(), &self.text_sha256)
+    }
+}
+
 impl std::fmt::Debug for ChapterManifest {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
@@ -1627,6 +1686,36 @@ impl BookAssetStore {
         )
     }
 
+    /// Mint a body-bound proof as part of the existing publication operation.
+    /// An incomplete image set remains usable as text, but cannot finish an
+    /// image-inclusive download chapter.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn commit_prepared_download_chapter_metadata(
+        &self,
+        store: &Store,
+        book_id: &str,
+        chapter_uid: &str,
+        html: &str,
+        canonical_text: &str,
+        metadata: &PreparedChapterMetadata,
+        downloaded: Option<&PreparedChapterImages>,
+    ) -> Result<Option<VerifiedChapterPublication>> {
+        let manifest = self.commit_prepared_chapter_metadata(
+            store,
+            book_id,
+            chapter_uid,
+            html,
+            canonical_text,
+            metadata,
+            downloaded,
+        )?;
+        Ok(manifest.complete.then(|| VerifiedChapterPublication {
+            book_id: manifest.book_id,
+            chapter_uid: manifest.chapter_uid,
+            text_sha256: manifest.text_sha256,
+        }))
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn commit_prepared_chapter_metadata_with_verification_budget(
         &self,
@@ -2216,6 +2305,94 @@ impl BookAssetStore {
             chapter_uids,
             self.cache.verification_work_limit(),
         )
+    }
+
+    /// Mint a checkpoint proof only after revalidating this exact body and all
+    /// referenced payloads. Download-plan hints alone cannot mint this proof.
+    pub(crate) fn verify_complete_checkpoint(
+        &self,
+        store: &Store,
+        book_id: &str,
+        chapter_uid: &str,
+    ) -> Result<Option<VerifiedChapterImages>> {
+        let complete = self.complete_many(store, book_id, &[chapter_uid])?;
+        ensure!(
+            complete.len() == 1,
+            "unaligned checkpoint image completeness"
+        );
+        Ok(complete[0].then(|| VerifiedChapterImages {
+            book_id: book_id.to_owned(),
+            chapter_uid: chapter_uid.to_owned(),
+        }))
+    }
+
+    /// Reconcile completed image chapters without temporarily dropping their
+    /// durable completion count or retaining a separate proof per book copy.
+    pub(crate) fn verify_complete_book(
+        &self,
+        store: &Store,
+        book_id: &str,
+        chapter_uids: &[&str],
+    ) -> Result<VerifiedBookImages> {
+        self.verify_complete_book_with_verification_budget(
+            store,
+            book_id,
+            chapter_uids,
+            self.cache.verification_work_limit(),
+        )
+    }
+
+    pub(crate) fn verify_complete_book_with_verification_budget(
+        &self,
+        store: &Store,
+        book_id: &str,
+        chapter_uids: &[&str],
+        maximum_work_bytes: u64,
+    ) -> Result<VerifiedBookImages> {
+        #[cfg(test)]
+        let limits = bulk_verification_tests::configured_limits().unwrap_or_default();
+        #[cfg(not(test))]
+        let limits = BulkVerificationLimits::default();
+        let mut metadata = BulkMetadataBudget {
+            used: 0,
+            maximum: limits.metadata_bytes.min(MAX_PREPARED_PACKET_BYTES),
+        };
+        metadata.reserve(std::mem::size_of::<VerifiedBookImages>())?;
+        metadata.reserve(book_id.len())?;
+        if chapter_uids.len() > limits.chapters.min(MAX_BULK_CHAPTERS) {
+            return Err(BulkVerificationLimitExceeded.into());
+        }
+        for uid in chapter_uids {
+            metadata.reserve(
+                uid.len()
+                    .checked_add(
+                        std::mem::size_of::<String>() + 4 * std::mem::size_of::<usize>() + 1,
+                    )
+                    .ok_or(BulkVerificationLimitExceeded)?,
+            )?;
+        }
+        // The existing operation pre-admits all manifest, body and PNG work
+        // together. It releases that workset before these compact UID copies.
+        let complete = self.complete_many_with_verification_budget(
+            store,
+            book_id,
+            chapter_uids,
+            maximum_work_bytes,
+        )?;
+        ensure!(
+            complete.len() == chapter_uids.len(),
+            "unaligned batch image proof"
+        );
+        let chapter_uids = chapter_uids
+            .iter()
+            .zip(complete)
+            .filter_map(|(uid, complete)| complete.then(|| (*uid).to_owned()))
+            .collect();
+        Ok(VerifiedBookImages {
+            book_id: book_id.to_owned(),
+            chapter_uids,
+            retained_metadata_bytes: metadata.used,
+        })
     }
 
     pub fn complete_many_with_verification_budget(

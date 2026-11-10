@@ -3,19 +3,26 @@ use super::protocol::{
     SKILL_VERSION, USER_AGENT, content_payload_checked as content_payload, normalize_cover_url,
     now_seconds, read_payload_checked as read_payload, reader_url_checked as reader_url,
 };
+use super::reader_admission::{DownloadReaderContext, ReaderTier};
 use super::web_session::{WebReadAuth, web_session_changed};
 use super::*;
+use crate::download_diagnostics::{DownloadDiagnostics, ResponsePhase};
 use reqwest::{Client, ClientBuilder, Method, RequestBuilder, Response};
 use serde_json::{Value, json};
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, Write};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{
+    Arc, Mutex, Weak,
+    atomic::{AtomicBool, Ordering},
+};
 use std::time::Duration;
 
 const WEB_ORIGIN: &str = "https://weread.qq.com";
 const GATEWAY_URL: &str = "https://i.weread.qq.com/api/agent/gateway";
 const MAX_RESPONSE_BYTES: usize = 24 * 1024 * 1024;
+const MAX_PREFETCH_RESPONSE_BYTES: usize = 512 * 1024;
+const MAX_PREFETCH_CONTENT_BYTES: usize = 4 * 1024 * 1024;
 const MAX_API_CODE_BYTES: usize = 64;
 pub(crate) const MAX_COOKIE_COUNT: usize = 256;
 pub(crate) const MAX_COOKIE_TOTAL_BYTES: usize = 64 * 1024;
@@ -822,13 +829,16 @@ fn normalize_underline_records(
 
 /// Verified format and transport hints that belong to one download task.
 /// Create a fresh value for every task, including resumed tasks.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct ChapterReadHints {
     scope: Option<ChapterHintScope>,
     confirmed_text: bool,
-    serial_epub: bool,
+    serial_epub: Arc<AtomicBool>,
+    download_diagnostics: Option<Arc<DownloadDiagnostics>>,
+    download_reader: Option<DownloadReaderContext>,
 }
 
+#[derive(Clone)]
 struct ChapterHintScope {
     client: Weak<Mutex<AuthSession>>,
     account_key: String,
@@ -836,6 +846,37 @@ struct ChapterHintScope {
 }
 
 impl ChapterReadHints {
+    pub(crate) fn set_download_diagnostics(&mut self, diagnostics: Arc<DownloadDiagnostics>) {
+        self.download_diagnostics = Some(diagnostics);
+    }
+
+    pub(crate) fn set_download_reader_gate(&mut self, admission: Arc<ReaderAdmission>) {
+        self.download_reader = Some(DownloadReaderContext::new(admission));
+    }
+
+    pub(crate) fn for_book(client: &WeReadClient, book_id: &str) -> Self {
+        let mut hints = Self::default();
+        hints.bind(client, book_id);
+        hints
+    }
+
+    /// Ordered results update the format hint. Credential-sensitive shard
+    /// fallback is shared immediately by every clone of this task's scope.
+    pub(crate) fn merge(&mut self, returned: Self) {
+        let same_scope = self
+            .scope
+            .as_ref()
+            .zip(returned.scope.as_ref())
+            .is_some_and(|(current, returned)| {
+                Weak::ptr_eq(&current.client, &returned.client)
+                    && current.account_key == returned.account_key
+                    && current.book_id == returned.book_id
+            });
+        if same_scope && Arc::ptr_eq(&self.serial_epub, &returned.serial_epub) {
+            self.confirmed_text = returned.confirmed_text;
+        }
+    }
+
     fn bind(&mut self, client: &WeReadClient, book_id: &str) {
         let identity = super::report::account_key(&client.session());
         let same_scope = self.scope.as_ref().is_some_and(|scope| {
@@ -844,7 +885,13 @@ impl ChapterReadHints {
                 && scope.book_id == book_id
         });
         if !same_scope {
+            let download_diagnostics = self.download_diagnostics.take();
+            let download_reader = self.download_reader.take();
             *self = Self::default();
+            self.download_diagnostics = download_diagnostics;
+            if let Some(context) = download_reader {
+                self.set_download_reader_gate(context.admission);
+            }
             self.scope = identity.map(|account_key| ChapterHintScope {
                 client: Arc::downgrade(&client.auth),
                 account_key,
@@ -1087,40 +1134,127 @@ impl WeReadClient {
         chapter_uid: Option<&str>,
         auth: &mut WebReadAuth,
     ) -> Result<ReaderSession> {
-        let (before_account, before_generation) = {
-            let generation = self.renewal.lock().await;
-            (super::report::account_key(&self.session()), *generation)
-        };
-        let url = reader_url(book_id, chapter_uid)?;
-        let path = url
-            .strip_prefix(WEB_ORIGIN)
-            .ok_or(SourceError::InvalidResponse("reader_url"))?;
-        let request = self.web_request(Method::GET, path)?.header("Referer", &url);
-        let html = self.web_text_read(request, auth, false).await?;
-        let (current, generation) = {
-            let generation = self.renewal.lock().await;
-            (self.session(), *generation)
-        };
-        let account = super::report::account_key(&current);
-        let expected_vid = if current.user_vid.is_empty() {
-            current.cookies.get("wr_vid").map(String::as_str)
-        } else {
-            Some(current.user_vid.as_str())
-        };
-        let mut session = super::content::extract_reader_session_with_access(
-            &html,
-            book_id,
-            chapter_uid,
-            expected_vid,
-            now_seconds(),
-        )?;
-        session.access.bind_session(
-            account.clone(),
-            generation,
-            before_account == account && before_generation == generation,
-        );
-        session.ensure_reader_clock(now_seconds())?;
-        Ok(session)
+        let context = auth.download_reader.clone();
+        loop {
+            // An explicit ordinary read retains the legacy full allowance.
+            // Speculative reads learn only a response tier within this task.
+            let tier = context.as_ref().map(|context| {
+                if auth.response_limit.is_none() {
+                    ReaderTier::FULL
+                } else {
+                    context.tier()
+                }
+            });
+            // Declare admission before HTML. All network error/cancellation
+            // paths drop their response buffers before returning this credit.
+            let reservation = match (&context, tier) {
+                (Some(context), Some(tier)) => Some(context.admission.acquire(tier).await?),
+                _ => None,
+            };
+            if auth.response_limit.is_some()
+                && context
+                    .as_ref()
+                    .zip(tier)
+                    .is_some_and(|(context, tier)| context.tier() > tier)
+            {
+                // A concurrent chapter learned a larger tier while we waited.
+                // Release the smaller credit before joining the larger queue.
+                drop(reservation);
+                continue;
+            }
+            let (before_account, before_generation) = {
+                let generation = self.renewal.lock().await;
+                (super::report::account_key(&self.session()), *generation)
+            };
+            let url = reader_url(book_id, chapter_uid)?;
+            let path = url
+                .strip_prefix(WEB_ORIGIN)
+                .ok_or(SourceError::InvalidResponse("reader_url"))?;
+            let request = self.web_request(Method::GET, path)?.header("Referer", &url);
+            let response_limit = tier.map(ReaderTier::bytes).or(auth.response_limit);
+            let (html, response_budget_exceeded) = self
+                .web_text_read_with_limit(request, auth, false, response_limit)
+                .await;
+            let html = match html {
+                Err(SourceError::ResponseTooLarge)
+                    if response_budget_exceeded
+                        && !auth.recovery_failed
+                        && tier.is_some_and(|tier| tier != ReaderTier::FULL) =>
+                {
+                    // Never wait for more credit while retaining a smaller
+                    // reservation: several simultaneous upgrades must progress.
+                    drop(reservation);
+                    let _ = context
+                        .as_ref()
+                        .expect("The adaptive Reader has admission")
+                        .advance(tier.expect("The adaptive Reader has a tier"));
+                    continue;
+                }
+                result => result?,
+            };
+            if let Some(diagnostics) = &auth.download_diagnostics {
+                diagnostics.reader_response(html.len());
+            }
+            let (current, generation) = {
+                let generation = self.renewal.lock().await;
+                (self.session(), *generation)
+            };
+            let account = super::report::account_key(&current);
+            let expected_vid = if current.user_vid.is_empty() {
+                current.cookies.get("wr_vid").map(String::as_str)
+            } else {
+                Some(current.user_vid.as_str())
+            };
+            let response_bytes = html.len();
+            let session = if let Some(reservation) = reservation {
+                let book_id = book_id.to_owned();
+                let chapter_uid = chapter_uid.map(str::to_owned);
+                let expected_vid = expected_vid.map(str::to_owned);
+                reservation
+                    .page(html)
+                    .parse(move |html| {
+                        super::content::extract_reader_session_with_access(
+                            html,
+                            &book_id,
+                            chapter_uid.as_deref(),
+                            expected_vid.as_deref(),
+                            now_seconds(),
+                        )
+                    })
+                    .await
+            } else {
+                // Ordinary source reads preserve their synchronous parser and
+                // its existing operation-budget observations.
+                super::content::extract_reader_session_with_access(
+                    &html,
+                    book_id,
+                    chapter_uid,
+                    expected_vid,
+                    now_seconds(),
+                )
+            };
+            if matches!(&session, Err(SourceError::ResponseTooLarge)) {
+                if let Some(diagnostics) = &auth.download_diagnostics {
+                    diagnostics.source_budget_exceeded(ResponsePhase::Reader, response_bytes);
+                }
+            }
+            let mut session = session?;
+            // Parser queueing and blocking work introduce another renewal
+            // window. A proof is fresh only if all three snapshots agree.
+            let (after_account, after_generation) = {
+                let generation = self.renewal.lock().await;
+                (super::report::account_key(&self.session()), *generation)
+            };
+            let stable = before_account == account
+                && before_generation == generation
+                && account == after_account
+                && generation == after_generation;
+            session
+                .access
+                .bind_session(after_account, after_generation, stable);
+            session.ensure_reader_clock(now_seconds())?;
+            return Ok(session);
+        }
     }
 
     async fn reader_content_status(
@@ -1134,6 +1268,25 @@ impl WeReadClient {
             &super::report::account_key(&self.session()),
             *generation,
         )
+    }
+
+    async fn completed_chapter_attempt(
+        &self,
+        session: &ReaderSession,
+        content: ChapterContent,
+    ) -> ChapterAttempt {
+        let generation = self.renewal.lock().await;
+        if session
+            .access
+            .is_current(&super::report::account_key(&self.session()), *generation)
+        {
+            ChapterAttempt::Complete(content)
+        } else {
+            // Another chapter may renew the shared session during this read.
+            // Revalidate once using the existing access-refresh budget rather
+            // than publishing an expired proof or treating it as missing rights.
+            ChapterAttempt::RefreshAccess
+        }
     }
 
     async fn shard(
@@ -1173,10 +1326,41 @@ impl WeReadClient {
         chapter_uid: &str,
         hints: &mut ChapterReadHints,
     ) -> Result<ChapterContent> {
+        self.chapter_with_read_limits(book_id, chapter_uid, hints, None)
+            .await
+    }
+
+    /// Speculation uses a small decoded-response budget. The ordered download
+    /// owner can retry an oversized chapter alone with the normal read budget.
+    pub(crate) async fn chapter_prefetch_with_hints(
+        &self,
+        book_id: &str,
+        chapter_uid: &str,
+        hints: &mut ChapterReadHints,
+    ) -> Result<ChapterContent> {
+        self.chapter_with_read_limits(
+            book_id,
+            chapter_uid,
+            hints,
+            Some(MAX_PREFETCH_RESPONSE_BYTES),
+        )
+        .await
+    }
+
+    async fn chapter_with_read_limits(
+        &self,
+        book_id: &str,
+        chapter_uid: &str,
+        hints: &mut ChapterReadHints,
+        response_limit: Option<usize>,
+    ) -> Result<ChapterContent> {
         hints.bind(self, book_id);
         let account = super::report::account_key(&self.session());
         let mut retries = 0u64;
         let mut auth = WebReadAuth::default();
+        auth.response_limit = response_limit;
+        auth.download_diagnostics = hints.download_diagnostics.clone();
+        auth.download_reader = hints.download_reader.clone();
         let mut access_refreshed = false;
         loop {
             if super::report::account_key(&self.session()) != account {
@@ -1210,6 +1394,26 @@ impl WeReadClient {
                     crate::diagnostic!("weread: source operation=chapter_read serial_fallback=1");
                 }
                 Ok(ChapterAttempt::Complete(content)) => {
+                    let retained_bytes = content
+                        .html
+                        .len()
+                        .checked_add(content.plain_text.len())
+                        .and_then(|bytes| {
+                            bytes.checked_add(content.style.as_ref().map_or(0, String::len))
+                        });
+                    if response_limit.is_some()
+                        && retained_bytes.is_none_or(|bytes| bytes > MAX_PREFETCH_CONTENT_BYTES)
+                    {
+                        if let Some(diagnostics) = &auth.download_diagnostics {
+                            diagnostics.budget_exceeded(
+                                ResponsePhase::Result,
+                                MAX_PREFETCH_CONTENT_BYTES,
+                                retained_bytes.unwrap_or(usize::MAX),
+                                None,
+                            );
+                        }
+                        return Err(SourceError::ResponseTooLarge);
+                    }
                     if super::report::account_key(&self.session()) != account {
                         hints.bind(self, book_id);
                         return Err(SourceError::Unsupported("chapter_account_changed"));
@@ -1242,7 +1446,7 @@ impl WeReadClient {
             .reader_session_with_auth(book_id, Some(chapter_uid), auth)
             .await?;
         if web_session_changed(&before, &self.session()) {
-            hints.serial_epub = true;
+            hints.serial_epub.store(true, Ordering::SeqCst);
         }
         if session.access.needs_refresh() {
             // Renewal inside the Reader GET can return valid HTML after the
@@ -1255,7 +1459,7 @@ impl WeReadClient {
                 .text_chapter(book_id, chapter_uid, &session, auth)
                 .await
             {
-                Ok(content) => Ok(ChapterAttempt::Complete(content)),
+                Ok(content) => Ok(self.completed_chapter_attempt(&session, content).await),
                 Err(error) if format_hint_mismatch(&error) && !auth.recovery_failed => {
                     hints.confirmed_text = false;
                     Ok(ChapterAttempt::ProbeFormat)
@@ -1274,18 +1478,19 @@ impl WeReadClient {
             )
             .await?;
         if web_session_changed(&before, &self.session()) {
-            hints.serial_epub = true;
+            hints.serial_epub.store(true, Ordering::SeqCst);
         }
         let is_text = first.trim_start().starts_with('{')
             && serde_json::from_str::<Value>(&first)
                 .ok()
                 .is_some_and(|v| v.get("bookId").is_some());
         if is_text {
-            self.text_chapter(book_id, chapter_uid, &session, auth)
-                .await
-                .map(ChapterAttempt::Complete)
+            let content = self
+                .text_chapter(book_id, chapter_uid, &session, auth)
+                .await?;
+            Ok(self.completed_chapter_attempt(&session, content).await)
         } else {
-            let (second, third) = if hints.serial_epub {
+            let (second, third) = if hints.serial_epub.load(Ordering::SeqCst) {
                 let second = self
                     .shard(
                         book_id,
@@ -1330,7 +1535,7 @@ impl WeReadClient {
                     // Once an endpoint rotates credentials, subsequent chapters
                     // in this task remain serial. The conflicting batch is never
                     // accepted as content or resolved by overwriting newer auth.
-                    hints.serial_epub = true;
+                    hints.serial_epub.store(true, Ordering::SeqCst);
                     if !auth.recovery_failed
                         && pair.result.as_ref().err().is_none_or(retry_chapter_read)
                     {
@@ -1351,13 +1556,14 @@ impl WeReadClient {
                 }
                 return Err(SourceError::InvalidResponse("empty_chapter"));
             }
-            Ok(ChapterAttempt::Complete(ChapterContent {
+            let content = ChapterContent {
                 html,
                 plain_text,
                 style: None,
                 format: ContentFormat::Xhtml,
                 content_status,
-            }))
+            };
+            Ok(self.completed_chapter_attempt(&session, content).await)
         }
     }
 
@@ -1387,7 +1593,13 @@ impl WeReadClient {
             }
             return Err(SourceError::InvalidResponse("empty_chapter"));
         }
-        let html = super::content::paragraph_html_checked(&plain_text)?;
+        let html = super::content::paragraph_html_checked(&plain_text);
+        if matches!(&html, Err(SourceError::ResponseTooLarge)) {
+            if let Some(diagnostics) = &auth.download_diagnostics {
+                diagnostics.source_budget_exceeded(ResponsePhase::Result, plain_text.len());
+            }
+        }
+        let html = html?;
         Ok(ChapterContent {
             html,
             plain_text,
@@ -1863,6 +2075,7 @@ fn completed_chapter(attempt: ChapterAttempt) -> Result<ChapterContent> {
 
 fn format_hint_mismatch(error: &SourceError) -> bool {
     !error.requires_login()
+        && !matches!(error, SourceError::Api(code) if code == "-10102")
         && matches!(
             error,
             SourceError::Integrity
@@ -1879,7 +2092,7 @@ fn format_hint_mismatch(error: &SourceError) -> bool {
 }
 
 fn retry_chapter_read(error: &SourceError) -> bool {
-    if error.requires_login() {
+    if error.requires_login() || matches!(error, SourceError::Api(code) if code == "-10102") {
         return false;
     }
     matches!(
@@ -1948,6 +2161,10 @@ mod cached_underline_budget_tests;
 #[cfg(test)]
 #[path = "../jobs_cached_transport_tests.rs"]
 mod cached_download_transport_tests;
+
+#[cfg(test)]
+#[path = "../jobs_concurrency_tests.rs"]
+mod jobs_concurrency_tests;
 
 #[cfg(test)]
 #[path = "review_output_budget_tests.rs"]
@@ -2027,22 +2244,41 @@ pub(crate) fn network_error(error: reqwest::Error) -> SourceError {
     }
 }
 
-pub(crate) async fn response_bytes(mut response: Response, limit: usize) -> Result<Vec<u8>> {
+pub(crate) async fn response_bytes(response: Response, limit: usize) -> Result<Vec<u8>> {
+    response_bytes_observed(response, limit, |_, _| {}).await
+}
+
+async fn response_bytes_observed(
+    mut response: Response,
+    limit: usize,
+    mut budget_exceeded: impl FnMut(usize, Option<u64>),
+) -> Result<Vec<u8>> {
     if !response.status().is_success() {
         return Err(SourceError::Http(response.status().as_u16()));
     }
-    if response
-        .content_length()
-        .is_some_and(|len| len > limit as u64)
-    {
+    let declared_bytes = response.content_length();
+    if declared_bytes.is_some_and(|len| len > limit as u64) {
+        budget_exceeded(0, declared_bytes);
         return Err(SourceError::ResponseTooLarge);
     }
     let mut bytes = Vec::new();
     // Reqwest removes compressed Content-Length while decoding gzip. Every
     // chunk is still bounded here after decompression, including small bombs.
     while let Some(chunk) = response.chunk().await.map_err(network_error)? {
-        if bytes.len().saturating_add(chunk.len()) > limit {
+        let observed_bytes = bytes.len().saturating_add(chunk.len());
+        if observed_bytes > limit {
+            budget_exceeded(observed_bytes, declared_bytes);
             return Err(SourceError::ResponseTooLarge);
+        }
+        if bytes.capacity() < observed_bytes {
+            // Keep geometric growth within the admitted decoded allowance;
+            // Vec's default growth can otherwise exceed a non-power-of-two cap.
+            let capacity = bytes
+                .capacity()
+                .saturating_mul(2)
+                .max(observed_bytes)
+                .min(limit);
+            bytes.reserve_exact(capacity - bytes.len());
         }
         bytes.extend_from_slice(&chunk);
     }
@@ -2050,8 +2286,32 @@ pub(crate) async fn response_bytes(mut response: Response, limit: usize) -> Resu
 }
 
 pub(crate) async fn response_text(response: Response) -> Result<String> {
-    String::from_utf8(response_bytes(response, MAX_RESPONSE_BYTES).await?)
+    response_text_limited(response, None).await
+}
+
+pub(super) async fn response_text_limited(
+    response: Response,
+    limit: Option<usize>,
+) -> Result<String> {
+    let maximum = limit.unwrap_or(MAX_RESPONSE_BYTES).min(MAX_RESPONSE_BYTES);
+    String::from_utf8(response_bytes(response, maximum).await?)
         .map_err(|_| SourceError::InvalidResponse("utf8"))
+}
+
+pub(super) async fn response_text_limited_observed(
+    response: Response,
+    limit: Option<usize>,
+    diagnostics: Option<&Arc<DownloadDiagnostics>>,
+    phase: Option<ResponsePhase>,
+) -> Result<String> {
+    let maximum = limit.unwrap_or(MAX_RESPONSE_BYTES).min(MAX_RESPONSE_BYTES);
+    let bytes = response_bytes_observed(response, maximum, |observed, declared| {
+        if let (Some(diagnostics), Some(phase)) = (diagnostics, phase) {
+            diagnostics.budget_exceeded(phase, maximum, observed, declared);
+        }
+    })
+    .await?;
+    String::from_utf8(bytes).map_err(|_| SourceError::InvalidResponse("utf8"))
 }
 
 pub(crate) async fn response_json(response: Response) -> Result<Value> {

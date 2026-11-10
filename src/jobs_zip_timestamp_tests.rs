@@ -5,8 +5,8 @@ use super::*;
 use crate::{
     book_assets::BookAssetStore,
     cache::FileCache,
-    domain::{Book, Chapter, ContentStatus, DownloadStatus, DownloadTask},
-    jobs::{DownloadPlan, JobResult, Jobs},
+    domain::{Book, Chapter, ContentStatus, DownloadChapterRetry, DownloadStatus, DownloadTask},
+    jobs::{DownloadPlan, JobEvent, JobResult, Jobs},
     source::images::{DownloadedChapterImages, ImageAsset},
     store::Store,
 };
@@ -30,6 +30,23 @@ const ARCHIVE_URL: &str = "https://zip-fixture.invalid/archive.zip";
 const HTML: &str = "<html><body><p>Worker chapter.</p><img src='image.png'></body></html>";
 const TEXT: &str = "Worker chapter.";
 const TIMESTAMP_ERROR: &str = "flags and len don't match in extended timestamp field";
+
+async fn next_worker_result(receiver: &mpsc::Receiver<JobEvent>, skip_progress: bool) -> JobEvent {
+    let deadline = Instant::now() + Duration::from_secs(8);
+    loop {
+        assert!(
+            Instant::now() < deadline,
+            "The genuine ZIP worker did not settle"
+        );
+        if let Ok(event) = receiver.try_recv() {
+            if skip_progress && matches!(&event.result, JobResult::DownloadProgress { .. }) {
+                continue;
+            }
+            return event;
+        }
+        tokio::time::sleep(Duration::from_millis(1)).await;
+    }
+}
 
 fn auth() -> AuthSession {
     AuthSession {
@@ -227,32 +244,50 @@ fn actual_image_download_worker_preserves_state_when_retained_zip_records_exceed
                 let plan = DownloadPlan::from_headers(&task, &store.chapter_headers(BOOK).unwrap())
                     .unwrap();
                 assert!(jobs.download(request, task.clone(), plan).is_none());
-                let terminal = runtime.block_on(async {
-                    let deadline = Instant::now() + Duration::from_secs(8);
-                    loop {
-                        if let Ok(event) = receiver.try_recv() {
-                            break event;
-                        }
-                        assert!(
-                            Instant::now() < deadline,
-                            "The actual retained-quota worker did not settle"
-                        );
-                        tokio::time::sleep(Duration::from_millis(1)).await;
-                    }
-                });
+                let failure = runtime.block_on(next_worker_result(&receiver, false));
+                assert!(jobs.accepts(&failure));
+                assert_eq!(
+                    (failure.request, failure.account_epoch),
+                    (request, jobs.account_epoch())
+                );
+                let JobEvent {
+                    result, credits, ..
+                } = failure;
+                let JobResult::DownloadChapterFailed {
+                    task_id,
+                    chapter_id,
+                    chapter_index,
+                    ordinal,
+                    error,
+                    checkpoint,
+                } = result
+                else {
+                    panic!("The quota refusal did not produce an independent chapter failure");
+                };
+                assert_eq!(task_id, task.id);
+                assert_eq!(chapter_id, UID);
+                assert_eq!((chapter_index, ordinal), (0, 0));
+                assert!(matches!(&error, SourceError::ResponseTooLarge));
+                assert!(credits.is_some());
+                assert_eq!(jobs.download_resource_capacity_for_tests(), (0, 1));
+                assert_eq!(jobs.active_download().as_deref(), Some(task.id.as_str()));
+                checkpoint.send(Ok(DownloadChapterRetry::Blocked)).unwrap();
+                drop((task_id, chapter_id, error, credits));
+                let terminal = runtime.block_on(next_worker_result(&receiver, true));
                 assert!(jobs.accepts(&terminal));
                 assert_eq!(
                     (terminal.request, terminal.account_epoch),
                     (request, jobs.account_epoch())
                 );
-                assert!(matches!(&terminal.result, JobResult::DownloadFailed {
-                task_id, error: SourceError::ResponseTooLarge } if task_id == &task.id));
+                assert!(matches!(&terminal.result, JobResult::DownloadIncomplete {
+                    task_id, completed: 0, blocked: 1, total: 1,
+                } if task_id == &task.id));
                 assert!(terminal.credits.is_some());
                 assert_eq!(jobs.download_resource_capacity_for_tests(), (0, 1));
                 assert!(jobs.active_download().is_none());
                 assert!(
                     receiver.try_recv().is_err(),
-                    "A quota refusal must not publish chapter/progress packets"
+                    "A quota refusal must not publish a completed chapter"
                 );
                 let usage = super::super::images::zip_retention_usage_for_test();
                 assert_eq!(
@@ -810,16 +845,44 @@ fn actual_image_download_worker_rejects_zero_length_timestamp_zip_and_releases_o
         let headers = store.chapter_headers(BOOK).unwrap();
         let plan = DownloadPlan::from_headers(&task, &headers).unwrap();
         assert!(jobs.download(request, task.clone(), plan).is_none());
-        let terminal = receiver
-            .recv_timeout(Duration::from_secs(8))
-            .expect("The genuine ZIP worker did not emit its terminal result");
+        let failure = runtime.block_on(next_worker_result(&receiver, false));
+        assert_eq!(failure.request, request);
+        assert_eq!(failure.account_epoch, jobs.account_epoch());
+        assert!(failure.credits.is_some());
+        let JobEvent {
+            result, credits, ..
+        } = failure;
+        let JobResult::DownloadChapterFailed {
+            task_id,
+            chapter_id,
+            chapter_index,
+            ordinal,
+            error,
+            checkpoint,
+        } = result
+        else {
+            panic!("The malformed archive did not produce an independent chapter failure");
+        };
+        assert_eq!(task_id, task.id);
+        assert_eq!(chapter_id, UID);
+        assert_eq!((chapter_index, ordinal), (0, 0));
+        assert!(matches!(
+            &error,
+            SourceError::InvalidResponse("chapter_zip")
+        ));
+        assert_eq!(jobs.active_download().as_deref(), Some(task.id.as_str()));
+        checkpoint.send(Ok(DownloadChapterRetry::Blocked)).unwrap();
+        drop((task_id, chapter_id, error, credits));
+        let terminal = runtime.block_on(next_worker_result(&receiver, true));
         assert_eq!(terminal.request, request);
         assert_eq!(terminal.account_epoch, jobs.account_epoch());
         assert!(terminal.credits.is_some());
         match &terminal.result {
-            JobResult::DownloadFailed {
+            JobResult::DownloadIncomplete {
                 task_id,
-                error: SourceError::InvalidResponse("chapter_zip"),
+                completed: 0,
+                blocked: 1,
+                total: 1,
             } => {
                 assert_eq!(task_id, &task.id);
             }
@@ -828,7 +891,7 @@ fn actual_image_download_worker_rejects_zero_length_timestamp_zip_and_releases_o
         assert!(jobs.active_download().is_none());
         assert!(
             receiver.try_recv().is_err(),
-            "A rejected archive published a chapter or progress packet"
+            "A rejected archive published a completed chapter"
         );
         assert_eq!(store.task(&task.id).unwrap().unwrap(), task);
         assert_eq!(store.chapter(BOOK, 0).unwrap().unwrap(), original_chapter);

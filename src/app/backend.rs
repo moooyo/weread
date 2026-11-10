@@ -449,7 +449,10 @@ impl App {
                     self.job_error(&error, true)?;
                 }
             },
-            JobResult::Cover { book_id, result } => self.cover_result(&book_id, result)?,
+            JobResult::Cover { book_id, result } => {
+                self.cover_result(&book_id, result)?;
+                render = false;
+            }
             JobResult::ArticleImage {
                 article_id,
                 image_id,
@@ -597,21 +600,23 @@ impl App {
                 if request != self.download_request
                     || !self.valid_download_checkpoint(&task_id, &chapter, next_index)
                 {
+                    let _ = checkpoint.send(Err(source::SourceError::CheckpointFailed));
                     return Ok(false);
                 }
                 let mut committed = false;
+                let mut complete_images = true;
                 let result = (|| -> Result<bool> {
-                    self.store.validate_download_chapter(
+                    self.store.validate_independent_download_chapter(
                         self.current_download.as_ref().unwrap(),
                         &chapter,
-                        next_index,
+                        next_index - 1,
                     )?;
-                    match (html, metadata) {
+                    let publication = match (html, metadata) {
                         (Some(html), Some(metadata)) => {
                             let text = chapter.body.as_deref().ok_or_else(|| {
                                 anyhow::anyhow!("A completed chapter packet has no body")
                             })?;
-                            self.book_assets.commit_prepared_chapter_metadata(
+                            self.book_assets.commit_prepared_download_chapter_metadata(
                                 &self.store,
                                 &chapter.book_id,
                                 &chapter.id,
@@ -619,24 +624,41 @@ impl App {
                                 text,
                                 &metadata,
                                 images.as_ref(),
-                            )?;
+                            )?
                         }
-                        (None, None) if images.is_none() => {}
+                        (None, None) if images.is_none() => None,
                         _ => anyhow::bail!("A chapter packet has inconsistent prepared metadata"),
-                    }
-                    self.downloaded_chapter(&task_id, chapter, next_index, &mut committed)
+                    };
+                    complete_images = !self.current_download.as_ref().unwrap().include_images
+                        || chapter.content_status != ContentStatus::Full
+                        || publication.is_some();
+                    self.downloaded_chapter(
+                        &task_id,
+                        chapter,
+                        next_index,
+                        publication,
+                        &mut committed,
+                    )
                 })();
                 match result {
                     Ok(visible) => {
                         render = visible;
-                        let _ = checkpoint.send(Ok(()));
+                        let _ = checkpoint.send(if complete_images {
+                            Ok(())
+                        } else {
+                            Err(source::SourceError::ContentUnverified)
+                        });
                     }
                     Err(error) => {
                         if committed {
                             // The worker owns a durable checkpoint already.
                             // A later display/session error keeps its cause for
                             // the caller but cannot authorize packet replay.
-                            let _ = checkpoint.send(Ok(()));
+                            let _ = checkpoint.send(if complete_images {
+                                Ok(())
+                            } else {
+                                Err(source::SourceError::ContentUnverified)
+                            });
                             crate::diagnostic!("Post-commit chapter follow-up failed: {error:#}");
                             self.show_toast("operation_failed");
                             return Err(error);
@@ -680,18 +702,153 @@ impl App {
                         render = visible;
                         let _ = checkpoint.send(Ok(()));
                     }
-                    Err(_) => {
+                    Err(error) => {
+                        let conflict = error
+                            .downcast_ref::<crate::store::ContentConflict>()
+                            .is_some()
+                            || matches!(
+                                error.downcast_ref::<source::SourceError>(),
+                                Some(source::SourceError::ContentChanged)
+                            );
+                        let _ = checkpoint.send(Err(if conflict {
+                            source::SourceError::ContentChanged
+                        } else {
+                            source::SourceError::CheckpointFailed
+                        }));
+                        self.show_toast(if conflict {
+                            "content_changed"
+                        } else {
+                            "operation_failed"
+                        });
+                        render = false;
+                    }
+                }
+            }
+            JobResult::DownloadChapterStarted {
+                task_id,
+                chapter_id,
+                chapter_index,
+                ordinal,
+                checkpoint,
+            } => {
+                render = false;
+                if request != self.download_request
+                    || !self.valid_cached_download_checkpoint(
+                        &task_id,
+                        chapter_index,
+                        ordinal.saturating_add(1),
+                    )
+                {
+                    let _ = checkpoint.send(Err(source::SourceError::CheckpointFailed));
+                    return Ok(false);
+                }
+                let updated_at = Utc::now().timestamp();
+                match self.store.start_download_chapter_attempt(
+                    self.current_download.as_ref().unwrap(),
+                    &chapter_id,
+                    chapter_index,
+                    ordinal,
+                    updated_at,
+                ) {
+                    Ok(progress) => {
+                        let task = self.current_download.as_mut().unwrap();
+                        task.updated_at = updated_at;
+                        let task = task.clone();
+                        let _ = checkpoint.send(Ok(()));
+                        self.download_feedback(
+                            task.completed_count,
+                            task.chapters.len(),
+                            progress.retry_wait_count,
+                            progress.blocked_count,
+                        );
+                        self.remember_download_notice(&task)?;
+                    }
+                    Err(error) => {
+                        let conflict = error
+                            .downcast_ref::<crate::store::ContentConflict>()
+                            .is_some();
+                        let _ = checkpoint.send(Err(if conflict {
+                            source::SourceError::ContentChanged
+                        } else {
+                            source::SourceError::CheckpointFailed
+                        }));
+                        self.show_toast(if conflict {
+                            "content_changed"
+                        } else {
+                            "operation_failed"
+                        });
+                        crate::diagnostic!("Start chapter retry failed: {error:#}");
+                    }
+                }
+            }
+            JobResult::DownloadChapterFailed {
+                task_id,
+                chapter_id,
+                chapter_index,
+                ordinal,
+                error,
+                checkpoint,
+            } => {
+                render = false;
+                if request != self.download_request
+                    || !self.valid_cached_download_checkpoint(
+                        &task_id,
+                        chapter_index,
+                        ordinal.saturating_add(1),
+                    )
+                {
+                    let _ = checkpoint.send(Err(source::SourceError::CheckpointFailed));
+                    return Ok(false);
+                }
+                if error.requires_login() {
+                    // This is an identity boundary. The controller owns the
+                    // original error and fences the worker before opening login.
+                    let _ = checkpoint.send(Err(source::SourceError::CheckpointFailed));
+                    self.download_terminal(&task_id, Some(error), false)?;
+                    return Ok(true);
+                }
+                let updated_at = Utc::now().timestamp();
+                let task = self.current_download.as_ref().unwrap();
+                let retry = self.store.record_download_chapter_failure(
+                    task,
+                    &chapter_id,
+                    chapter_index,
+                    ordinal,
+                    error.retryable() || download_recovery::rejected_read(&error),
+                    &error.to_string(),
+                    updated_at,
+                );
+                match retry {
+                    Ok(retry) => {
+                        let task = self.current_download.as_mut().unwrap();
+                        task.updated_at = updated_at;
+                        let task = task.clone();
+                        // The scheduler may release this chapter's retry wait
+                        // only after its deadline or blocked state is durable.
+                        let _ = checkpoint.send(Ok(retry));
+                        let progress = self.store.download_chapter_progress(&task.id)?;
+                        self.download_feedback(
+                            task.completed_count,
+                            task.chapters.len(),
+                            progress.retry_wait_count,
+                            progress.blocked_count,
+                        );
+                        self.remember_download_notice(&task)?;
+                    }
+                    Err(error) => {
                         let _ = checkpoint.send(Err(source::SourceError::CheckpointFailed));
                         self.show_toast("operation_failed");
-                        render = false;
+                        crate::diagnostic!("Persist chapter retry failed: {error:#}");
                     }
                 }
             }
             JobResult::DownloadProgress {
                 task_id,
-                completed,
-                total,
+                completed: _,
+                total: _,
                 title,
+                waiting: _,
+                blocked: _,
             } => {
                 render = false;
                 if request == self.download_request
@@ -701,14 +858,25 @@ impl App {
                 {
                     let reflow_library = self.route == Route::Library
                         && self.prefs.view_mode == "list"
-                        && self
-                            .ui
-                            .upgrade()
-                            .is_some_and(|ui| ui.global::<LibraryModel>().get_status().is_empty());
+                        && self.ui.upgrade().is_some_and(|ui| {
+                            let library = ui.global::<LibraryModel>();
+                            library.get_status().is_empty()
+                                || library.get_books().row_count() > self.library_page_size()
+                        });
                     if let Some(ui) = self.ui.upgrade() {
                         ui.global::<ShellModel>().set_dialog_chapter(title.into());
                     }
-                    self.download_feedback(completed, total);
+                    let task = self.current_download.as_ref().unwrap();
+                    let progress = self.store.download_chapter_progress(&task.id)?;
+                    // Progress can trail a different worker's durable failure.
+                    // Read one current summary instead of combining snapshots.
+                    self.download_feedback(
+                        progress.completed_count,
+                        task.chapters.len(),
+                        progress.retry_wait_count,
+                        progress.blocked_count,
+                    );
+                    self.sync_running_download_actions(progress.blocked_count);
                     if reflow_library {
                         // A status row can reduce list capacity when a retry starts
                         // without a user action. Reflow only this layout transition.
@@ -726,6 +894,27 @@ impl App {
                         .is_some_and(|task| task.id == task_id);
                 if render {
                     self.download_terminal(&task_id, None, false)?;
+                }
+            }
+            JobResult::DownloadIncomplete { task_id, .. } => {
+                render = request == self.download_request
+                    && self
+                        .current_download
+                        .as_ref()
+                        .is_some_and(|task| task.id == task_id);
+                if render {
+                    if self
+                        .store
+                        .download_chapter_progress(&task_id)?
+                        .pending_count
+                        > 0
+                    {
+                        // A manual retry can win after the worker took its
+                        // terminal snapshot but before this packet is consumed.
+                        self.requeue_incomplete_download(&task_id)?;
+                    } else {
+                        self.download_terminal(&task_id, None, false)?;
+                    }
                 }
             }
             JobResult::DownloadFailed { task_id, error } => {
@@ -1474,15 +1663,9 @@ impl App {
                     Ok(_) => {
                         self.store
                             .delete_setting(&format!("cover.failed:{book_id}"))?;
-                        let (width, height) = self.platform.logical_viewport_size();
-                        self.refresh_display(RefreshReason::ImageLoaded(
-                            crate::platform::RefreshRect {
-                                x: 0,
-                                y: 0,
-                                width,
-                                height,
-                            },
-                        ));
+                        if self.visible_cover_ids().iter().any(|id| id == book_id) {
+                            self.cover_ui_changes.insert(book_id.to_owned());
+                        }
                     }
                     Err(_) => {
                         self.store.set_setting(
@@ -1510,6 +1693,114 @@ impl App {
             }
         }
         Ok(())
+    }
+
+    fn updated_cover_tile(
+        &self,
+        mut tile: BookTile,
+        changes: &BTreeSet<String>,
+    ) -> Option<BookTile> {
+        if !changes.contains(tile.id.as_str()) {
+            return None;
+        }
+        let path = self.cache.get(&format!("cover:{}", tile.id)).ok()??;
+        tile.cover = slint::Image::load_from_path(&path).ok()?;
+        tile.has_cover = true;
+        Some(tile)
+    }
+
+    fn updated_search_cover(
+        &self,
+        mut row: SearchResult,
+        changes: &BTreeSet<String>,
+    ) -> Option<SearchResult> {
+        if !changes.contains(row.id.as_str()) {
+            return None;
+        }
+        let path = self.cache.get(&format!("cover:{}", row.id)).ok()??;
+        row.cover = slint::Image::load_from_path(&path).ok()?;
+        Some(row)
+    }
+
+    fn updated_cover_rows<T: Clone + 'static>(
+        &self,
+        rows: ModelRc<T>,
+        mut update: impl FnMut(T) -> Option<T>,
+    ) -> Option<ModelRc<T>> {
+        let updates: Vec<_> = rows
+            .iter()
+            .enumerate()
+            .filter_map(|(index, row)| update(row).map(|row| (index, row)))
+            .collect();
+        if updates.is_empty() {
+            return None;
+        }
+        if rows.as_any().is::<VecModel<T>>() {
+            for (index, tile) in updates {
+                rows.set_row_data(index, tile);
+            }
+            Some(rows)
+        } else {
+            // A read-only replacement model must not silently discard writes.
+            // Preserve its published order and metadata in a mutable fallback.
+            let mut replacement: Vec<_> = rows.iter().collect();
+            for (index, tile) in updates {
+                replacement[index] = tile;
+            }
+            Some(model(replacement))
+        }
+    }
+
+    /// Apply one mailbox batch without rebuilding the shelf, its pagination,
+    /// or its selection state. Offscreen completions remain cache-only.
+    pub(super) fn flush_cover_ui(&mut self) {
+        if self.cover_ui_changes.is_empty() {
+            return;
+        }
+        let changes = std::mem::take(&mut self.cover_ui_changes);
+        let Some(ui) = self.ui.upgrade() else {
+            return;
+        };
+        let changed = match &self.route {
+            Route::Library => {
+                let state = ui.global::<LibraryModel>();
+                if let Some(rows) = self.updated_cover_rows(state.get_books(), |tile| {
+                    self.updated_cover_tile(tile, &changes)
+                }) {
+                    state.set_books(rows);
+                    true
+                } else {
+                    false
+                }
+            }
+            Route::Search if self.search_purpose == "books" => {
+                let state = ui.global::<SearchModel>();
+                if let Some(rows) = self.updated_cover_rows(state.get_results(), |row| {
+                    self.updated_search_cover(row, &changes)
+                }) {
+                    state.set_results(rows);
+                    true
+                } else {
+                    false
+                }
+            }
+            Route::Detail(id) => {
+                let state = ui.global::<DetailModel>();
+                let tile = state.get_book();
+                if tile.id.as_str() != id.as_str() {
+                    false
+                } else if let Some(tile) = self.updated_cover_tile(tile, &changes) {
+                    state.set_book(tile);
+                    true
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        };
+        if changed {
+            self.refresh_display(RefreshReason::CoversLoaded);
+        }
     }
 
     fn login_failure(&mut self, error: &source::SourceError) {
@@ -1618,9 +1909,10 @@ impl App {
         self.current_download.as_ref().is_some_and(|task| {
             task.id == task_id
                 && task.status == DownloadStatus::Running
-                && !task.include_images
-                && task.next_index.checked_add(1) == Some(next_index)
-                && task.chapters.get(task.next_index) == Some(&chapter_index)
+                && next_index
+                    .checked_sub(1)
+                    .and_then(|ordinal| task.chapters.get(ordinal))
+                    == Some(&chapter_index)
                 && owner.as_deref() == Some(task.account_key.as_str())
                 && !task.account_key.is_empty()
         })
@@ -1645,18 +1937,44 @@ impl App {
             .ok_or_else(|| anyhow::anyhow!("A cached checkpoint has no current account"))?;
         let updated_at = Utc::now().timestamp();
         let task = self.current_download.as_ref().unwrap();
-        self.store.commit_cached_download_checkpoint(
-            task,
-            chapter_id,
-            chapter_index,
-            next_index,
-            &owner,
-            updated_at,
-        )?;
+        let progress = if task.include_images {
+            let proof = self
+                .book_assets
+                .verify_complete_checkpoint(&self.store, &task.book_id, chapter_id)?
+                .ok_or(source::SourceError::ContentChanged)?;
+            self.store.commit_verified_cached_image_download_chapter(
+                task,
+                proof,
+                chapter_index,
+                next_index - 1,
+                &owner,
+                updated_at,
+            )?
+        } else {
+            self.store.commit_cached_download_chapter(
+                task,
+                chapter_id,
+                chapter_index,
+                next_index - 1,
+                &owner,
+                updated_at,
+            )?
+        };
         let book_id = task.book_id.clone();
         let task = self.current_download.as_mut().unwrap();
-        task.next_index = next_index;
+        task.next_index = progress.next_index;
+        task.completed_count = progress.completed_count;
         task.updated_at = updated_at;
+        let notice_task = task.clone();
+        self.download_feedback(
+            progress.completed_count,
+            self.current_download.as_ref().unwrap().chapters.len(),
+            progress.retry_wait_count,
+            progress.blocked_count,
+        );
+        if let Err(error) = self.remember_download_notice(&notice_task) {
+            crate::diagnostic!("Refresh committed cached download notice failed: {error:#}");
+        }
         self.download_ui_changes
             .entry(book_id.clone())
             .or_default()
@@ -1699,6 +2017,7 @@ impl App {
         task_id: &str,
         chapter: Chapter,
         next_index: usize,
+        publication: Option<crate::book_assets::VerifiedChapterPublication>,
         committed: &mut bool,
     ) -> Result<bool> {
         anyhow::ensure!(
@@ -1707,13 +2026,47 @@ impl App {
         );
         let updated_at = Utc::now().timestamp();
         let task = self.current_download.as_ref().unwrap();
-        let newly_cached = self
-            .store
-            .commit_download_checkpoint(task, &chapter, next_index, updated_at)?;
+        let committed_chapter =
+            if task.include_images && chapter.content_status == ContentStatus::Full {
+                if let Some(proof) = publication {
+                    self.store.commit_verified_image_download_chapter(
+                        task,
+                        &chapter,
+                        next_index - 1,
+                        proof,
+                        updated_at,
+                    )?
+                } else {
+                    self.store.commit_pending_image_download_chapter(
+                        task,
+                        &chapter,
+                        next_index - 1,
+                        updated_at,
+                    )?
+                }
+            } else {
+                self.store.commit_independent_download_chapter(
+                    task,
+                    &chapter,
+                    next_index - 1,
+                    updated_at,
+                )?
+            };
         *committed = true;
         let task = self.current_download.as_mut().unwrap();
-        task.next_index = next_index;
+        task.next_index = committed_chapter.progress.next_index;
+        task.completed_count = committed_chapter.progress.completed_count;
         task.updated_at = updated_at;
+        let notice_task = task.clone();
+        self.download_feedback(
+            committed_chapter.progress.completed_count,
+            self.current_download.as_ref().unwrap().chapters.len(),
+            committed_chapter.progress.retry_wait_count,
+            committed_chapter.progress.blocked_count,
+        );
+        if let Err(error) = self.remember_download_notice(&notice_task) {
+            crate::diagnostic!("Refresh committed download notice failed: {error:#}");
+        }
         let changes = self
             .download_ui_changes
             .entry(chapter.book_id.clone())
@@ -1721,7 +2074,7 @@ impl App {
         changes
             .chapters
             .insert(chapter.id.clone(), chapter.content_status);
-        if newly_cached {
+        if committed_chapter.newly_cached {
             changes.newly_cached += 1;
         }
         let requested = self
@@ -1785,12 +2138,11 @@ impl App {
         self.current_download.as_ref().is_some_and(|task| {
             task.id == task_id
                 && task.status == DownloadStatus::Running
-                && (if chapter.content_status == ContentStatus::Full {
-                    chapter.cached && task.next_index.checked_add(1) == Some(next_index)
-                } else {
-                    !chapter.cached && task.next_index == next_index
-                })
-                && task.chapters.get(task.next_index) == Some(&chapter.index)
+                && chapter.cached == (chapter.content_status == ContentStatus::Full)
+                && next_index
+                    .checked_sub(1)
+                    .and_then(|ordinal| task.chapters.get(ordinal))
+                    == Some(&chapter.index)
                 && task.book_id == chapter.book_id
                 && chapter.content_account_key == task.account_key
                 && (chapter.content_status == ContentStatus::Locked && chapter.body.is_none()
@@ -1801,18 +2153,17 @@ impl App {
         })
     }
 
-    fn download_feedback(&self, completed: usize, total: usize) {
+    pub(super) fn download_feedback(
+        &self,
+        completed: usize,
+        total: usize,
+        waiting: usize,
+        blocked: usize,
+    ) {
         if let Some(ui) = self.ui.upgrade() {
             let shell = ui.global::<ShellModel>();
             shell.set_task_label(
-                i18n::format(
-                    "downloading_chapter",
-                    &[
-                        ("current", completed.to_string()),
-                        ("total", total.to_string()),
-                    ],
-                )
-                .into(),
+                download_recovery::chapter_summary_label(completed, total, waiting, blocked).into(),
             );
             shell.set_dialog_progress(if total == 0 {
                 0.0
@@ -1821,6 +2172,15 @@ impl App {
             });
             if self.route == Route::Library {
                 ui.global::<LibraryModel>()
+                    .set_status(shell.get_task_label());
+            }
+            ui.global::<LibraryModel>().set_download_notice(true);
+            if self
+                .current_download
+                .as_ref()
+                .is_some_and(|task| matches!(&self.route, Route::Detail(id) if *id == task.book_id))
+            {
+                ui.global::<DetailModel>()
                     .set_status(shell.get_task_label());
             }
         }
@@ -1986,6 +2346,13 @@ impl App {
             self.current_download = Some(task);
             return Ok(());
         }
+        let progress = match self.store.download_chapter_progress(&task.id) {
+            Ok(progress) => progress,
+            Err(error) => {
+                self.current_download = Some(task);
+                return Err(error);
+            }
+        };
         let previous = task.clone();
         let network_pause = error.as_ref().is_some_and(|error| {
             matches!(
@@ -2011,13 +2378,21 @@ impl App {
             DownloadStatus::Paused
         } else if error.is_some() {
             DownloadStatus::Failed
-        } else if task.next_index == task.chapters.len() {
+        } else if task.completed_count == task.chapters.len()
+            && progress.completed_count == task.chapters.len()
+            && progress.next_index == task.chapters.len()
+        {
             DownloadStatus::Complete
+        } else if progress.blocked_count > 0 {
+            DownloadStatus::Failed
         } else {
             DownloadStatus::Paused
         };
         task.error = error.as_ref().map(ToString::to_string);
         task.updated_at = Utc::now().timestamp();
+        if cancelled {
+            download_recovery::reset_recovery(&mut task);
+        }
         match self.store.save_task_if_current(&previous, &task) {
             Ok(true) => {}
             Ok(false) => {
@@ -2032,7 +2407,23 @@ impl App {
                 return Err(error);
             }
         }
+        let was_open = matches!(
+            self.dialog_action.as_str(),
+            "downloading" | "download-retry-active"
+        );
         self.clear_download_feedback();
+        if !cancelled
+            && error.is_none()
+            && (progress.retry_wait_count > 0 || progress.blocked_count > 0)
+        {
+            self.remember_download_notice(&task)?;
+            if was_open {
+                self.open_download_notice()?;
+            }
+            self.start_next_download()?;
+            return Ok(());
+        }
+        self.clear_download_notice(&task.id)?;
         if retry_pause {
             if network_pause {
                 self.online = false;
@@ -2055,7 +2446,10 @@ impl App {
 
     fn clear_download_feedback(&mut self) {
         self.retire_task_wake_guard();
-        if self.dialog_action == "downloading" {
+        if matches!(
+            self.dialog_action.as_str(),
+            "downloading" | "download-retry-active"
+        ) {
             self.dialog_action.clear();
             if let Some(ui) = self.ui.upgrade() {
                 ui.global::<ShellModel>().set_dialog_kind("".into());
@@ -2206,7 +2600,7 @@ mod tests {
             assert_eq!(app.route, Route::Reader("rejected-catalog".into(), 2));
 
             app.pending_covers.insert("busy-cover".into());
-            assert!(app.handle_job(JobEvent {
+            assert!(!app.handle_job(JobEvent {
                 credits: None,
                 request: 45,
                 account_epoch: epoch,
@@ -2256,7 +2650,7 @@ mod tests {
             let mut opaque_png = std::io::Cursor::new(Vec::new());
             image::DynamicImage::new_rgb8(2, 2)
                 .write_to(&mut opaque_png, image::ImageFormat::Png)?;
-            assert!(app.handle_job(JobEvent {
+            assert!(!app.handle_job(JobEvent {
                 credits: None,
                 request: 48,
                 account_epoch: epoch,

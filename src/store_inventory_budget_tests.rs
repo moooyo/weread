@@ -604,6 +604,113 @@ fn task_owner_projection_preserves_legacy_defaults_and_strict_error_causes() -> 
 }
 
 #[test]
+fn task_completion_count_defaults_for_legacy_object_and_sequence_but_rejects_null() -> Result<()> {
+    let object = r#"{"id":"legacy-count","book_id":"book","account_key":"own\u0065r","chapters":[0],"error":null,"updated_at":100}"#;
+    let sequence = r#"["legacy-count","book","own\u0065r",[0],"pending",false,0,null,100]"#;
+    let expected = DownloadTask {
+        id: "legacy-count".into(),
+        book_id: "book".into(),
+        account_key: "owner".into(),
+        chapters: vec![0],
+        updated_at: 100,
+        ..Default::default()
+    };
+    for payload in [object, sequence] {
+        let store = fixture()?;
+        store.connection.execute(
+            "INSERT INTO download_tasks (id,book_id,status,updated_at,payload)
+             VALUES ('legacy-count','book','pending',100,?1)",
+            [payload],
+        )?;
+        let selected = store.pending_tasks_for_owner("owner")?;
+        assert_eq!(selected, vec![expected.clone()]);
+        assert_eq!(selected[0].completed_count, 0);
+        assert_eq!(selected[0].updated_at, 100);
+        assert_eq!(selected[0].retry_cursor, 0);
+        assert_eq!(store.task("legacy-count")?, Some(expected.clone()));
+        if payload == object {
+            let mut explicit_null: serde_json::Value = serde_json::from_str(payload)?;
+            explicit_null["completed_count"] = serde_json::Value::Null;
+            let explicit_null = serde_json::to_string(&explicit_null)?;
+            store.connection.execute(
+                "UPDATE download_tasks SET payload=?1 WHERE id='legacy-count'",
+                [&explicit_null],
+            )?;
+            let error = store.pending_tasks_for_owner("owner").unwrap_err();
+            assert!(error.downcast_ref::<serde_json::Error>().is_some());
+            let error = store.task("legacy-count").unwrap_err();
+            assert!(error.downcast_ref::<serde_json::Error>().is_some());
+            let retained: String = store.connection.query_row(
+                "SELECT payload FROM download_tasks WHERE id='legacy-count'",
+                [],
+                |row| row.get(0),
+            )?;
+            assert_eq!(retained, explicit_null);
+        }
+        assert_retained(&store)?;
+    }
+
+    let store = fixture()?;
+    let full_sequence =
+        r#"["legacy-count","book","own\u0065r",[0],"paused",true,0,null,0,2,500,100]"#;
+    let expected = DownloadTask {
+        status: DownloadStatus::Paused,
+        include_images: true,
+        retry_count: 2,
+        retry_not_before: 500,
+        updated_at: 100,
+        ..expected
+    };
+    store.connection.execute(
+        "INSERT INTO download_tasks (id,book_id,status,updated_at,payload)
+         VALUES ('legacy-count','book','paused',100,?1)",
+        [full_sequence],
+    )?;
+    let selected = store.task("legacy-count")?.unwrap();
+    assert_eq!(selected.completed_count, 0);
+    assert_eq!(selected, expected);
+    assert_eq!(
+        store.pending_tasks_for_owner("owner")?,
+        vec![expected.clone()]
+    );
+
+    let mut current_sequence: serde_json::Value = serde_json::from_str(full_sequence)?;
+    current_sequence
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!(1));
+    let counted = serde_json::to_string(&current_sequence)?;
+    store.connection.execute(
+        "UPDATE download_tasks SET payload=?1 WHERE id='legacy-count'",
+        [&counted],
+    )?;
+    let counted_task = DownloadTask {
+        completed_count: 1,
+        ..expected
+    };
+    assert_eq!(store.task("legacy-count")?, Some(counted_task.clone()));
+    assert_eq!(store.pending_tasks_for_owner("owner")?, vec![counted_task]);
+
+    current_sequence[12] = serde_json::Value::Null;
+    let explicit_null = serde_json::to_string(&current_sequence)?;
+    store.connection.execute(
+        "UPDATE download_tasks SET payload=?1 WHERE id='legacy-count'",
+        [&explicit_null],
+    )?;
+    let error = store.task("legacy-count").unwrap_err();
+    assert!(error.downcast_ref::<serde_json::Error>().is_some());
+    let error = store.pending_tasks_for_owner("owner").unwrap_err();
+    assert!(error.downcast_ref::<serde_json::Error>().is_some());
+    let retained: String = store.connection.query_row(
+        "SELECT payload FROM download_tasks WHERE id='legacy-count'",
+        [],
+        |row| row.get(0),
+    )?;
+    assert_eq!(retained, explicit_null);
+    assert_retained(&store)
+}
+
+#[test]
 fn setting_inventory_bool_preserves_whitespace_false_and_borrowed_key_order() -> Result<()> {
     let store = fixture()?;
     store.set_setting("shelf.override:book", &true)?;

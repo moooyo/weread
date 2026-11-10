@@ -3,6 +3,9 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+pub const DEFAULT_DOWNLOAD_CONCURRENCY: u32 = 8;
+pub const MAX_DOWNLOAD_CONCURRENCY: u32 = 16;
+
 /// Read a best-effort startup appearance hint before mutable application state
 /// is opened. The existing database is opened read-only without migration or
 /// creation. SQLite may maintain its required WAL shared-memory bookkeeping.
@@ -63,6 +66,7 @@ pub struct AppPreferences {
     pub popup_position: String,
     pub popup_turn: bool,
     pub download_images: bool,
+    pub download_concurrency: u32,
     pub download_article_images: bool,
     pub prefetch: bool,
     pub prefetch_notes: bool,
@@ -92,6 +96,7 @@ impl Default for AppPreferences {
             popup_position: "center".into(),
             popup_turn: false,
             download_images: true,
+            download_concurrency: DEFAULT_DOWNLOAD_CONCURRENCY,
             download_article_images: false,
             prefetch: false,
             prefetch_notes: false,
@@ -215,6 +220,15 @@ impl AppPreferences {
             }
             "edge_region" => self.edge_region = stepped(self.edge_region, delta, 5, 10, 40),
             "popup_height" => self.popup_height = stepped(self.popup_height, delta, 4, 20, 90),
+            "download_concurrency" => {
+                self.download_concurrency = stepped(
+                    self.download_concurrency,
+                    delta,
+                    1,
+                    1,
+                    i64::from(MAX_DOWNLOAD_CONCURRENCY),
+                );
+            }
             "reader_line_spacing" | "line_spacing" => {
                 self.reader.line_spacing = stepped(self.reader.line_spacing, delta, 1, 0, 2);
             }
@@ -372,6 +386,7 @@ impl AppPreferences {
             "popup_position" => self.popup_position.clone(),
             "popup_turn" => self.popup_turn.to_string(),
             "download_images" => self.download_images.to_string(),
+            "download_concurrency" => self.download_concurrency.to_string(),
             "download_article_images" => self.download_article_images.to_string(),
             "prefetch" => self.prefetch.to_string(),
             "prefetch_notes" => self.prefetch_notes.to_string(),
@@ -393,6 +408,7 @@ impl AppPreferences {
         }
         self.edge_region = self.edge_region.clamp(10, 40);
         self.popup_height = self.popup_height.clamp(20, 90);
+        self.download_concurrency = self.download_concurrency.clamp(1, MAX_DOWNLOAD_CONCURRENCY);
         self.reader.font_size = nearest(
             self.reader.font_size,
             &[16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38],
@@ -637,6 +653,41 @@ mod tests {
         let restored: AppPreferences = serde_json::from_str(&stored).unwrap();
         assert!(!restored.dark_mode);
         assert_eq!(restored.value("night_mode"), "false");
+    }
+
+    #[test]
+    fn download_concurrency_defaults_migrates_and_survives_storage() {
+        for stored in [
+            "{}",
+            r#"{"download_images":false,"reader":{"font_size":28}}"#,
+        ] {
+            let mut preferences: AppPreferences = serde_json::from_str(stored).unwrap();
+            assert_eq!(
+                preferences.download_concurrency,
+                DEFAULT_DOWNLOAD_CONCURRENCY
+            );
+            assert!(preferences.adjust("download_concurrency", 1));
+            assert_eq!(preferences.value("download_concurrency"), "9");
+            let restored: AppPreferences =
+                serde_json::from_str(&serde_json::to_string(&preferences).unwrap()).unwrap();
+            assert_eq!(restored.download_concurrency, 9);
+        }
+        assert_eq!(AppPreferences::for_device(true).download_concurrency, 8);
+        assert_eq!(AppPreferences::for_device(false).download_concurrency, 8);
+    }
+
+    #[test]
+    fn download_concurrency_rejects_unbounded_steps_and_repairs_stored_limits() {
+        let mut preferences = AppPreferences::default();
+        assert!(preferences.adjust("download_concurrency", i32::MAX));
+        assert_eq!(preferences.download_concurrency, MAX_DOWNLOAD_CONCURRENCY);
+        assert!(preferences.adjust("download_concurrency", i32::MIN));
+        assert_eq!(preferences.download_concurrency, 1);
+        for (stored, expected) in [(0, 1), (u32::MAX, MAX_DOWNLOAD_CONCURRENCY)] {
+            preferences.download_concurrency = stored;
+            preferences.normalize_for_device(true);
+            assert_eq!(preferences.download_concurrency, expected);
+        }
     }
 
     #[test]

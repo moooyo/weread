@@ -69,6 +69,22 @@ A fresh private-trial data directory initially opens Login. Authenticate on the 
 
 The content-access correction migrates SQLite metadata to schema 2. Exit the application and back up the existing database and account material before replacing the executable. First launch retains all text and personal records but marks legacy WeRead bodies as unverified. Use the book's access-refresh action to revalidate them; previews do not count as complete downloads. An older schema-1 executable cannot open the migrated database, so a rollback must restore its matching pre-upgrade database backup as well as the old executable. Runtime backups remain private and are never package inputs.
 
+The later independent-chapter candidate upgrades metadata to schema 3 and adds
+task-scoped chapter completion and retry records. Existing bodies, notes,
+bookmarks, positions, and task selections are retained. Completed caches are
+revalidated when work resumes; one rejected chapter does not pause other ready
+chapters. A schema-2 executable cannot open this upgraded database. Before any
+future device rollout, preserve a matching private backup of the executable and
+data. Preserve any newer user changes separately before restoring an older
+backup. The implementation and remote gates are described in
+[Independent chapter downloads](../../docs/INDEPENDENT_CHAPTER_DOWNLOADS.md).
+The bounded 2026-11-11 physical follow-up replaced `985efefc` with `dd8ac6c3`
+on the identified Scribe 2022 / firmware 5.19.5 and confirmed schema 3. Launcher
+`a5fec72f` and native frame guard `a235b41c` remain unchanged. The original
+executable/data pair is backed up privately. Device windows ended with native
+restoration and exact lease release; failed sampling qualification and
+remaining physical acceptance do not change the rollback boundary above.
+
 The resident-sleep candidate requires its matching launcher and executable to enable same-process recovery. A per-cycle private handshake confirms that state and hardware workers have stopped, touch has been released, and drawing is paused before the supervisor stops the application process. Wake confirms native dismissal before continuing that process; complete framebuffer restoration and touch reacquisition precede resumed work. Capability absence or a failed handshake retains the bounded saved-session fallback. An interrupted or failed recovery must restore native ownership instead of leaving a stopped application behind. See the current verification documents for the candidate-specific acceptance status.
 
 For the pinned PW6 firmware-emulator experiment only, create `data/experimental-display` containing the single line `pw6-5201-emulator`. The launcher accepts it only with profile `pw6` and firmware `5.20.1`, and exports the recognized specification to native initialization. Unknown identifiers and mismatched pairs fail before services change. An inherited environment value is cleared unless the local file enables it.
