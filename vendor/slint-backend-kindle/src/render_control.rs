@@ -10,11 +10,15 @@ use slint::Rgb8Pixel;
 
 use crate::managed_sleep::{ManagedSleepControl, ManagedSleepState};
 use crate::refresh::PhysicalRect;
+use crate::sleep_presentation::SleepPresentationControl;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RenderError {
     EventLoopTerminated,
     AlreadyInitialized,
+    PresentationUnavailable,
+    PresentationSequenceExhausted,
+    InvalidPresentationToken,
 }
 
 impl fmt::Display for RenderError {
@@ -22,6 +26,9 @@ impl fmt::Display for RenderError {
         formatter.write_str(match self {
             Self::EventLoopTerminated => "the Kindle event loop has terminated",
             Self::AlreadyInitialized => "night-mode configuration must precede the event loop",
+            Self::PresentationUnavailable => "the sleep presentation is unavailable or cancelled",
+            Self::PresentationSequenceExhausted => "the sleep presentation sequence is exhausted",
+            Self::InvalidPresentationToken => "the sleep presentation token was not issued",
         })
     }
 }
@@ -107,6 +114,7 @@ impl NightModeControl {
 pub struct RenderHandle {
     pub(crate) night_mode: Arc<NightModeControl>,
     pub(crate) managed_sleep: Arc<ManagedSleepControl>,
+    pub(crate) sleep_presentation: Arc<SleepPresentationControl>,
     pub(crate) wake: Arc<OwnedFd>,
     pub(crate) quit: Arc<AtomicBool>,
 }
@@ -135,10 +143,57 @@ impl RenderHandle {
         {
             return Err(RenderError::EventLoopTerminated);
         }
-        if self.managed_sleep.request(sleeping) {
+        let changed = self.managed_sleep.request(sleeping);
+        if sleeping {
+            self.sleep_presentation.cancel_pending();
+        }
+        if changed {
             crate::wakeup::poke(&self.wake);
         }
         Ok(())
+    }
+
+    /// Request a complete frame after the caller has installed its sleep UI.
+    /// The token is acknowledged only after actual rendering and EPDC completion.
+    /// Several requests before one draw may share that draw; requests received
+    /// during the draw remain pending for another complete frame.
+    pub fn request_sleep_presentation(&self) -> Result<u64, RenderError> {
+        if self.quit.load(Ordering::SeqCst)
+            || self.managed_sleep.state() == ManagedSleepState::Terminated
+        {
+            return Err(RenderError::EventLoopTerminated);
+        }
+        if self.managed_sleep.state() != ManagedSleepState::Running {
+            return Err(RenderError::PresentationUnavailable);
+        }
+        let token = self.sleep_presentation.request()?;
+        if self.quit.load(Ordering::SeqCst)
+            || self.managed_sleep.state() != ManagedSleepState::Running
+        {
+            self.sleep_presentation.cancel_pending();
+            return Err(
+                if self.quit.load(Ordering::SeqCst)
+                    || self.managed_sleep.state() == ManagedSleepState::Terminated
+                {
+                    RenderError::EventLoopTerminated
+                } else {
+                    RenderError::PresentationUnavailable
+                },
+            );
+        }
+        crate::wakeup::poke(&self.wake);
+        Ok(token)
+    }
+
+    /// A completed token proves the requested frame reached the panel. An old
+    /// success cannot complete a newer request; termination invalidates all tokens.
+    pub fn sleep_presentation_completed(&self, token: u64) -> Result<bool, RenderError> {
+        if self.quit.load(Ordering::SeqCst)
+            || self.managed_sleep.state() == ManagedSleepState::Terminated
+        {
+            return Err(RenderError::EventLoopTerminated);
+        }
+        self.sleep_presentation.completed(token)
     }
 
     /// Running acknowledges restored input and a complete framebuffer rewrite.
@@ -495,6 +550,7 @@ mod tests {
         let handle = RenderHandle {
             night_mode: Arc::new(NightModeControl::default()),
             managed_sleep: Arc::new(ManagedSleepControl::default()),
+            sleep_presentation: Arc::new(SleepPresentationControl::default()),
             wake: wakeup.write.clone(),
             quit: Arc::new(AtomicBool::new(false)),
         };
@@ -592,6 +648,7 @@ mod tests {
         let handle = RenderHandle {
             night_mode: Arc::new(NightModeControl::default()),
             managed_sleep: Arc::new(ManagedSleepControl::default()),
+            sleep_presentation: Arc::new(SleepPresentationControl::default()),
             wake: wakeup.write.clone(),
             quit: Arc::new(AtomicBool::new(false)),
         };
@@ -623,6 +680,60 @@ mod tests {
         assert_eq!(handle.managed_sleep_state(), ManagedSleepState::Terminated);
         assert_eq!(
             handle.set_managed_sleep(true),
+            Err(RenderError::EventLoopTerminated)
+        );
+    }
+
+    #[test]
+    fn sleep_presentations_wake_without_releasing_input_and_require_their_own_ack() {
+        let wakeup = crate::wakeup::make_wakeup().unwrap();
+        let handle = RenderHandle {
+            night_mode: Arc::new(NightModeControl::default()),
+            managed_sleep: Arc::new(ManagedSleepControl::default()),
+            sleep_presentation: Arc::new(SleepPresentationControl::default()),
+            wake: wakeup.write.clone(),
+            quit: Arc::new(AtomicBool::new(false)),
+        };
+        let first = handle.request_sleep_presentation().unwrap();
+        assert_eq!(handle.managed_sleep_state(), ManagedSleepState::Running);
+        assert!(!handle.sleep_presentation_completed(first).unwrap());
+        let mut descriptor = libc::pollfd {
+            fd: std::os::fd::AsRawFd::as_raw_fd(&*wakeup.read),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        // SAFETY: descriptor points to one live wake-pipe pollfd for this call.
+        assert_eq!(unsafe { libc::poll(&mut descriptor, 1, 0) }, 1);
+        handle.sleep_presentation.acknowledge(first).unwrap();
+        assert!(handle.sleep_presentation_completed(first).unwrap());
+        let next = handle.request_sleep_presentation().unwrap();
+        assert!(!handle.sleep_presentation_completed(next).unwrap());
+        handle.set_managed_sleep(true).unwrap();
+        assert_eq!(
+            handle.sleep_presentation_completed(next),
+            Err(RenderError::PresentationUnavailable)
+        );
+        assert_eq!(
+            handle.request_sleep_presentation(),
+            Err(RenderError::PresentationUnavailable)
+        );
+        handle.managed_sleep.acknowledge_suspended();
+        handle.set_managed_sleep(false).unwrap();
+        assert_eq!(
+            handle.request_sleep_presentation(),
+            Err(RenderError::PresentationUnavailable)
+        );
+        handle.managed_sleep.acknowledge_running();
+        let fresh = handle.request_sleep_presentation().unwrap();
+        assert!(fresh > next);
+        handle.sleep_presentation.acknowledge(fresh).unwrap();
+        handle.quit.store(true, Ordering::SeqCst);
+        assert_eq!(
+            handle.sleep_presentation_completed(fresh),
+            Err(RenderError::EventLoopTerminated)
+        );
+        assert_eq!(
+            handle.request_sleep_presentation(),
             Err(RenderError::EventLoopTerminated)
         );
     }

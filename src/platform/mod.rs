@@ -155,6 +155,16 @@ pub trait RenderSink: Send + Sync {
     fn managed_sleep_state(&self) -> Result<ManagedSleepState, PlatformError> {
         Err(PlatformError::Unsupported("managed_sleep"))
     }
+
+    /// Request a complete frame after the application has installed its sleep UI.
+    fn request_sleep_presentation(&self) -> Result<u64, PlatformError> {
+        Err(PlatformError::Unsupported("sleep_presentation"))
+    }
+
+    /// Only actual completed presentation may satisfy the returned token.
+    fn sleep_presentation_completed(&self, _: u64) -> Result<bool, PlatformError> {
+        Err(PlatformError::Unsupported("sleep_presentation"))
+    }
 }
 
 /// Canonical UI colors stay unchanged. Only the process-local output transform
@@ -463,6 +473,26 @@ impl Platform {
         sink.managed_sleep_state()
     }
 
+    pub fn request_sleep_presentation(&self) -> Result<u64, PlatformError> {
+        let sink = self
+            .render_sink
+            .lock()
+            .map_err(|_| PlatformError::Operation("render sink lock was poisoned".into()))?
+            .clone()
+            .ok_or(PlatformError::Unsupported("sleep_presentation"))?;
+        sink.request_sleep_presentation()
+    }
+
+    pub fn sleep_presentation_completed(&self, token: u64) -> Result<bool, PlatformError> {
+        let sink = self
+            .render_sink
+            .lock()
+            .map_err(|_| PlatformError::Operation("render sink lock was poisoned".into()))?
+            .clone()
+            .ok_or(PlatformError::Unsupported("sleep_presentation"))?;
+        sink.sleep_presentation_completed(token)
+    }
+
     pub fn plan_refresh(&self, reason: RefreshReason) -> Option<RefreshPlan> {
         self.refresh
             .lock()
@@ -733,6 +763,18 @@ impl KindleRenderSink {
 
 #[cfg(all(feature = "kindle", target_os = "linux"))]
 impl RenderSink for KindleRenderSink {
+    fn request_sleep_presentation(&self) -> Result<u64, PlatformError> {
+        self.handle
+            .request_sleep_presentation()
+            .map_err(|error| PlatformError::Operation(error.to_string()))
+    }
+
+    fn sleep_presentation_completed(&self, token: u64) -> Result<bool, PlatformError> {
+        self.handle
+            .sleep_presentation_completed(token)
+            .map_err(|error| PlatformError::Operation(error.to_string()))
+    }
+
     fn observes_native_output_on_resume(&self) -> bool {
         true
     }
@@ -1135,6 +1177,57 @@ mod tests {
     }
 
     struct ManagedRenderSink(Mutex<ManagedSleepState>);
+
+    struct PresentationRenderSink(Mutex<(u64, u64)>);
+
+    impl RenderSink for PresentationRenderSink {
+        fn set_dark_mode(&self, _: bool) -> Result<(), PlatformError> {
+            Ok(())
+        }
+
+        fn request_sleep_presentation(&self) -> Result<u64, PlatformError> {
+            let mut state = self.0.lock().unwrap();
+            state.0 += 1;
+            Ok(state.0)
+        }
+
+        fn sleep_presentation_completed(&self, token: u64) -> Result<bool, PlatformError> {
+            let state = self.0.lock().unwrap();
+            if token == 0 || token > state.0 {
+                return Err(PlatformError::InvalidValue("unknown presentation token"));
+            }
+            Ok(token <= state.1)
+        }
+    }
+
+    #[test]
+    fn sleep_presentation_requires_an_explicit_sink_and_forwards_independent_tokens() {
+        let platform = Platform::new(DeviceProfile::Scribe, false).unwrap();
+        assert!(matches!(
+            platform.request_sleep_presentation(),
+            Err(PlatformError::Unsupported("sleep_presentation"))
+        ));
+        assert!(matches!(
+            platform.sleep_presentation_completed(1),
+            Err(PlatformError::Unsupported("sleep_presentation"))
+        ));
+        platform
+            .set_render_sink(Arc::new(RecordingRenderSink::default()))
+            .unwrap();
+        assert!(matches!(
+            platform.request_sleep_presentation(),
+            Err(PlatformError::Unsupported("sleep_presentation"))
+        ));
+        let sink = Arc::new(PresentationRenderSink(Mutex::new((0, 0))));
+        platform.set_render_sink(sink.clone()).unwrap();
+        let first = platform.request_sleep_presentation().unwrap();
+        assert!(!platform.sleep_presentation_completed(first).unwrap());
+        sink.0.lock().unwrap().1 = first;
+        let second = platform.request_sleep_presentation().unwrap();
+        assert!(platform.sleep_presentation_completed(first).unwrap());
+        assert!(!platform.sleep_presentation_completed(second).unwrap());
+        assert!(!platform.managed_sleep_supported());
+    }
 
     impl RenderSink for ManagedRenderSink {
         fn set_dark_mode(&self, _: bool) -> Result<(), PlatformError> {

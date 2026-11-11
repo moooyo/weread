@@ -697,9 +697,10 @@ impl App {
                 .skip(self.search_page * size)
                 .take(size)
             {
-                let cover = self
-                    .cache
-                    .get(&format!("cover:{}", book.id))?
+                let cover = sleep_screen::thumbnail_key(&book.id, &book.cover_url)
+                    .map(|key| self.cache.get(&key))
+                    .transpose()?
+                    .flatten()
                     .and_then(|path| slint::Image::load_from_path(&path).ok())
                     .unwrap_or_default();
                 let on_shelf = self.store.book_on_shelf(&book.id)?.unwrap_or(false);

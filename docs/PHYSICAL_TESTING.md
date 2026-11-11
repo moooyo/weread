@@ -11,6 +11,39 @@ Development is continuing. The observations in this document do not complete acc
 
 No device address, credential, serial number, private note text, or account content is part of this record. Offline demonstration results do not establish live-account authentication, content entitlements, or upstream writes.
 
+## Book-cover sleep observation
+
+On 2026-11-12 (Asia/Shanghai), the operator requested deployment and a physical
+demonstration of the [book-cover sleep change](SLEEP_COVER.md#scoped-physical-follow-up)
+on the identified Scribe 2022 / firmware 5.19.5. The coordinator acquired a fresh
+exclusive host lease, normally stopped the existing reading application, and
+preserved the WeRead data directory. Private public-file rollback copies and a
+database snapshot stayed outside the repository. All 36 installed public files
+matched the verified bundle; the existing SQLite bytes were unchanged across
+replacement before startup. ARM main `d8b3df1f`, launcher `71316711`, and retained
+native guard `a235b41c` identify this installation.
+
+The operator selected the built-in offline sample and explicitly chose its
+title/author sleep screen. One current-run observation logged 753 ms and one
+controlled stock power-event cycle logged 855 ms from application handling to
+observed presentation completion. The controlled cycle retained stopped native
+drawing, matching cover/sleep markers, and the same application process/start
+time/generation after its matching wake. These are internal presentation
+intervals, not measured physical-button response times. The operator confirmed
+the effect was very good, then requested that testing stop.
+
+No additional tests followed that request. Managed exit restored native
+foreground, statusbar, the original running window manager, and inverse
+framebuffer baseline. The task-owned device staging/capture directory was
+removed. Device transports ended before exact owner/token-checked lease release
+at 2026-11-12 02:53:27 +08:00, followed by an independent absence check. The new
+normal installation remains available and stopped. Private receipts are at
+`test-env:/tmp/weread-cover-sleep-physical-20261112-r1/evidence/`.
+
+The demonstrated sample had no bitmap cover. Authenticated bitmap-cover display,
+long-sleep recovery, rapid reversals, native-lock fallback, numeric key-to-visible
+latency, and a model/firmware support matrix remain separate, unverified gates.
+
 ## Clean current-layout installation
 
 On 2026-11-11 (Asia/Shanghai), the user authorized deleting this project's Kindle installation, application data, and related test residue without backups, then installing the newly verified build. Reauthentication and redownloading were explicitly accepted. The remote software gates in [Verification](VERIFICATION.md#pre-release-persistence-cleanup) completed before device access. The coordinator waited for the other project's natural lease release and acquired a fresh exclusive lease only for the actual installation window.

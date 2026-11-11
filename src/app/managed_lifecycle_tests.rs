@@ -1902,3 +1902,6 @@ fn ordinary_exit_waits_for_native_quiescence_before_closing_or_requesting_quit()
     const CASE: &str = "app::managed_lifecycle_tests::ordinary_exit_waits_for_native_quiescence_before_closing_or_requesting_quit";
     isolated_lifecycle_resource_case(CASE, run_retired_native_blocks_ordinary_exit, true)
 }
+
+#[path = "sleep_lifecycle_tests.rs"]
+mod sleep_lifecycle_tests;

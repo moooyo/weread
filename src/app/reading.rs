@@ -1734,6 +1734,7 @@ impl App {
         let Some(book) = self.store.book_metadata_by_id(&self.reader.book_id)? else {
             return Ok(());
         };
+        self.prepare_sleep_screen_for_book(&book);
         let Some(access) = self
             .store
             .chapter_access_metadata(&book.id, self.reader.chapter_index)?

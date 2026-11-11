@@ -26,11 +26,12 @@ use weread::{
     reader::TextMetrics,
     ui::{
         AppWindow, ArticleModel, AuxiliaryModel, DetailModel, DetailReview, LibraryModel,
-        LoginModel, ReaderModel, SearchModel, ShellModel, Theme,
+        LoginModel, ReaderModel, SearchModel, ShellModel, SleepScreenModel, Theme,
     },
 };
 
 const MAX_FONT_BYTES: u64 = 64 * 1024 * 1024;
+const SLEEP_COVER_SIZE: (u32, u32) = (300, 450);
 
 #[derive(Parser)]
 #[command(about = "Render isolated offline UI states with observable public models")]
@@ -55,7 +56,7 @@ struct Arguments {
     offline: bool,
     #[arg(long, default_value_t = 1_200)]
     exit_after_ms: u64,
-    #[arg(long, value_parser = ["login-qr", "login-code", "detail-reviews", "detail-notes", "article-qr"])]
+    #[arg(long, value_parser = ["login-qr", "login-code", "detail-reviews", "detail-notes", "article-qr", "sleep-cover", "sleep-title", "sleep-neutral"])]
     fixture: Option<String>,
 }
 
@@ -133,13 +134,22 @@ fn run(arguments: Arguments) -> Result<()> {
         &runtime,
     )?;
     let fixture_qr = fixture_qr()?;
-    apply_fixture(&ui, arguments.fixture.as_deref(), &fixture_qr);
+    let fixture_cover = fixture_sleep_cover();
+    let mut fixture_visible = true;
+    apply_fixture(
+        &ui,
+        arguments.fixture.as_deref(),
+        &fixture_qr,
+        &fixture_cover,
+        fixture_visible,
+    );
     let failures = Rc::new(RefCell::new(Vec::<String>::new()));
     let timer = slint::Timer::default();
     let weak_ui = ui.as_weak();
     let timer_application = application.clone();
     let timer_failures = failures.clone();
     let fixture = arguments.fixture.clone();
+    let fixture_capture = arguments.capture.clone();
     let profile = arguments.device;
     let deadline = arguments.exit_after_ms;
     let started = Instant::now();
@@ -166,7 +176,26 @@ fn run(arguments: Arguments) -> Result<()> {
                     if action.at_ms > elapsed {
                         break;
                     }
-                    if action.section == "pointer" {
+                    if action.section == "fixture" {
+                        if !fixture
+                            .as_deref()
+                            .is_some_and(|name| name.starts_with("sleep-"))
+                        {
+                            bail!("Fixture actions require an explicit sleep overlay fixture");
+                        }
+                        match action.action.as_str() {
+                            "hide" => fixture_visible = false,
+                            "show" => fixture_visible = true,
+                            "capture" => capture_fixture_checkpoint(
+                                &ui,
+                                &fixture_capture,
+                                profile,
+                                fixture.as_deref(),
+                                &action.value,
+                            )?,
+                            _ => bail!("Unsupported fixture action {}", action.action),
+                        }
+                    } else if action.section == "pointer" {
                         dispatch_pointer(ui.window(), &action.action, &action.value)?;
                     } else if action.section == "keyboard" {
                         dispatch_keyboard(ui.window(), &action.action, &action.value)?;
@@ -182,7 +211,13 @@ fn run(arguments: Arguments) -> Result<()> {
                 timer_application.borrow_mut().tick()?;
                 // These named overlays expose otherwise unavailable display states only.
                 // They neither alter controller authorization nor invoke source operations.
-                apply_fixture(&ui, fixture.as_deref(), &fixture_qr);
+                apply_fixture(
+                    &ui,
+                    fixture.as_deref(),
+                    &fixture_qr,
+                    &fixture_cover,
+                    fixture_visible,
+                );
                 if elapsed >= deadline {
                     if next_action != actions.len() {
                         bail!("Not every scheduled action was dispatched");
@@ -358,7 +393,39 @@ fn fixture_qr() -> Result<slint::Image> {
     Ok(slint::Image::from_rgb8(buffer))
 }
 
-fn apply_fixture(ui: &AppWindow, fixture: Option<&str>, qr: &slint::Image) {
+fn fixture_sleep_cover() -> slint::Image {
+    let (width, height) = SLEEP_COVER_SIZE;
+    let mut buffer = slint::SharedPixelBuffer::<slint::Rgb8Pixel>::new(width, height);
+    for (index, pixel) in buffer.make_mut_bytes().chunks_exact_mut(3).enumerate() {
+        let x = index as u32 % width;
+        let y = index as u32 / width;
+        let tone = if x < 8 || x >= width - 8 || y < 8 || y >= height - 8 {
+            0
+        } else if (16..56).contains(&x) && (16..56).contains(&y) {
+            51
+        } else if (244..284).contains(&x) && (16..56).contains(&y) {
+            102
+        } else if (16..56).contains(&x) && (394..434).contains(&y) {
+            153
+        } else if (244..284).contains(&x) && (394..434).contains(&y) {
+            204
+        } else if (100..200).contains(&x) && (180..270).contains(&y) {
+            119
+        } else {
+            238
+        };
+        pixel.fill(tone);
+    }
+    slint::Image::from_rgb8(buffer)
+}
+
+fn apply_fixture(
+    ui: &AppWindow,
+    fixture: Option<&str>,
+    qr: &slint::Image,
+    sleep_cover: &slint::Image,
+    sleep_visible: bool,
+) {
     match fixture {
         Some("login-qr") => {
             let login = ui.global::<LoginModel>();
@@ -412,8 +479,52 @@ fn apply_fixture(ui: &AppWindow, fixture: Option<&str>, qr: &slint::Image) {
             article.set_qr_open(true);
             article.set_menu(false);
         }
+        Some("sleep-cover") | Some("sleep-title") | Some("sleep-neutral") => {
+            let sleep = ui.global::<SleepScreenModel>();
+            let has_cover = fixture == Some("sleep-cover");
+            let neutral = fixture == Some("sleep-neutral");
+            sleep.set_active(sleep_visible);
+            sleep.set_has_cover(has_cover);
+            sleep.set_cover(if has_cover {
+                sleep_cover.clone()
+            } else {
+                slint::Image::default()
+            });
+            sleep.set_title(
+                if neutral {
+                    "WeRead for Kindle"
+                } else {
+                    "Offline Cover Fixture"
+                }
+                .into(),
+            );
+            sleep.set_author(if neutral { "" } else { "Fixture Author" }.into());
+        }
         _ => {}
     }
+}
+
+fn capture_fixture_checkpoint(
+    ui: &AppWindow,
+    capture: &Path,
+    profile: DeviceProfile,
+    fixture: Option<&str>,
+    checkpoint: &str,
+) -> Result<()> {
+    if !matches!(checkpoint, "before" | "sleep") {
+        bail!("Unsupported fixture checkpoint {checkpoint}");
+    }
+    let stem = capture
+        .file_stem()
+        .context("The fixture capture must have a filename")?
+        .to_string_lossy();
+    let path = capture.with_file_name(format!("{stem}.{checkpoint}.png"));
+    capture_window(ui, &path, profile)?;
+    fs::write(
+        path.with_extension("state.json"),
+        serde_json::to_vec_pretty(&model_state(ui, fixture))?,
+    )?;
+    Ok(())
 }
 
 fn set_geometry(window: &slint::Window, profile: DeviceProfile) -> Result<()> {
@@ -499,11 +610,7 @@ fn snapshot_window(
     Ok(snapshot)
 }
 
-fn capture_window(
-    ui: &AppWindow,
-    path: &Path,
-    profile: DeviceProfile,
-) -> Result<()> {
+fn capture_window(ui: &AppWindow, path: &Path, profile: DeviceProfile) -> Result<()> {
     let expected = profile.logical_size();
     let snapshot = snapshot_window(ui, profile)?;
     let actual = ui.window().size();
@@ -539,9 +646,14 @@ fn model_state(ui: &AppWindow, fixture: Option<&str>) -> Value {
     let article = ui.global::<ArticleModel>();
     let auxiliary = ui.global::<AuxiliaryModel>();
     let login = ui.global::<LoginModel>();
+    let sleep = ui.global::<SleepScreenModel>();
+    let sleep_cover_size = sleep.get_cover().size();
     json!({
         "fixture": fixture,
         "boundary": "Offline public demo fixture; no account or physical Kindle verification",
+        "sleep_screen": {"active": sleep.get_active(), "has_cover": sleep.get_has_cover(),
+            "title": sleep.get_title().to_string(), "author": sleep.get_author().to_string(),
+            "cover_size": [sleep_cover_size.width, sleep_cover_size.height]},
         "shell": {"route": shell.get_route().to_string(), "dialog_kind": shell.get_dialog_kind().to_string(),
             "selection_count": shell.get_selection_count(), "online": shell.get_online()},
         "library": {"page": library.get_page(), "page_count": library.get_page_count(),

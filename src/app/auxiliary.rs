@@ -896,6 +896,16 @@ impl App {
                 if changed {
                     self.prefs.normalize_for_device(self.profile.is_scribe());
                     self.save_preferences()?;
+                    if value == "sleep_cover" {
+                        self.clear_prepared_sleep_screen();
+                        if self.prefs.sleep_cover {
+                            if let Some(id) = self.current_sleep_book_id().map(str::to_owned) {
+                                if let Some(book) = self.store.book_metadata_by_id(&id)? {
+                                    self.prepare_sleep_screen_for_book(&book);
+                                }
+                            }
+                        }
+                    }
                     self.platform
                         .set_flash_on_navigation(self.prefs.flash_on_navigation);
                     self.platform
@@ -2282,9 +2292,9 @@ impl App {
                     "sleep_cover",
                     "toggle",
                     String::new(),
-                    false,
-                    false,
-                    "pending_verification",
+                    preferences.sleep_cover,
+                    true,
+                    "",
                 ),
             ],
             "about" => vec![

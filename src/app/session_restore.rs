@@ -20,6 +20,8 @@ pub(super) struct LauncherContext {
 pub(super) enum ManagedMarker {
     SleepRequest,
     SleepReady,
+    CoverRequest,
+    CoverReady,
     WakeRequest,
     WakeReady,
 }
@@ -29,6 +31,8 @@ impl ManagedMarker {
         match self {
             Self::SleepRequest => "managed-sleep-request",
             Self::SleepReady => "managed-sleep-ready",
+            Self::CoverRequest => "managed-cover-request",
+            Self::CoverReady => "managed-cover-ready",
             Self::WakeRequest => "managed-wake-request",
             Self::WakeReady => "managed-wake-ready",
         }
@@ -310,13 +314,23 @@ impl LauncherContext {
         self.validate_managed_owner()?;
         let request = match marker {
             ManagedMarker::SleepReady => Some(ManagedMarker::SleepRequest),
+            ManagedMarker::CoverReady => Some(ManagedMarker::CoverRequest),
             ManagedMarker::WakeReady => Some(ManagedMarker::WakeRequest),
-            ManagedMarker::SleepRequest | ManagedMarker::WakeRequest => None,
+            ManagedMarker::SleepRequest
+            | ManagedMarker::CoverRequest
+            | ManagedMarker::WakeRequest => None,
         };
         if let Some(request) = request {
             ensure!(
                 self.managed_cycle(request)? == Some(cycle) && !self.matches("ordinary-exit")?,
                 "The managed acknowledgement intent is no longer current"
+            );
+        }
+        if matches!(marker, ManagedMarker::CoverReady) {
+            ensure!(
+                self.managed_cycle(ManagedMarker::SleepRequest)? == Some(cycle)
+                    && self.matches("sleep-request")?,
+                "The cover acknowledgement has no current sleep intent"
             );
         }
         self.write_record(marker.name(), &format!("{}:{cycle}", self.record()))

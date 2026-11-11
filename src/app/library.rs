@@ -6,6 +6,7 @@ pub(super) struct BookTileMetadata<'a> {
     id: &'a str,
     title: &'a str,
     author: &'a str,
+    cover_url: &'a str,
     source: &'a str,
     progress: f32,
     cached_chapters: u32,
@@ -23,6 +24,7 @@ impl BookTileFields for Book {
             id: &self.id,
             title: &self.title,
             author: &self.author,
+            cover_url: &self.cover_url,
             source: &self.source,
             progress: self.progress,
             cached_chapters: self.cached_chapters,
@@ -38,6 +40,7 @@ impl BookTileFields for BookMetadata {
             id: &self.id,
             title: &self.title,
             author: &self.author,
+            cover_url: &self.cover_url,
             source: &self.source,
             progress: self.progress,
             cached_chapters: self.cached_chapters,
@@ -663,11 +666,8 @@ impl App {
             .map(char::to_string)
             .collect::<Vec<_>>()
             .join("\n");
-        let cover = self
-            .cache
-            .get(&format!("cover:{}", book.id))
-            .ok()
-            .flatten()
+        let cover = sleep_screen::thumbnail_key(book.id, book.cover_url)
+            .and_then(|key| self.cache.get(&key).ok().flatten())
             .and_then(|path| slint::Image::load_from_path(&path).ok());
         BookTile {
             id: book.id.into(),
@@ -2190,17 +2190,21 @@ impl App {
                     }
                     "clear-book" => {
                         let id = self.detail_id.clone();
-                        if self
-                            .store
-                            .book_metadata_by_id(&id)?
-                            .is_some_and(|b| b.source == "weread")
-                        {
+                        let book = self.store.book_metadata_by_id(&id)?;
+                        if book.as_ref().is_some_and(|b| b.source == "weread") {
                             self.book_assets.clear_book(&self.store, &id)?;
                             self.store.clear_book_cache(&id)?;
                         } else {
                             self.show_toast("local_cache_preserved");
                         }
-                        self.cache.remove(&format!("cover:{id}"))?;
+                        if let Some(book) = book {
+                            if let Some(key) = sleep_screen::thumbnail_key(&id, &book.cover_url) {
+                                self.cache.remove(&key)?;
+                            }
+                            if let Some(key) = sleep_screen::cover_key(&id, &book.cover_url) {
+                                self.cache.remove(&key)?;
+                            }
+                        }
                     }
                     "clear-cache" => {
                         let books = match self.store.book_metadata() {

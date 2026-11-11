@@ -8,6 +8,37 @@ The subsequent [Library-entry correction](PHYSICAL_TESTING.md#fresh-launches-ent
 
 The later [normal-mode private trial deployment](PHYSICAL_TESTING.md#normal-mode-private-trial-deployment) replaced the supervised demo with the retained release ELF and standard document launcher. Installed hashes, normal arguments without a deadline, state initialization, the visible catalog entry, and the user's login-screen observation were recorded. Off-device backup verification preceded removal of the old test installation. This adds deployment and first-screen evidence, not authenticated-service or new physical sleep-cycle acceptance.
 
+## Book-cover sleep presentation
+
+The 2026-11-12 [book-cover sleep change](SLEEP_COVER.md) uses a prepared image and
+a checked panel-presentation acknowledgement before synchronous persistence and
+worker shutdown. An eligible current-cycle handshake retains application display
+ownership while `powerd` handles normal sleep. Wake hides the overlay before the
+first full Reader render. Native locks, advertisement screensavers, unknown
+capability, and disabled preferences retain stock handling.
+
+All verification ran on `test-env`: 1,619 library tests and 52 Main tests passed
+with four explicitly ignored benchmarks, together with 95 backend tests, 211
+launcher fixtures, 133 general desktop UI/persistence checks, 16 focused
+sleep-screen capture/assertion checks, formatting for three manifests, and 472
+translation keys. Four package contracts passed; the generated archive's 36
+public members matched staged bytes, executable modes, and CRCs. The initial
+new-test constructor errors and the synthetic deferred-refill helper correction
+are retained in the feature record rather than described as passing attempts.
+
+ARM main `d8b3df1f`, launcher `71316711`, unchanged native guard `a235b41c`, and
+development ZIP `8e0c632d` identify this candidate. Detailed hashes,
+scope limits, and reports are in the feature record. A subsequent
+[scoped physical demonstration](PHYSICAL_TESTING.md#book-cover-sleep-observation)
+installed the matching public files on Scribe 2022 / firmware 5.19.5 while
+preserving data. The operator chose the offline sample's title/author screen,
+confirmed the effect was very good, and stopped further testing. A controlled
+cycle retained matching cover/sleep/wake markers and the same process/start
+time/generation. Internal observations of 753 and 855 ms do not measure physical
+key-to-visible latency. Native ownership and the exact device lease were
+returned. Authenticated bitmap covers, long-sleep wake, rapid reversals,
+native-lock fallback, and a broader support matrix remain unverified.
+
 ## Pre-release persistence cleanup
 
 The 2026-11-11 storage cleanup removes schema upgrades, task-level retry fields, old task tuple parsing, outbox field aliases, and missing-field defaults in current preference/reporting snapshots. Direct initialization includes content evidence, normalized chapter retry rows, and annotation read indexes. Unsupported versioned development databases are rejected without conversion or deletion.

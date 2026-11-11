@@ -26,6 +26,7 @@ mod platform;
 mod power;
 mod refresh;
 mod render_control;
+mod sleep_presentation;
 mod splash;
 mod touch;
 mod wakeup;

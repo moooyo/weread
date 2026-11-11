@@ -114,8 +114,7 @@ impl App {
         self.reader.thought_request = invalid_request;
         self.catalog_requests.clear();
         self.book_requests.clear();
-        self.pending_covers.clear();
-        self.cover_ui_changes.clear();
+        self.clear_pending_cover_requests();
         self.pending_articles.clear();
         self.pending_article_images.clear();
         self.article.image_work.pause_pending();
@@ -179,6 +178,9 @@ impl App {
         self.preserve_submission_error(resumed)?;
         self.resident_lifecycle.prepared = false;
         self.managed_sleep_blocked = false;
+        // Sleep cancels public-image jobs too. Retry the current visible cover
+        // after input and display recovery, even when the Reader stays still.
+        self.schedule_visible_covers();
         Ok(())
     }
 

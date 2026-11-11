@@ -147,6 +147,8 @@ WAKE_PROBE_CHILD_BIRTH=''
 SLEEP_GENERATION=0
 MANAGED_SLEEP_CYCLE=0
 MANAGED_FROZEN=0
+APP_SLEEP_COVER=0
+COVER_SLEEP_SUPPORTED=0
 WAKE_PENDING=0
 WAKE_PROBES_REMAINING=0
 PAUSED_WM_IDENTITIES=''
@@ -885,6 +887,41 @@ query_native_property() {
     NATIVE_PROPERTY_VALUE=$(cat "$LOCK_DIR/native-theme-output" 3>&-) || return 1
 }
 
+configure_cover_sleep() {
+    # Query the framework once while it is running. Keeping powerd enabled is
+    # independent of who supplies its screen-saver image.
+    COVER_SLEEP_SUPPORTED=0
+    if query_native_property com.lab126.blanket load; then
+        case "$NATIVE_PROPERTY_VALUE" in
+            ''|*ad_screensaver*) return 0 ;;
+        esac
+        case "$NATIVE_PROPERTY_VALUE" in
+            *[![:space:]]*) ;;
+            *) return 0 ;;
+        esac
+        COVER_SLEEP_SUPPORTED=1
+    fi
+    return 0
+}
+
+cover_sleep_can_own_display() {
+    [ "$COVER_SLEEP_SUPPORTED" -eq 1 ] && [ "$DISPLAY_OWNED" -eq 1 ] &&
+        [ -n "$PAUSED_WM_IDENTITIES" ] && [ -z "$WM_STOP_PENDING_IDENTITY" ] || return 1
+    # Never remove a passcode or draw over the native lock. Recheck the file at
+    # every transition rather than treating startup permission as permanent.
+    [ ! -e /var/local/system/userpasswdenabled ] &&
+        [ ! -L /var/local/system/userpasswdenabled ] || return 1
+    for cover_wm_identity in $PAUSED_WM_IDENTITIES; do
+        cover_wm_pid=${cover_wm_identity%%:*}
+        cover_wm_birth=${cover_wm_identity#*:}
+        [ "$(process_birth "$cover_wm_pid" 2>/dev/null || :)" = "$cover_wm_birth" ] || return 1
+        case "$(sed -n 's/^State:[[:space:]]*//p' "/proc/$cover_wm_pid/status" 2>/dev/null || :)" in
+            T*|t*) ;;
+            *) return 1 ;;
+        esac
+    done
+}
+
 query_native_processes() {
     NATIVE_PROCESS_IDS=''
     if owned_native_command "$NATIVE_QUERY_OUTPUT_LIMIT" pidof "$@"; then
@@ -1318,7 +1355,8 @@ start_application() {
     APP_CHILD_BIRTH=''
     MANAGED_FROZEN=0
     MANAGED_SLEEP_CYCLE=0
-    rm -f "$LOCK_DIR/application-pid" "$LOCK_DIR/application-birth" "$LOCK_DIR/application-owned" "$LOCK_DIR/sleep-request" "$LOCK_DIR/resume-ready" "$LOCK_DIR/ordinary-exit" "$LOCK_DIR/state-open" "$LOCK_DIR/state-open.pending" "$LOCK_DIR/native-wifi-request" "$LOCK_DIR/native-quick-request" "$LOCK_DIR/native-return" "$LOCK_DIR/native-wifi-available" "$LOCK_DIR/native-quick-available" "$LOCK_DIR/managed-sleep-available" "$LOCK_DIR/managed-sleep-available.pending" "$LOCK_DIR/managed-sleep-request" "$LOCK_DIR/managed-sleep-request.pending" "$LOCK_DIR/managed-sleep-ready" "$LOCK_DIR/managed-sleep-ready.pending" "$LOCK_DIR/managed-wake-request" "$LOCK_DIR/managed-wake-request.pending" "$LOCK_DIR/managed-wake-ready" "$LOCK_DIR/managed-wake-ready.pending" "$LOCK_DIR/native-epdc-mode" "$LOCK_DIR/native-epdc-mode.pending" "$LOCK_DIR/native-portrait-calibration" "$LOCK_DIR/native-portrait-calibration.pending" "$LOCK_DIR/managed-native-epdc-mode" "$LOCK_DIR/managed-native-epdc-mode.pending" "$LOCK_DIR/managed-native-portrait-calibration" "$LOCK_DIR/managed-native-portrait-calibration.pending" "$LOCK_DIR/native-dark-target" "$LOCK_DIR/native-dark-target.pending"
+    APP_SLEEP_COVER=0
+    rm -f "$LOCK_DIR/application-pid" "$LOCK_DIR/application-birth" "$LOCK_DIR/application-owned" "$LOCK_DIR/sleep-request" "$LOCK_DIR/resume-ready" "$LOCK_DIR/ordinary-exit" "$LOCK_DIR/state-open" "$LOCK_DIR/state-open.pending" "$LOCK_DIR/native-wifi-request" "$LOCK_DIR/native-quick-request" "$LOCK_DIR/native-return" "$LOCK_DIR/native-wifi-available" "$LOCK_DIR/native-quick-available" "$LOCK_DIR/managed-sleep-available" "$LOCK_DIR/managed-sleep-available.pending" "$LOCK_DIR/managed-sleep-request" "$LOCK_DIR/managed-sleep-request.pending" "$LOCK_DIR/managed-sleep-ready" "$LOCK_DIR/managed-sleep-ready.pending" "$LOCK_DIR/managed-cover-request" "$LOCK_DIR/managed-cover-request.pending" "$LOCK_DIR/managed-cover-ready" "$LOCK_DIR/managed-cover-ready.pending" "$LOCK_DIR/managed-wake-request" "$LOCK_DIR/managed-wake-request.pending" "$LOCK_DIR/managed-wake-ready" "$LOCK_DIR/managed-wake-ready.pending" "$LOCK_DIR/native-epdc-mode" "$LOCK_DIR/native-epdc-mode.pending" "$LOCK_DIR/native-portrait-calibration" "$LOCK_DIR/native-portrait-calibration.pending" "$LOCK_DIR/managed-native-epdc-mode" "$LOCK_DIR/managed-native-epdc-mode.pending" "$LOCK_DIR/managed-native-portrait-calibration" "$LOCK_DIR/managed-native-portrait-calibration.pending" "$LOCK_DIR/native-dark-target" "$LOCK_DIR/native-dark-target.pending"
     printf '%s:%s\n' "$APP_GENERATION" "$LAUNCH_TOKEN" >"$LOCK_DIR/generation"
     publish_native_epdc_mode native-epdc-mode
     # Retire the former system-theme handshake on every normal/cold start.
@@ -2018,6 +2056,10 @@ attempt_managed_sleep() {
     fi
     managed_application_is_current || return 1
     MANAGED_SLEEP_CYCLE=$SLEEP_GENERATION
+    APP_SLEEP_COVER=0
+    if cover_sleep_can_own_display; then
+        write_managed_request managed-cover-request || return 1
+    fi
     write_managed_request managed-sleep-request || return 1
     signal_managed_application USR1 || return 1
     managed_sleep_checks=$(managed_wait_budget 8)
@@ -2039,6 +2081,15 @@ attempt_managed_sleep() {
                         SLEEP_RESUME_INTENT=1
                         SLEEP_NATIVE_RETURN_INTENT=0
                         SLEEP_NATIVE_RETURN_RESULT=closed
+                        if managed_marker_matches managed-cover-request &&
+                            managed_marker_matches managed-cover-ready &&
+                            cover_sleep_can_own_display; then
+                            APP_SLEEP_COVER=1
+                            # The acknowledged cover is already on the panel.
+                            # Keep native drawing paused and avoid another full
+                            # capture/upload before powerd completes suspension.
+                            return 0
+                        fi
                         request_frame_guard capture || return 1
                         return 0
                         ;;
@@ -2058,14 +2109,25 @@ attempt_managed_sleep() {
 resume_managed_application() {
     managed_application_is_current || return 1
     marker_matches_application ordinary-exit && return 1
-    take_display || return 1
-    clear_native_theme_power_interrupt || fail 'Resident wake was superseded by a power event or an unconfirmed active state.'
-    publish_native_epdc_mode managed-native-epdc-mode
-    if ! publish_native_portrait_calibration managed-native-portrait-calibration; then
-        launcher_log '%s\n' 'weread: Native wake portrait record publication failed; keeping the previous calibration.'
+    if [ "$APP_SLEEP_COVER" -eq 1 ]; then
+        managed_marker_matches managed-cover-request &&
+            managed_marker_matches managed-cover-ready && cover_sleep_can_own_display ||
+            fail 'Custom sleep display permission changed; restoring native ownership.'
+        # Native drawing never resumed, so there is no takeover, native WM
+        # query, or frame-guard alignment to perform. The backend still observes
+        # actual framebuffer metadata before repainting the original route.
+        clear_native_theme_power_interrupt ||
+            fail 'Custom sleep wake was superseded by a power event or an unconfirmed active state.'
+    else
+        take_display || return 1
+        clear_native_theme_power_interrupt || fail 'Resident wake was superseded by a power event or an unconfirmed active state.'
+        publish_native_epdc_mode managed-native-epdc-mode
+        if ! publish_native_portrait_calibration managed-native-portrait-calibration; then
+            launcher_log '%s\n' 'weread: Native wake portrait record publication failed; keeping the previous calibration.'
+        fi
+        request_frame_guard align || return 1
+        clear_native_theme_power_interrupt || fail 'Resident wake alignment was superseded by a power event or an unconfirmed active state.'
     fi
-    request_frame_guard align || return 1
-    clear_native_theme_power_interrupt || fail 'Resident wake alignment was superseded by a power event or an unconfirmed active state.'
     write_managed_request managed-wake-request || return 1
     # SIGUSR2 is queued while the process is stopped and becomes visible
     # before its next application timer can perform ordinary work.
@@ -2084,6 +2146,7 @@ resume_managed_application() {
                 rm -f "$LOCK_DIR/sleep-request" || return 1
             fi
             APP_PHASE=running
+            APP_SLEEP_COVER=0
             return 0
         fi
         managed_wake_checks=$((managed_wake_checks - 1))
@@ -2094,6 +2157,7 @@ resume_managed_application() {
 
 cold_sleep_application() {
     APP_PHASE=stopping
+    APP_SLEEP_COVER=0
     if marker_matches_application ordinary-exit; then
         # A committed UI exit may already be unwinding. Observe the captured
         # runner briefly before the existing bounded stop path can signal it.
@@ -2481,7 +2545,7 @@ cleanup() {
             note_cleanup_failure 'power event descriptor'
         fi
     fi
-    if ! rm -f "$LOCK_DIR/pid" "$LOCK_DIR/power-events" "$LOCK_DIR/nonce" "$LOCK_DIR/generation" "$LOCK_DIR/sleep-request" "$LOCK_DIR/resume-ready" "$LOCK_DIR/ordinary-exit" "$LOCK_DIR/state-open" "$LOCK_DIR/resume-ready.pending" "$LOCK_DIR/ordinary-exit.pending" "$LOCK_DIR/state-open.pending" "$LOCK_DIR/state-open.pending" "$LOCK_DIR/native-wifi-request" "$LOCK_DIR/native-quick-request" "$LOCK_DIR/native-wifi-request.pending" "$LOCK_DIR/native-quick-request.pending" "$LOCK_DIR/native-return" "$LOCK_DIR/native-wifi-available" "$LOCK_DIR/native-quick-available" "$LOCK_DIR/native-baseline" "$LOCK_DIR/native-current" "$LOCK_DIR/native-active-app" "$LOCK_DIR/native-active-view" "$LOCK_DIR/native-return-check" "$LOCK_DIR/application-birth" "$LOCK_DIR/application-owned" "$LOCK_DIR/managed-sleep-available" "$LOCK_DIR/managed-sleep-available.pending" "$LOCK_DIR/managed-sleep-request" "$LOCK_DIR/managed-sleep-request.pending" "$LOCK_DIR/managed-sleep-ready" "$LOCK_DIR/managed-sleep-ready.pending" "$LOCK_DIR/managed-wake-request" "$LOCK_DIR/managed-wake-request.pending" "$LOCK_DIR/managed-wake-ready" "$LOCK_DIR/managed-wake-ready.pending" "$LOCK_DIR/native-epdc-mode" "$LOCK_DIR/native-epdc-mode.pending" "$LOCK_DIR/native-portrait-calibration" "$LOCK_DIR/native-portrait-calibration.pending" "$LOCK_DIR/managed-native-epdc-mode" "$LOCK_DIR/managed-native-epdc-mode.pending" "$LOCK_DIR/managed-native-portrait-calibration" "$LOCK_DIR/managed-native-portrait-calibration.pending" "$LOCK_DIR/native-dark-target" "$LOCK_DIR/native-dark-target.pending" "$LOCK_DIR/native-theme-output" "$LOCK_DIR/native-theme-done" "$LOCK_DIR/native-theme-done.pending"; then
+    if ! rm -f "$LOCK_DIR/pid" "$LOCK_DIR/power-events" "$LOCK_DIR/nonce" "$LOCK_DIR/generation" "$LOCK_DIR/sleep-request" "$LOCK_DIR/resume-ready" "$LOCK_DIR/ordinary-exit" "$LOCK_DIR/state-open" "$LOCK_DIR/resume-ready.pending" "$LOCK_DIR/ordinary-exit.pending" "$LOCK_DIR/state-open.pending" "$LOCK_DIR/state-open.pending" "$LOCK_DIR/native-wifi-request" "$LOCK_DIR/native-quick-request" "$LOCK_DIR/native-wifi-request.pending" "$LOCK_DIR/native-quick-request.pending" "$LOCK_DIR/native-return" "$LOCK_DIR/native-wifi-available" "$LOCK_DIR/native-quick-available" "$LOCK_DIR/native-baseline" "$LOCK_DIR/native-current" "$LOCK_DIR/native-active-app" "$LOCK_DIR/native-active-view" "$LOCK_DIR/native-return-check" "$LOCK_DIR/application-birth" "$LOCK_DIR/application-owned" "$LOCK_DIR/managed-sleep-available" "$LOCK_DIR/managed-sleep-available.pending" "$LOCK_DIR/managed-sleep-request" "$LOCK_DIR/managed-sleep-request.pending" "$LOCK_DIR/managed-sleep-ready" "$LOCK_DIR/managed-sleep-ready.pending" "$LOCK_DIR/managed-cover-request" "$LOCK_DIR/managed-cover-request.pending" "$LOCK_DIR/managed-cover-ready" "$LOCK_DIR/managed-cover-ready.pending" "$LOCK_DIR/managed-wake-request" "$LOCK_DIR/managed-wake-request.pending" "$LOCK_DIR/managed-wake-ready" "$LOCK_DIR/managed-wake-ready.pending" "$LOCK_DIR/native-epdc-mode" "$LOCK_DIR/native-epdc-mode.pending" "$LOCK_DIR/native-portrait-calibration" "$LOCK_DIR/native-portrait-calibration.pending" "$LOCK_DIR/managed-native-epdc-mode" "$LOCK_DIR/managed-native-epdc-mode.pending" "$LOCK_DIR/managed-native-portrait-calibration" "$LOCK_DIR/managed-native-portrait-calibration.pending" "$LOCK_DIR/native-dark-target" "$LOCK_DIR/native-dark-target.pending" "$LOCK_DIR/native-theme-output" "$LOCK_DIR/native-theme-done" "$LOCK_DIR/native-theme-done.pending"; then
         note_cleanup_failure 'launcher records'
     fi
     if ! rm -f "$LOCK_DIR/native-theme-go" "$LOCK_DIR/native-theme-go.pending" "$LOCK_DIR/native-portrait-step" "$LOCK_DIR/native-portrait-step.pending"; then note_cleanup_failure 'native theme permission records'; fi
@@ -2566,6 +2630,7 @@ start_power_observer || fail 'Power observer startup failed before a proven subs
 sleep 2
 export WEREAD_HOME
 configure_native_settings
+configure_cover_sleep
 take_display
 start_application 0
 
@@ -2585,10 +2650,12 @@ while IFS= read -r power_event <&3; do
                 # The application generation stays constant for resident
                 # cycles, so every durable and volatile acknowledgment must
                 # be refreshed rather than inherited from the last sleep.
-                rm -f "$LOCK_DIR/resume-ready" "$LOCK_DIR/resume-ready.pending" "$LOCK_DIR/managed-sleep-request" "$LOCK_DIR/managed-sleep-request.pending" "$LOCK_DIR/managed-sleep-ready" "$LOCK_DIR/managed-sleep-ready.pending" "$LOCK_DIR/managed-wake-request" "$LOCK_DIR/managed-wake-request.pending" "$LOCK_DIR/managed-wake-ready" "$LOCK_DIR/managed-wake-ready.pending" "$LOCK_DIR/managed-native-epdc-mode" "$LOCK_DIR/managed-native-epdc-mode.pending" "$LOCK_DIR/managed-native-portrait-calibration" "$LOCK_DIR/managed-native-portrait-calibration.pending"
+                rm -f "$LOCK_DIR/resume-ready" "$LOCK_DIR/resume-ready.pending" "$LOCK_DIR/managed-sleep-request" "$LOCK_DIR/managed-sleep-request.pending" "$LOCK_DIR/managed-sleep-ready" "$LOCK_DIR/managed-sleep-ready.pending" "$LOCK_DIR/managed-cover-request" "$LOCK_DIR/managed-cover-request.pending" "$LOCK_DIR/managed-cover-ready" "$LOCK_DIR/managed-cover-ready.pending" "$LOCK_DIR/managed-wake-request" "$LOCK_DIR/managed-wake-request.pending" "$LOCK_DIR/managed-wake-ready" "$LOCK_DIR/managed-wake-ready.pending" "$LOCK_DIR/managed-native-epdc-mode" "$LOCK_DIR/managed-native-epdc-mode.pending" "$LOCK_DIR/managed-native-portrait-calibration" "$LOCK_DIR/managed-native-portrait-calibration.pending"
                 printf '%s:%s\n' "$APP_GENERATION" "$LAUNCH_TOKEN" >"$LOCK_DIR/sleep-request"
                 if attempt_managed_sleep; then
-                    release_display retain-frame
+                    if [ "$APP_SLEEP_COVER" -ne 1 ]; then
+                        release_display retain-frame
+                    fi
                 else
                     cold_sleep_application
                 fi
@@ -2600,6 +2667,19 @@ while IFS= read -r power_event <&3; do
             if { [ "$APP_PHASE" = sleeping ] || [ "$APP_PHASE" = suspended ] || { [ "$APP_PHASE" = native ] && [ "$NATIVE_SLEEPING" -eq 1 ]; }; } && [ "$WAKE_PENDING" -eq 0 ]; then
                 WAKE_PENDING=1
                 WAKE_PROBES_REMAINING=3
+                if [ "$APP_PHASE" = suspended ] && [ "$APP_SLEEP_COVER" -eq 1 ]; then
+                    managed_marker_matches managed-cover-request &&
+                        managed_marker_matches managed-cover-ready && cover_sleep_can_own_display ||
+                        fail 'Custom sleep display permission changed before wake; restoring native ownership.'
+                    # Most custom-screen wakes can resume immediately. Do not
+                    # require an ExitingSS event from a framework we kept paused.
+                    if clear_native_theme_power_interrupt; then
+                        resume_application
+                        continue
+                    fi
+                    native_theme_power_epoch_is_current ||
+                        fail 'Custom sleep wake was superseded before active confirmation.'
+                fi
                 start_wake_probe "$SLEEP_GENERATION" 2 || fail 'Wake probe startup failed; native ownership is preserved.'
             fi
             ;;
@@ -2700,6 +2780,9 @@ while IFS= read -r power_event <&3; do
                     if [ "$WAKE_PROBES_REMAINING" -gt 0 ]; then
                         WAKE_PROBES_REMAINING=$((WAKE_PROBES_REMAINING - 1))
                         if [ "$WAKE_PROBES_REMAINING" -eq 0 ]; then
+                            if [ "$APP_SLEEP_COVER" -eq 1 ]; then
+                                fail 'Custom sleep wake did not confirm an active power state; restoring native ownership.'
+                            fi
                             launcher_log '%s\n' 'weread: Waiting for native unlock or screen-saver dismissal.'
                         fi
                     fi

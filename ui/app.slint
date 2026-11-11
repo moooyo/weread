@@ -5,6 +5,7 @@ import { LibraryScreen, LibraryModel, DetailScreen, DetailModel } from "bookstor
 import { LoginScreen, LoginModel, SearchScreen, SearchModel } from "auth.slint";
 import { ReaderScreen, ReaderModel, ArticleScreen, ArticleModel } from "reader.slint";
 import { PublicationScreen, StatisticsScreen, SettingsScreen, AuxiliaryModel } from "auxiliary.slint";
+import { SleepScreen, SleepScreenModel } from "sleep-screen.slint";
 
 export { Theme } from "theme.slint";
 export { SegmentedOption } from "widgets.slint";
@@ -12,6 +13,7 @@ export { LibraryModel, DetailModel, BookTile, DetailChapter, DetailReview } from
 export { LoginModel, SearchModel, SearchResult, RecentSearchChip } from "auth.slint";
 export { ReaderModel, ArticleModel, ReaderLine, ReaderMark, ReaderImage, ReaderChapter, ThoughtEntry, ReaderEntry, ReaderFont, ArticleBlock } from "reader.slint";
 export { AuxiliaryModel, PublicationRow, StatisticMetric, StatisticBar, RankingEntry, PreferenceEntry, SettingEntry } from "auxiliary.slint";
+export { SleepScreenModel } from "sleep-screen.slint";
 
 export global ShellModel {
     in-out property <string> route: "login";
@@ -178,5 +180,9 @@ export component AppWindow inherits Window {
             }
             if ShellModel.dialog-kind == "more": Rectangle { x: 0px; y: 0px; width: parent.width; height: 2px; background: Theme.ink; }
         }
+    }
+    if SleepScreenModel.active: SleepScreen {
+        width: parent.width;
+        height: parent.height;
     }
 }

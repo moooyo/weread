@@ -6,18 +6,26 @@ use crate::platform::ManagedSleepState;
 use anyhow::{bail, ensure};
 
 const SUSPEND_TIMEOUT: Duration = Duration::from_secs(7);
+const PRESENTATION_TIMEOUT: Duration = SUSPEND_TIMEOUT;
 const RESUME_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Default)]
 enum Phase {
     #[default]
     Running,
+    Presenting {
+        cycle: u64,
+        token: u64,
+        started: Instant,
+    },
     Suspending {
         cycle: u64,
         started: Instant,
+        cover: bool,
     },
     Suspended {
         cycle: u64,
+        cover: bool,
     },
     Resuming {
         cycle: u64,
@@ -29,8 +37,9 @@ enum Phase {
 impl Phase {
     fn cycle(&self) -> Option<u64> {
         match self {
-            Self::Suspending { cycle, .. }
-            | Self::Suspended { cycle }
+            Self::Presenting { cycle, .. }
+            | Self::Suspending { cycle, .. }
+            | Self::Suspended { cycle, .. }
             | Self::Resuming { cycle, .. } => Some(*cycle),
             Self::Running | Self::Failed => None,
         }
@@ -53,6 +62,18 @@ trait ManagedSleepHost {
     fn closing(&self) -> bool;
     fn render_state(&self) -> Result<ManagedSleepState>;
     fn set_sleeping(&self, sleeping: bool) -> Result<()>;
+    fn cover_enabled(&self) -> bool {
+        false
+    }
+    fn present_cover(&mut self) -> Result<u64> {
+        bail!("The resident renderer cannot present a sleep cover")
+    }
+    fn cover_presented(&self, _: u64) -> Result<bool> {
+        bail!("The resident renderer cannot confirm a sleep cover")
+    }
+    fn hide_cover(&mut self) -> Result<()> {
+        Ok(())
+    }
     fn native_base(&self) -> Option<bool> {
         None
     }
@@ -87,6 +108,27 @@ impl ManagedSleepHost for App {
 
     fn set_sleeping(&self, sleeping: bool) -> Result<()> {
         Ok(self.platform.set_managed_sleep(sleeping)?)
+    }
+
+    fn cover_enabled(&self) -> bool {
+        self.sleep_cover_enabled()
+    }
+
+    fn present_cover(&mut self) -> Result<u64> {
+        // The prepared image is already decoded. Returning to the event loop
+        // lets it reach the panel before synchronous persistence can begin.
+        self.managed_sleep_blocked = true;
+        self.show_sleep_screen()?;
+        Ok(self.platform.request_sleep_presentation()?)
+    }
+
+    fn cover_presented(&self, token: u64) -> Result<bool> {
+        Ok(self.platform.sleep_presentation_completed(token)?)
+    }
+
+    fn hide_cover(&mut self) -> Result<()> {
+        self.hide_sleep_screen();
+        Ok(())
     }
 
     fn native_base(&self) -> Option<bool> {
@@ -232,15 +274,64 @@ impl ManagedSleep {
                 );
                 self.last_cycle = cycle;
                 self.pending_wake = false;
+                if host.cover_enabled()
+                    && context.managed_cycle(ManagedMarker::CoverRequest)? == Some(cycle)
+                {
+                    let token = host.present_cover()?;
+                    self.phase = Phase::Presenting {
+                        cycle,
+                        token,
+                        started: now,
+                    };
+                    return Ok(true);
+                }
                 self.phase = Phase::Suspending {
                     cycle,
                     started: now,
+                    cover: false,
                 };
                 host.prepare()?;
                 host.set_sleeping(true)?;
                 Ok(true)
             }
-            Phase::Suspending { cycle, started } => {
+            Phase::Presenting {
+                cycle,
+                token,
+                started,
+            } => {
+                ensure!(
+                    now.saturating_duration_since(started) < PRESENTATION_TIMEOUT,
+                    "The resident renderer did not present the sleep cover in time"
+                );
+                ensure!(
+                    state == ManagedSleepState::Running
+                        && context.managed_cycle(ManagedMarker::SleepRequest)? == Some(cycle)
+                        && context.managed_cycle(ManagedMarker::CoverRequest)? == Some(cycle)
+                        && context.matches("sleep-request")?,
+                    "The sleep cover presentation intent is no longer current"
+                );
+                if host.cover_presented(token)? {
+                    crate::diagnostic!(
+                        "Sleep cover presented {} ms after application sleep handling began",
+                        now.saturating_duration_since(started).as_millis()
+                    );
+                    // Persistence and worker joins begin only after checked
+                    // panel completion. Their original freeze barrier remains.
+                    self.phase = Phase::Suspending {
+                        cycle,
+                        started,
+                        cover: true,
+                    };
+                    host.prepare()?;
+                    host.set_sleeping(true)?;
+                }
+                Ok(true)
+            }
+            Phase::Suspending {
+                cycle,
+                started,
+                cover,
+            } => {
                 ensure!(
                     now.saturating_duration_since(started) < SUSPEND_TIMEOUT,
                     "The resident renderer did not release display and input in time"
@@ -248,8 +339,11 @@ impl ManagedSleep {
                 match state {
                     ManagedSleepState::Running | ManagedSleepState::Suspending => {}
                     ManagedSleepState::Suspended => {
+                        if cover {
+                            context.write_managed_cycle(ManagedMarker::CoverReady, cycle)?;
+                        }
                         context.acknowledge_managed_sleep(cycle)?;
-                        self.phase = Phase::Suspended { cycle };
+                        self.phase = Phase::Suspended { cycle, cover };
                     }
                     ManagedSleepState::Resuming | ManagedSleepState::Terminated => {
                         bail!("The renderer could not complete its managed sleep release");
@@ -257,7 +351,7 @@ impl ManagedSleep {
                 }
                 Ok(true)
             }
-            Phase::Suspended { cycle } => {
+            Phase::Suspended { cycle, cover } => {
                 ensure!(
                     state == ManagedSleepState::Suspended,
                     "The suspended renderer changed ownership without a wake request"
@@ -286,6 +380,11 @@ impl ManagedSleep {
                         // Fresh holding/scanout metadata is staged while input
                         // and display are still suspended, before the full draw.
                         host.prepare_native_portrait_resume(observation)?;
+                    }
+                    if cover {
+                        // The backend renders updated Slint state before its
+                        // first full wake refresh, so that frame is the Reader.
+                        host.hide_cover()?;
                     }
                     host.set_sleeping(false)?;
                     self.phase = Phase::Resuming {

@@ -135,7 +135,20 @@ impl Drop for Fixture {
 fn deliver_cover(app: &mut App, id: &str) -> Result<()> {
     let mut image = std::io::Cursor::new(Vec::new());
     image::DynamicImage::new_rgb8(2, 2).write_to(&mut image, image::ImageFormat::Png)?;
-    app.pending_covers.insert(id.into());
+    let url = app
+        .search_results
+        .iter()
+        .find(|book| book.id == id)
+        .map(|book| book.cover_url.clone())
+        .or_else(|| {
+            app.store
+                .book_metadata_by_id(id)
+                .ok()
+                .flatten()
+                .map(|book| book.cover_url)
+        })
+        .unwrap_or_default();
+    app.register_cover_request(1, id, &url);
     let epoch = app.jobs.account_epoch();
     assert!(!app.handle_job(JobEvent::new(
         1,

@@ -21,7 +21,7 @@ use night_mode::{ModeIo, ModeSnapshot, NightModeState};
 /// Which MXCFB update ioctl this kernel accepts, varies with the Kindle model
 ///
 //We probe on first refresh and remember the winner instead of retrying the failing ioctl every frame.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum UpdateVariant {
     /// `MXCFB_SEND_UPDATE` — 72-byte struct, older devices.
     Legacy,
@@ -42,6 +42,13 @@ impl UpdateVariant {
     const PROBE_ORDER: [UpdateVariant; 4] = [Self::Legacy, Self::Rex, Self::Zelda, Self::Mtk];
 }
 
+enum PackedUpdateRequest {
+    Legacy(UpdateRequest),
+    Rex(UpdateRequestRex),
+    Zelda(UpdateRequestZelda),
+    Mtk(UpdateRequestMtk),
+}
+
 /// Memory-mapped handle to the Kindle's e-ink framebuffer.
 ///
 /// Pixel format is 8-bit grayscale (one byte per pixel) on most models, or
@@ -60,6 +67,10 @@ pub(crate) struct Framebuffer {
     /// The update ioctl variant this kernel accepts, cached after the first
     /// successful refresh. `None` until then.
     update_variant: Cell<Option<UpdateVariant>>,
+    /// Failed attempts consume their identity too; no update marker is reused.
+    last_issued_marker: Cell<u32>,
+    last_submitted_marker: Cell<Option<u32>>,
+    last_completed_marker: Cell<Option<u32>>,
     night_mode: NightModeState,
 }
 
@@ -143,6 +154,9 @@ impl Framebuffer {
             stride,
             bytes_per_pixel,
             update_variant: Cell::new(None),
+            last_issued_marker: Cell::new(0),
+            last_submitted_marker: Cell::new(None),
+            last_completed_marker: Cell::new(None),
             night_mode: NightModeState::new(snapshot, enabled),
         })
     }
@@ -245,12 +259,24 @@ impl Framebuffer {
     }
 
     fn send_update_checked(&self, region: UpdateRect, waveform: u32, mode: u32) -> bool {
-        match self.update_variant.get() {
-            Some(variant) => self.send_update_variant(variant, region, waveform, mode),
+        self.submit_update_with(|variant, marker| {
+            self.send_update_variant(variant, region, waveform, mode, marker)
+        })
+    }
+
+    fn submit_update_with(&self, mut send: impl FnMut(UpdateVariant, u32) -> bool) -> bool {
+        let Some(marker) = self.last_issued_marker.get().checked_add(1) else {
+            return false;
+        };
+        // Consume failed identities as well. A later successful update cannot
+        // accidentally reuse a marker from an uncertain rejected request.
+        self.last_issued_marker.set(marker);
+        let accepted = match self.update_variant.get() {
+            Some(variant) => send(variant, marker),
             None => {
                 let accepted = UpdateVariant::PROBE_ORDER
                     .into_iter()
-                    .find(|&variant| self.send_update_variant(variant, region, waveform, mode));
+                    .find(|&variant| send(variant, marker));
                 if accepted.is_none() {
                     log::error!(
                         "EPDC refresh failed: no known MXCFB_SEND_UPDATE variant \
@@ -261,7 +287,11 @@ impl Framebuffer {
                     .set(Some(accepted.unwrap_or(UpdateVariant::Unsupported)));
                 accepted.is_some()
             }
+        };
+        if accepted {
+            self.last_submitted_marker.set(Some(marker));
         }
+        accepted
     }
 
     /// Issue one specific update ioctl variant. Returns whether it succeeded.
@@ -271,13 +301,70 @@ impl Framebuffer {
         region: UpdateRect,
         waveform: u32,
         mode: u32,
+        marker: u32,
     ) -> bool {
+        match self.pack_update_request(variant, region, waveform, mode, marker) {
+            Some(PackedUpdateRequest::Legacy(update)) => {
+                self.send_update_ioctl(MXCFB_SEND_UPDATE, &update)
+            }
+            Some(PackedUpdateRequest::Rex(update)) => {
+                self.send_update_ioctl(MXCFB_SEND_UPDATE_REX, &update)
+            }
+            Some(PackedUpdateRequest::Zelda(update)) => {
+                self.send_update_ioctl(MXCFB_SEND_UPDATE_ZELDA, &update)
+            }
+            Some(PackedUpdateRequest::Mtk(update)) => {
+                self.send_update_ioctl(MXCFB_SEND_UPDATE_MTK, &update)
+            }
+            None => false,
+        }
+    }
+
+    fn pack_update_request(
+        &self,
+        variant: UpdateVariant,
+        region: UpdateRect,
+        waveform: u32,
+        mode: u32,
+        marker: u32,
+    ) -> Option<PackedUpdateRequest> {
+        let flags = if waveform == WAVEFORM_MODE_DU {
+            EPDC_FLAG_FORCE_MONOCHROME
+        } else {
+            0
+        };
         match variant {
-            UpdateVariant::Legacy => self.send_update_legacy(region, waveform, mode),
-            UpdateVariant::Rex => self.send_update_rex(region, waveform, mode),
-            UpdateVariant::Zelda => self.send_update_zelda(region, waveform, mode),
-            UpdateVariant::Mtk => self.send_update_mtk(region, waveform, mode),
-            UpdateVariant::Unsupported => false,
+            UpdateVariant::Legacy => Some(PackedUpdateRequest::Legacy(UpdateRequest {
+                update_region: region,
+                waveform_mode: waveform,
+                update_mode: mode,
+                update_marker: marker,
+                temperature: TEMP_USE_AMBIENT,
+                flags,
+                ..Default::default()
+            })),
+            UpdateVariant::Rex => Some(PackedUpdateRequest::Rex(UpdateRequestRex {
+                update_region: region,
+                waveform_mode: waveform,
+                update_mode: mode,
+                update_marker: marker,
+                temperature: TEMP_USE_AMBIENT,
+                flags,
+                ..Default::default()
+            })),
+            UpdateVariant::Zelda => Some(PackedUpdateRequest::Zelda(UpdateRequestZelda {
+                update_region: region,
+                waveform_mode: waveform,
+                update_mode: mode,
+                update_marker: marker,
+                temperature: TEMP_USE_AMBIENT,
+                flags,
+                ..Default::default()
+            })),
+            UpdateVariant::Mtk => Some(PackedUpdateRequest::Mtk(
+                self.mtk_update_request(region, waveform, mode, marker),
+            )),
+            UpdateVariant::Unsupported => None,
         }
     }
 
@@ -288,52 +375,13 @@ impl Framebuffer {
         unsafe { libc::ioctl(self.file.as_raw_fd(), request as _, update as *const _) != -1 }
     }
 
-    /// Issue the legacy `MXCFB_SEND_UPDATE` (72-byte struct). Returns whether the
-    /// ioctl succeeded.
-    fn send_update_legacy(&self, region: UpdateRect, waveform: u32, mode: u32) -> bool {
-        let update = UpdateRequest {
-            update_region: region,
-            waveform_mode: waveform,
-            update_mode: mode,
-            update_marker: 1,
-            temperature: TEMP_USE_AMBIENT,
-            flags: if waveform == WAVEFORM_MODE_DU {
-                EPDC_FLAG_FORCE_MONOCHROME
-            } else {
-                0
-            },
-            ..Default::default()
-        };
-        self.send_update_ioctl(MXCFB_SEND_UPDATE, &update)
-    }
-
-    /// Issue the modern `MXCFB_SEND_UPDATE_REX` (80-byte struct). Returns whether
-    /// the ioctl succeeded.
-    fn send_update_rex(&self, region: UpdateRect, waveform: u32, mode: u32) -> bool {
-        let update = UpdateRequestRex {
-            update_region: region,
-            waveform_mode: waveform,
-            update_mode: mode,
-            update_marker: 1,
-            temperature: TEMP_USE_AMBIENT,
-            flags: if waveform == WAVEFORM_MODE_DU {
-                EPDC_FLAG_FORCE_MONOCHROME
-            } else {
-                0
-            },
-            ..Default::default()
-        };
-        self.send_update_ioctl(MXCFB_SEND_UPDATE_REX, &update)
-    }
-
-    /// Issue `MXCFB_SEND_UPDATE_MTK` (96-byte struct, MediaTek devices).
-    /// Returns whether the ioctl succeeded.
-    fn send_update_mtk(&self, region: UpdateRect, waveform: u32, mode: u32) -> bool {
-        let update = self.mtk_update_request(region, waveform, mode);
-        self.send_update_ioctl(MXCFB_SEND_UPDATE_MTK, &update)
-    }
-
-    fn mtk_update_request(&self, region: UpdateRect, waveform: u32, mode: u32) -> UpdateRequestMtk {
+    fn mtk_update_request(
+        &self,
+        region: UpdateRect,
+        waveform: u32,
+        mode: u32,
+        marker: u32,
+    ) -> UpdateRequestMtk {
         // Map at final packing so the uncached first MTK probe uses GCK16 too.
         // Global grayscale inversion is already active; no EPDC inversion flag is added.
         // https://github.com/koreader/koreader-base/blob/1c9682506757d5fd30cfa01c5698929dcc35340f/ffi/framebuffer_mxcfb.lua#L433-L455
@@ -349,7 +397,7 @@ impl Framebuffer {
             update_region: region,
             waveform_mode: waveform,
             update_mode: mode,
-            update_marker: 1,
+            update_marker: marker,
             temperature: TEMP_USE_AMBIENT,
             flags: if waveform == WAVEFORM_MODE_DU {
                 EPDC_FLAG_FORCE_MONOCHROME
@@ -358,25 +406,6 @@ impl Framebuffer {
             },
             ..Default::default()
         }
-    }
-
-    /// Issue `MXCFB_SEND_UPDATE_ZELDA` (88-byte struct, KOA2/KOA3 — Oasis 2/3).
-    /// Returns whether the ioctl succeeded.
-    fn send_update_zelda(&self, region: UpdateRect, waveform: u32, mode: u32) -> bool {
-        let update = UpdateRequestZelda {
-            update_region: region,
-            waveform_mode: waveform,
-            update_mode: mode,
-            update_marker: 1,
-            temperature: TEMP_USE_AMBIENT,
-            flags: if waveform == WAVEFORM_MODE_DU {
-                EPDC_FLAG_FORCE_MONOCHROME
-            } else {
-                0
-            },
-            ..Default::default()
-        };
-        self.send_update_ioctl(MXCFB_SEND_UPDATE_ZELDA, &update)
     }
 
     /// Apply a request resolved against the current framebuffer bounds.
@@ -419,9 +448,14 @@ impl Framebuffer {
         );
     }
 
-    /// Require acceptance of the full-frame update before a resident wake is acknowledged.
+    /// Require acceptance of a full-frame presentation or resident wake update.
     /// This does not add an unbounded update-completion wait to the power handshake.
     pub(crate) fn refresh_full_checked(&self) -> std::io::Result<()> {
+        if self.last_issued_marker.get() == u32::MAX {
+            return Err(std::io::Error::other(
+                "the EPDC update marker sequence is exhausted",
+            ));
+        }
         if self.send_update_checked(
             UpdateRect {
                 top: 0,
@@ -435,27 +469,66 @@ impl Framebuffer {
             Ok(())
         } else {
             Err(std::io::Error::other(
-                "the EPDC rejected the full-frame wake update",
+                "the EPDC rejected the full-frame update",
             ))
         }
     }
 
-    /// Block until the EPDC has applied the last update (marker 1).
+    /// Block until the EPDC has applied the latest successfully submitted update.
     ///
     /// Used before suspending to RAM so the panel doesn't latch mid-refresh.
     /// Best-effort: a failing ioctl is ignored, since this is purely defensive.
     pub(crate) fn wait_for_update_complete(&self) {
+        let _ = self.wait_for_update_complete_checked();
+    }
+
+    /// Require completion evidence before acknowledging a sleep presentation.
+    pub(crate) fn wait_for_update_complete_checked(&self) -> std::io::Result<()> {
+        self.wait_for_update_complete_with(|marker| {
+            // SAFETY: the framebuffer descriptor is live and marker has the ABI
+            // expected by MXCFB_WAIT_FOR_UPDATE_COMPLETE for this synchronous call.
+            let result = unsafe {
+                libc::ioctl(
+                    self.file.as_raw_fd(),
+                    MXCFB_WAIT_FOR_UPDATE_COMPLETE as _,
+                    marker as *mut _,
+                )
+            };
+            if result < 0 {
+                Err(std::io::Error::last_os_error())
+            } else {
+                Ok(())
+            }
+        })
+    }
+
+    /// Keep a preceding asynchronous update from reading a rewritten framebuffer.
+    /// With no submitted update there is no preceding DMA operation to await.
+    pub(crate) fn wait_for_pending_update_complete_checked(&self) -> std::io::Result<()> {
+        if self.last_submitted_marker.get().is_none() {
+            return Ok(());
+        }
+        self.wait_for_update_complete_checked()
+    }
+
+    fn wait_for_update_complete_with(
+        &self,
+        wait: impl FnOnce(&mut UpdateMarkerData) -> std::io::Result<()>,
+    ) -> std::io::Result<()> {
+        let submitted = self
+            .last_submitted_marker
+            .get()
+            .ok_or_else(|| std::io::Error::other("no EPDC update was successfully submitted"))?;
+        if self.last_completed_marker.get() == Some(submitted) {
+            return Ok(());
+        }
         let mut marker = UpdateMarkerData {
-            update_marker: 1,
+            update_marker: submitted,
             collision_test: 0,
         };
-        unsafe {
-            libc::ioctl(
-                self.file.as_raw_fd(),
-                MXCFB_WAIT_FOR_UPDATE_COMPLETE as _,
-                &mut marker as *mut _,
-            );
-        }
+        wait(&mut marker)?;
+        self.last_completed_marker.set(Some(submitted));
+        Ok(())
     }
 
     /// Partial refresh of a dirty rectangle
@@ -592,6 +665,9 @@ mod tests {
             stride: 2,
             bytes_per_pixel: 1,
             update_variant: Cell::new(None),
+            last_issued_marker: Cell::new(0),
+            last_submitted_marker: Cell::new(None),
+            last_completed_marker: Cell::new(None),
             night_mode,
         }
     }
@@ -632,6 +708,178 @@ mod tests {
     }
 
     #[test]
+    fn a_rejected_completion_ioctl_cannot_confirm_a_sleep_frame() {
+        let framebuffer = update_test_framebuffer(observed_night_mode(1, false, false));
+        framebuffer.last_submitted_marker.set(Some(7));
+        assert!(framebuffer.wait_for_update_complete_checked().is_err());
+        framebuffer.wait_for_update_complete();
+    }
+
+    fn packed_marker(request: PackedUpdateRequest) -> u32 {
+        match request {
+            PackedUpdateRequest::Legacy(update) => update.update_marker,
+            PackedUpdateRequest::Rex(update) => update.update_marker,
+            PackedUpdateRequest::Zelda(update) => update.update_marker,
+            PackedUpdateRequest::Mtk(update) => update.update_marker,
+        }
+    }
+
+    #[test]
+    fn every_driver_waits_for_the_new_frame_instead_of_an_older_completed_marker() {
+        for variant in UpdateVariant::PROBE_ORDER {
+            let framebuffer = update_test_framebuffer(observed_night_mode(1, false, false));
+            framebuffer.update_variant.set(Some(variant));
+            let mut submitted = Vec::new();
+            for mode in [UPDATE_MODE_PARTIAL, UPDATE_MODE_FULL] {
+                assert!(framebuffer.submit_update_with(|driver, marker| {
+                    assert_eq!(driver, variant);
+                    let request = framebuffer
+                        .pack_update_request(
+                            driver,
+                            UpdateRect::default(),
+                            WAVEFORM_MODE_GC16,
+                            mode,
+                            marker,
+                        )
+                        .unwrap();
+                    submitted.push(packed_marker(request));
+                    true
+                }));
+            }
+            assert_eq!(submitted, [1, 2]);
+            let old_completed = submitted[0];
+            assert!(
+                framebuffer
+                    .wait_for_update_complete_with(|record| {
+                        assert_eq!(record.update_marker, submitted[1]);
+                        if record.update_marker == old_completed {
+                            Ok(())
+                        } else {
+                            Err(std::io::Error::from(std::io::ErrorKind::WouldBlock))
+                        }
+                    })
+                    .is_err()
+            );
+            assert_eq!(framebuffer.last_completed_marker.get(), None);
+            framebuffer
+                .wait_for_update_complete_with(|record| {
+                    assert_eq!(record.update_marker, submitted[1]);
+                    Ok(())
+                })
+                .unwrap();
+            assert_eq!(framebuffer.last_completed_marker.get(), Some(submitted[1]));
+        }
+    }
+
+    #[test]
+    fn failed_submissions_preserve_the_last_success_and_never_reuse_the_failed_identity() {
+        let framebuffer = update_test_framebuffer(observed_night_mode(1, false, false));
+        framebuffer.update_variant.set(Some(UpdateVariant::Mtk));
+        assert!(framebuffer.submit_update_with(|_, marker| {
+            assert_eq!(marker, 1);
+            true
+        }));
+        assert!(!framebuffer.submit_update_with(|_, marker| {
+            assert_eq!(marker, 2);
+            false
+        }));
+        assert_eq!(framebuffer.last_submitted_marker.get(), Some(1));
+        assert!(framebuffer.submit_update_with(|_, marker| {
+            assert_eq!(marker, 3);
+            true
+        }));
+        framebuffer
+            .wait_for_update_complete_with(|record| {
+                assert_eq!(record.update_marker, 3);
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn driver_probes_share_one_logical_identity_and_cache_the_first_accepted_abi() {
+        let framebuffer = update_test_framebuffer(observed_night_mode(1, false, false));
+        let mut probes = Vec::new();
+        assert!(framebuffer.submit_update_with(|variant, marker| {
+            probes.push((variant, marker));
+            assert_eq!(framebuffer.last_submitted_marker.get(), None);
+            variant == UpdateVariant::Zelda
+        }));
+        assert_eq!(
+            probes,
+            [
+                (UpdateVariant::Legacy, 1),
+                (UpdateVariant::Rex, 1),
+                (UpdateVariant::Zelda, 1),
+            ]
+        );
+        assert_eq!(framebuffer.last_submitted_marker.get(), Some(1));
+        assert_eq!(framebuffer.update_variant.get(), Some(UpdateVariant::Zelda));
+        assert!(framebuffer.submit_update_with(|variant, marker| {
+            assert_eq!((variant, marker), (UpdateVariant::Zelda, 2));
+            true
+        }));
+        assert_eq!(framebuffer.last_submitted_marker.get(), Some(2));
+    }
+
+    #[test]
+    fn absent_submissions_and_marker_exhaustion_cannot_manufacture_completion() {
+        let framebuffer = update_test_framebuffer(observed_night_mode(1, false, false));
+        assert!(
+            framebuffer
+                .wait_for_update_complete_with(|_| panic!("No update was submitted"))
+                .is_err()
+        );
+        framebuffer
+            .wait_for_pending_update_complete_checked()
+            .unwrap();
+        framebuffer.update_variant.set(Some(UpdateVariant::Mtk));
+        framebuffer.last_issued_marker.set(u32::MAX - 1);
+        assert!(framebuffer.submit_update_with(|_, marker| {
+            assert_eq!(marker, u32::MAX);
+            true
+        }));
+        assert!(!framebuffer.submit_update_with(|_, _| panic!("Markers cannot wrap to zero")));
+        assert_eq!(framebuffer.last_submitted_marker.get(), Some(u32::MAX));
+        assert!(framebuffer.refresh_full_checked().is_err());
+        framebuffer
+            .wait_for_update_complete_with(|record| {
+                assert_eq!(record.update_marker, u32::MAX);
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn only_a_successful_wait_is_cached_and_a_new_frame_requires_new_completion() {
+        let framebuffer = update_test_framebuffer(observed_night_mode(1, false, false));
+        framebuffer.update_variant.set(Some(UpdateVariant::Mtk));
+        assert!(framebuffer.submit_update_with(|_, _| true));
+        assert!(
+            framebuffer
+                .wait_for_update_complete_with(|_| Err(std::io::Error::other("interrupted wait")))
+                .is_err()
+        );
+        assert_eq!(framebuffer.last_completed_marker.get(), None);
+        framebuffer
+            .wait_for_update_complete_with(|record| {
+                assert_eq!(record.update_marker, 1);
+                Ok(())
+            })
+            .unwrap();
+        framebuffer
+            .wait_for_update_complete_with(|_| panic!("A completed marker needs no repeated ioctl"))
+            .unwrap();
+        assert!(framebuffer.submit_update_with(|_, _| true));
+        framebuffer
+            .wait_for_update_complete_with(|record| {
+                assert_eq!(record.update_marker, 2);
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
     fn mtk_night_full_requests_pack_gck16_before_the_driver_probe_is_cached() {
         let framebuffer = update_test_framebuffer(observed_night_mode(1, true, true));
         assert!(framebuffer.update_variant.get().is_none());
@@ -650,6 +898,7 @@ mod tests {
                 },
                 WAVEFORM_MODE_GC16,
                 UPDATE_MODE_FULL,
+                7,
             );
             assert_eq!(request.waveform_mode, 8);
             assert_eq!(request.update_mode, UPDATE_MODE_FULL);
@@ -675,6 +924,7 @@ mod tests {
                 UpdateRect::default(),
                 WAVEFORM_MODE_GC16,
                 UPDATE_MODE_FULL,
+                8,
             );
             assert_eq!(request.waveform_mode, 2);
             assert_eq!(request.flags, 0);
@@ -693,7 +943,7 @@ mod tests {
                 EPDC_FLAG_FORCE_MONOCHROME,
             ),
         ] {
-            let request = framebuffer.mtk_update_request(UpdateRect::default(), waveform, mode);
+            let request = framebuffer.mtk_update_request(UpdateRect::default(), waveform, mode, 9);
             assert_eq!(request.waveform_mode, waveform);
             assert_eq!(request.update_mode, mode);
             assert_eq!(request.flags, flags);

@@ -1,0 +1,68 @@
+import { Theme } from "theme.slint";
+
+export global SleepScreenModel {
+    in-out property <bool> active;
+    in-out property <bool> has-cover;
+    in-out property <image> cover;
+    in-out property <string> title;
+    in-out property <string> author;
+}
+
+export component SleepScreen inherits Rectangle {
+    background: Theme.paper;
+    clip: true;
+
+    if SleepScreenModel.has-cover: Image {
+        width: parent.width;
+        height: parent.height;
+        source: SleepScreenModel.cover;
+        image-fit: contain;
+    }
+
+    if !SleepScreenModel.has-cover: Rectangle {
+        x: parent.width * 0.12;
+        y: parent.height * 0.13;
+        width: parent.width * 0.76;
+        height: parent.height * 0.74;
+        border-width: 2px;
+        border-color: Theme.ink;
+        background: Theme.paper;
+        clip: true;
+
+        Text {
+            x: 24px;
+            y: parent.height * 0.18;
+            width: parent.width - 48px;
+            height: parent.height * 0.42;
+            text: SleepScreenModel.title;
+            color: Theme.ink;
+            font-family: Theme.serif-font;
+            font-size: Theme.scribe ? 40px : 30px;
+            font-weight: 600;
+            wrap: word-wrap;
+            overflow: elide;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+
+        Text {
+            x: 24px;
+            y: parent.height * 0.69;
+            width: parent.width - 48px;
+            height: parent.height * 0.15;
+            text: SleepScreenModel.author;
+            color: Theme.secondary;
+            font-family: Theme.ui-font;
+            font-size: Theme.scribe ? 22px : 18px;
+            wrap: word-wrap;
+            overflow: elide;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
+    TouchArea {
+        width: parent.width;
+        height: parent.height;
+    }
+}

@@ -13,6 +13,7 @@ mod reading;
 mod reporting;
 mod session_persistence;
 mod session_restore;
+mod sleep_screen;
 mod system_settings;
 mod task_wake;
 mod thoughts;
@@ -350,6 +351,7 @@ pub struct App {
     terminal_cleanup_attempted: bool,
     managed_sleep_blocked: bool,
     managed_sleep: managed_sleep::ManagedSleep,
+    sleep_screen: sleep_screen::SleepScreenState,
     resident_lifecycle: managed_lifecycle::ResidentLifecycle,
     lighting: lighting::LightingState,
     store: Store,
@@ -437,7 +439,8 @@ pub struct App {
     pending_catalog_downloads: BTreeSet<String>,
     pending_catalog_images: BTreeMap<String, bool>,
     pending_covers: BTreeSet<String>,
-    cover_ui_changes: BTreeSet<String>,
+    pending_cover_requests: BTreeMap<String, backend::CoverRequestContext>,
+    cover_ui_changes: BTreeMap<String, PathBuf>,
     deferred_cover_refill: Option<Route>,
     pending_articles: BTreeSet<String>,
     pending_article_requests: BTreeMap<String, u64>,
@@ -536,6 +539,7 @@ impl App {
             terminal_cleanup_attempted: false,
             managed_sleep_blocked: false,
             managed_sleep: managed_sleep::ManagedSleep::default(),
+            sleep_screen: sleep_screen::SleepScreenState::default(),
             resident_lifecycle: managed_lifecycle::ResidentLifecycle::default(),
             lighting: lighting::LightingState::default(),
             store,
@@ -680,7 +684,8 @@ impl App {
             pending_catalog_downloads: BTreeSet::new(),
             pending_catalog_images: BTreeMap::new(),
             pending_covers: BTreeSet::new(),
-            cover_ui_changes: BTreeSet::new(),
+            pending_cover_requests: BTreeMap::new(),
+            cover_ui_changes: BTreeMap::new(),
             deferred_cover_refill: None,
             pending_articles: BTreeSet::new(),
             pending_article_requests: BTreeMap::new(),
@@ -1075,6 +1080,7 @@ impl App {
     }
 
     pub(super) fn invalidate_account_work(&mut self) -> Result<()> {
+        self.clear_prepared_sleep_screen();
         self.clear_article_image_work();
         self.interrupt_read_reports()?;
         if let Some(mut task) = self.current_download.take() {
@@ -1087,9 +1093,7 @@ impl App {
         self.download_notice = None;
         self.download_ui_changes.clear();
         self.retire_task_wake_guard();
-        self.pending_covers.clear();
-        self.cover_ui_changes.clear();
-        self.deferred_cover_refill = None;
+        self.clear_pending_cover_requests();
         self.pending_articles.clear();
         self.pending_article_requests.clear();
         self.pending_article_images.clear();
@@ -1474,9 +1478,12 @@ impl App {
     fn render(&mut self) -> Result<()> {
         if !matches!(
             self.route,
-            Route::Library | Route::Search | Route::Detail(_)
+            Route::Library | Route::Search | Route::Detail(_) | Route::Reader(..)
         ) {
             self.deferred_cover_refill = None;
+        }
+        if self.current_sleep_book_id().is_none() {
+            self.clear_prepared_sleep_screen();
         }
         let Some(ui) = self.ui.upgrade() else {
             return Ok(());

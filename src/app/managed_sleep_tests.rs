@@ -17,6 +17,11 @@ struct Host {
     native_base_fails: bool,
     observes_native_output_on_resume: bool,
     portrait_observations: RefCell<Vec<crate::platform::NativePortraitCalibration>>,
+    cover_enabled: bool,
+    presentation_token: Cell<u64>,
+    presented_token: Cell<u64>,
+    presentation_fails: bool,
+    hide_cover_fails: bool,
 }
 
 impl Default for Host {
@@ -33,6 +38,11 @@ impl Default for Host {
             native_base_fails: false,
             observes_native_output_on_resume: false,
             portrait_observations: RefCell::new(Vec::new()),
+            cover_enabled: true,
+            presentation_token: Cell::new(0),
+            presented_token: Cell::new(0),
+            presentation_fails: false,
+            hide_cover_fails: false,
         }
     }
 }
@@ -58,6 +68,30 @@ impl ManagedSleepHost for Host {
         } else {
             ManagedSleepState::Resuming
         });
+        Ok(())
+    }
+    fn cover_enabled(&self) -> bool {
+        self.cover_enabled
+    }
+    fn present_cover(&mut self) -> Result<u64> {
+        self.events.borrow_mut().push("present_cover");
+        ensure!(
+            !self.presentation_fails,
+            "The synthetic presentation failed"
+        );
+        let token = self.presentation_token.get() + 1;
+        self.presentation_token.set(token);
+        Ok(token)
+    }
+    fn cover_presented(&self, token: u64) -> Result<bool> {
+        Ok(self.presented_token.get() == token)
+    }
+    fn hide_cover(&mut self) -> Result<()> {
+        self.events.borrow_mut().push("hide_cover");
+        ensure!(
+            !self.hide_cover_fails,
+            "The synthetic cover could not close"
+        );
         Ok(())
     }
     fn native_base(&self) -> Option<bool> {
@@ -138,6 +172,8 @@ impl Fixture {
     fn request_sleep(&mut self, cycle: u64) -> Result<()> {
         for name in [
             "managed-sleep-ready",
+            "managed-cover-request",
+            "managed-cover-ready",
             "managed-wake-ready",
             "managed-wake-request",
             "resume-ready",
@@ -198,6 +234,230 @@ fn write_private(path: &Path, value: &str) -> Result<()> {
         options.mode(0o600);
     }
     options.open(path)?.write_all(value.as_bytes())?;
+    Ok(())
+}
+
+#[test]
+fn cover_reaches_the_panel_before_persistence_and_closes_before_the_first_wake_frame() -> Result<()>
+{
+    let mut fixture = Fixture::new()?;
+    for cycle in [1, 2] {
+        fixture.host.events.borrow_mut().clear();
+        fixture.request_sleep(cycle)?;
+        fixture
+            .context()
+            .write_managed_cycle(ManagedMarker::CoverRequest, cycle)?;
+        assert!(fixture.poll(true, false)?);
+        assert_eq!(&*fixture.host.events.borrow(), &["present_cover"]);
+        assert_eq!(fixture.host.state.get(), ManagedSleepState::Running);
+        assert!(fixture.poll(false, false)?);
+        assert_eq!(&*fixture.host.events.borrow(), &["present_cover"]);
+        assert!(!fixture.context().matches("resume-ready")?);
+        assert_eq!(
+            fixture.context().managed_cycle(ManagedMarker::CoverReady)?,
+            None
+        );
+
+        fixture
+            .host
+            .presented_token
+            .set(fixture.host.presentation_token.get());
+        assert!(fixture.poll(false, false)?);
+        assert_eq!(
+            &*fixture.host.events.borrow(),
+            &["present_cover", "prepare", "request_sleep"]
+        );
+        assert_eq!(
+            fixture.context().managed_cycle(ManagedMarker::CoverReady)?,
+            None
+        );
+        fixture.host.state.set(ManagedSleepState::Suspended);
+        assert!(fixture.poll(false, false)?);
+        assert_eq!(
+            fixture.context().managed_cycle(ManagedMarker::CoverReady)?,
+            Some(cycle)
+        );
+        assert_eq!(
+            fixture.context().managed_cycle(ManagedMarker::SleepReady)?,
+            Some(cycle)
+        );
+        assert!(fixture.context().matches("resume-ready")?);
+
+        fixture.request_wake(cycle)?;
+        assert!(fixture.poll(false, true)?);
+        assert_eq!(
+            &*fixture.host.events.borrow(),
+            &[
+                "present_cover",
+                "prepare",
+                "request_sleep",
+                "hide_cover",
+                "request_wake"
+            ]
+        );
+        fixture.host.state.set(ManagedSleepState::Running);
+        assert!(!fixture.poll(false, false)?);
+        assert_eq!(
+            fixture.context().managed_cycle(ManagedMarker::WakeReady)?,
+            Some(cycle)
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn disabled_cover_and_foreign_cover_requests_keep_the_stock_sleep_protocol() -> Result<()> {
+    for request in [
+        None,
+        Some("7:ffffffffffffffffffffffffffffffff:1"),
+        Some("7:0123456789abcdef0123456789abcdef:2"),
+    ] {
+        let mut fixture = Fixture::new()?;
+        fixture.request_sleep(1)?;
+        if let Some(value) = request {
+            write_private(&fixture.path("managed-cover-request"), value)?;
+        }
+        assert!(fixture.poll(true, false)?);
+        assert_eq!(
+            &*fixture.host.events.borrow(),
+            &["prepare", "request_sleep"]
+        );
+    }
+    let mut fixture = Fixture::new()?;
+    fixture.request_sleep(1)?;
+    fixture
+        .context()
+        .write_managed_cycle(ManagedMarker::CoverRequest, 1)?;
+    fixture.host.cover_enabled = false;
+    assert!(fixture.poll(true, false)?);
+    assert_eq!(
+        &*fixture.host.events.borrow(),
+        &["prepare", "request_sleep"]
+    );
+    Ok(())
+}
+
+#[test]
+fn a_failed_or_timed_out_presentation_never_saves_or_acknowledges_sleep() -> Result<()> {
+    for fails_immediately in [false, true] {
+        let mut fixture = Fixture::new()?;
+        fixture.request_sleep(1)?;
+        fixture
+            .context()
+            .write_managed_cycle(ManagedMarker::CoverRequest, 1)?;
+        fixture.host.presentation_fails = fails_immediately;
+        if fails_immediately {
+            assert!(fixture.poll(true, false).is_err());
+        } else {
+            assert!(fixture.poll(true, false)?);
+            fixture.now += PRESENTATION_TIMEOUT;
+            assert!(fixture.poll(false, false).is_err());
+        }
+        assert_eq!(&*fixture.host.events.borrow(), &["present_cover"]);
+        assert_eq!(
+            fixture.context().managed_cycle(ManagedMarker::CoverReady)?,
+            None
+        );
+        assert_eq!(
+            fixture.context().managed_cycle(ManagedMarker::SleepReady)?,
+            None
+        );
+        assert!(!fixture.context().matches("resume-ready")?);
+    }
+    Ok(())
+}
+
+#[test]
+fn replaced_cover_intent_cannot_turn_a_late_frame_into_a_sleep_acknowledgement() -> Result<()> {
+    for replace_before_prepare in [false, true] {
+        let mut fixture = Fixture::new()?;
+        fixture.request_sleep(1)?;
+        fixture
+            .context()
+            .write_managed_cycle(ManagedMarker::CoverRequest, 1)?;
+        assert!(fixture.poll(true, false)?);
+        fixture.host.presented_token.set(1);
+        if !replace_before_prepare {
+            assert!(fixture.poll(false, false)?);
+            fixture.host.state.set(ManagedSleepState::Suspended);
+        }
+        fixture
+            .context()
+            .write_managed_cycle(ManagedMarker::CoverRequest, 2)?;
+        assert!(fixture.poll(false, false).is_err());
+        assert_eq!(
+            fixture.context().managed_cycle(ManagedMarker::CoverReady)?,
+            None
+        );
+        assert_eq!(
+            fixture.context().managed_cycle(ManagedMarker::SleepReady)?,
+            None
+        );
+        assert!(!fixture.context().matches("resume-ready")?);
+    }
+    Ok(())
+}
+
+#[test]
+fn a_cover_that_cannot_close_must_not_release_the_wake_frame_gate() -> Result<()> {
+    let mut fixture = Fixture::new()?;
+    fixture.request_sleep(1)?;
+    fixture
+        .context()
+        .write_managed_cycle(ManagedMarker::CoverRequest, 1)?;
+    assert!(fixture.poll(true, false)?);
+    fixture.host.presented_token.set(1);
+    assert!(fixture.poll(false, false)?);
+    fixture.host.state.set(ManagedSleepState::Suspended);
+    assert!(fixture.poll(false, false)?);
+    fixture.host.hide_cover_fails = true;
+    fixture.request_wake(1)?;
+    assert!(fixture.poll(false, true).is_err());
+    assert_eq!(fixture.host.state.get(), ManagedSleepState::Suspended);
+    assert!(!fixture.host.events.borrow().contains(&"request_wake"));
+    assert_eq!(
+        fixture.context().managed_cycle(ManagedMarker::WakeReady)?,
+        None
+    );
+    Ok(())
+}
+
+#[test]
+fn cover_acknowledgements_require_both_current_cover_and_sleep_intents() -> Result<()> {
+    let fixture = Fixture::new()?;
+    assert!(
+        fixture
+            .context()
+            .write_managed_cycle(ManagedMarker::CoverReady, 1)
+            .is_err()
+    );
+    fixture
+        .context()
+        .write_managed_cycle(ManagedMarker::CoverRequest, 1)?;
+    assert!(
+        fixture
+            .context()
+            .write_managed_cycle(ManagedMarker::CoverReady, 1)
+            .is_err()
+    );
+    fixture
+        .context()
+        .write_managed_cycle(ManagedMarker::SleepRequest, 1)?;
+    fixture.context().write("sleep-request")?;
+    fixture
+        .context()
+        .write_managed_cycle(ManagedMarker::CoverReady, 1)?;
+    assert_eq!(
+        fixture.context().managed_cycle(ManagedMarker::CoverReady)?,
+        Some(1)
+    );
+    fixture.context().write("ordinary-exit")?;
+    assert!(
+        fixture
+            .context()
+            .write_managed_cycle(ManagedMarker::CoverReady, 1)
+            .is_err()
+    );
     Ok(())
 }
 

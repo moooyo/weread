@@ -213,7 +213,9 @@ fn png_bytes() -> Result<Vec<u8>> {
 }
 
 fn cover_access_spy(state: &mut App) -> Result<rusqlite::Connection> {
-    state.cache.put_png("cover:fixture-book", &png_bytes()?)?;
+    let book = state.store.book_metadata_by_id("fixture-book")?.unwrap();
+    let key = sleep_screen::thumbnail_key(&book.id, &book.cover_url).unwrap();
+    state.cache.put_png(&key, &png_bytes()?)?;
     state.render()?;
     let connection = rusqlite::Connection::open(state.cache.root().join("cache-index.sqlite3"))?;
     connection.execute_batch(

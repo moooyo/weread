@@ -24,6 +24,7 @@ use crate::refresh::{PendingRefresh, PhysicalRect, RefreshHandle};
 use crate::render_control::{
     GrayMode, GrayRenderer, NightModeConfig, NightModeControl, RenderHandle,
 };
+use crate::sleep_presentation::SleepPresentationControl;
 use crate::touch::{TouchInput, TransitionDrain, has_accelerometer};
 use crate::wakeup::{self, KindleEventLoopProxy, Queue, Wakeup};
 use crate::{OnWakeCallback, WakeSchedule};
@@ -45,6 +46,7 @@ pub(crate) struct KindlePlatform {
     black_and_white: Arc<AtomicBool>,
     night_mode: Arc<NightModeControl>,
     managed_sleep: Arc<ManagedSleepControl>,
+    sleep_presentation: Arc<SleepPresentationControl>,
     rotation: Arc<AtomicU32>,
     native_orientation: Arc<Mutex<OrientationRequest>>,
     initialized: Arc<AtomicBool>,
@@ -72,6 +74,7 @@ impl KindlePlatform {
             black_and_white,
             night_mode: Arc::new(NightModeControl::default()),
             managed_sleep: Arc::new(ManagedSleepControl::default()),
+            sleep_presentation: Arc::new(SleepPresentationControl::default()),
             rotation,
             native_orientation: Arc::new(Mutex::new(OrientationRequest::default())),
             initialized: Arc::new(AtomicBool::new(false)),
@@ -92,6 +95,7 @@ impl KindlePlatform {
         RenderHandle {
             night_mode: self.night_mode.clone(),
             managed_sleep: self.managed_sleep.clone(),
+            sleep_presentation: self.sleep_presentation.clone(),
             wake: self.wakeup.write.clone(),
             quit: self.quit_flag.clone(),
         }
@@ -112,6 +116,12 @@ impl KindlePlatform {
             dark_mode: software_inverse,
             black_and_white: self.black_and_white.load(Ordering::Relaxed),
         }
+    }
+
+    fn pending_sleep_presentation(&self) -> Result<Option<u64>, PlatformError> {
+        self.sleep_presentation
+            .pending()
+            .map_err(|error| PlatformError::Other(format!("sleep presentation failed: {error}")))
     }
 
     /// Suspend the device to RAM once it's been idle for `stay_awake` with no
@@ -216,14 +226,23 @@ impl Platform for KindlePlatform {
     }
 
     fn run_event_loop(&self) -> Result<(), PlatformError> {
-        struct QuitOnExit(Arc<AtomicBool>, Arc<ManagedSleepControl>);
+        struct QuitOnExit(
+            Arc<AtomicBool>,
+            Arc<ManagedSleepControl>,
+            Arc<SleepPresentationControl>,
+        );
         impl Drop for QuitOnExit {
             fn drop(&mut self) {
                 self.0.store(true, Ordering::SeqCst);
                 self.1.terminate();
+                self.2.terminate();
             }
         }
-        let _quit_on_exit = QuitOnExit(self.quit_flag.clone(), self.managed_sleep.clone());
+        let _quit_on_exit = QuitOnExit(
+            self.quit_flag.clone(),
+            self.managed_sleep.clone(),
+            self.sleep_presentation.clone(),
+        );
         self.initialized.store(true, Ordering::Release);
         let night_mode_config = self.night_mode.lock_configuration();
         let mut frame_buffer = Framebuffer::open_with_hardware_inversion(
@@ -318,6 +337,7 @@ impl Platform for KindlePlatform {
                 && !restore_full_frame
                 && !presentation_barrier
                 && !post_frame_input.waiting
+                && self.pending_sleep_presentation()?.is_none()
                 && self.suspend_if_idle(
                     &frame_buffer,
                     wakealarm.as_deref(),
@@ -336,7 +356,9 @@ impl Platform for KindlePlatform {
                 continue;
             }
 
-            let timeout_ms: libc::c_int = if (restore_full_frame || presentation_barrier)
+            let timeout_ms: libc::c_int = if (restore_full_frame
+                || presentation_barrier
+                || self.pending_sleep_presentation()?.is_some())
                 && !portrait.input_gated()
                 && !self.managed_sleep.requested()
             {
@@ -504,6 +526,7 @@ impl Platform for KindlePlatform {
                 && !post_frame_input.waiting
                 && !portrait.input_gated()
                 && !self.managed_sleep.requested()
+                && self.pending_sleep_presentation()?.is_none()
                 && polled_input_generation == input_generation
                 && file_descriptors[0].revents & libc::POLLIN != 0
             {
@@ -536,6 +559,17 @@ impl Platform for KindlePlatform {
             if portrait.input_gated() {
                 continue;
             }
+            // Capture after application callbacks, before this draw. A request
+            // made while rendering cannot be acknowledged by the older frame.
+            let sleep_presentation_token = self.pending_sleep_presentation()?;
+            if sleep_presentation_token.is_some() && !presentation_barrier {
+                begin_presentation_transition(
+                    &mut touch_input,
+                    &mut input_generation,
+                    &self.window,
+                )?;
+                presentation_barrier = true;
+            }
             let night_mode = frame_buffer
                 .apply_night_mode(self.night_mode.desired())
                 .map_err(|error| {
@@ -547,6 +581,7 @@ impl Platform for KindlePlatform {
             let mode_changed = night_mode.changed || output_mode != gray_renderer.mode();
             let force_full = restore_full_frame
                 || presentation_barrier
+                || sleep_presentation_token.is_some()
                 || (post_frame_input.waiting && mode_changed);
             let render_rotation = (applied_rotation + portrait.controller.render_offset()) % 360;
             if force_full {
@@ -568,7 +603,9 @@ impl Platform for KindlePlatform {
                 self.window.request_redraw();
             }
             let mut dirty_region = None;
+            let mut did_render = false;
             self.window.draw_if_needed(|renderer| {
+                did_render = true;
                 renderer.set_rendering_rotation(match render_rotation {
                     90 => RenderingRotation::Rotate90,
                     180 => RenderingRotation::Rotate180,
@@ -591,6 +628,15 @@ impl Platform for KindlePlatform {
                     height: size.height,
                 });
             });
+            if sleep_presentation_token.is_some() {
+                frame_buffer
+                    .wait_for_pending_update_complete_checked()
+                    .map_err(|error| {
+                        PlatformError::Other(format!(
+                            "failed to complete the preceding update before sleep: {error}"
+                        ))
+                    })?;
+            }
             let written = gray_renderer.write_frame(
                 &rgb_buffer,
                 (panel_width, panel_height),
@@ -600,12 +646,22 @@ impl Platform for KindlePlatform {
                 |row, columns, pixels| frame_buffer.write_line(row, columns, pixels),
             );
             if force_full {
-                frame_buffer.refresh_full_checked().map_err(|error| {
-                    PlatformError::Other(format!(
-                        "failed to restore the presentation frame: {error}"
-                    ))
-                })?;
-                frame_buffer.wait_for_update_complete();
+                if let Some(token) = sleep_presentation_token {
+                    finish_sleep_presentation(
+                        &self.sleep_presentation,
+                        token,
+                        did_render,
+                        || frame_buffer.refresh_full_checked(),
+                        || frame_buffer.wait_for_update_complete_checked(),
+                    )?;
+                } else {
+                    frame_buffer.refresh_full_checked().map_err(|error| {
+                        PlatformError::Other(format!(
+                            "failed to restore the presentation frame: {error}"
+                        ))
+                    })?;
+                    frame_buffer.wait_for_update_complete();
+                }
                 let drain = match touch_input.as_mut() {
                     Some(input) => input.finish_presentation_transition().map_err(|error| {
                         PlatformError::Other(format!(
@@ -634,6 +690,35 @@ impl Platform for KindlePlatform {
         }
         Ok(())
     }
+}
+
+/// A pending sleep frame needs stronger completion evidence than an ordinary
+/// best-effort repaint. A queued or unmapped Slint window cannot acknowledge it.
+fn finish_sleep_presentation(
+    control: &SleepPresentationControl,
+    token: u64,
+    did_render: bool,
+    refresh: impl FnOnce() -> io::Result<()>,
+    wait: impl FnOnce() -> io::Result<()>,
+) -> Result<(), PlatformError> {
+    if !did_render {
+        return Err(PlatformError::Other(
+            "the sleep presentation did not render a complete Slint frame".into(),
+        ));
+    }
+    refresh().map_err(|error| {
+        PlatformError::Other(format!("failed to submit the sleep presentation: {error}"))
+    })?;
+    wait().map_err(|error| {
+        PlatformError::Other(format!(
+            "failed to complete the sleep presentation: {error}"
+        ))
+    })?;
+    control.acknowledge(token).map_err(|error| {
+        PlatformError::Other(format!(
+            "failed to acknowledge the sleep presentation: {error}"
+        ))
+    })
 }
 
 /// A written presentation is retained while its cancelled input stream settles.
@@ -1135,6 +1220,9 @@ mod managed_sleep_tests {
         let handle = RenderHandle {
             night_mode: Arc::new(NightModeControl::default()),
             managed_sleep: control.clone(),
+            sleep_presentation: Arc::new(
+                crate::sleep_presentation::SleepPresentationControl::default(),
+            ),
             wake: wake.write,
             quit: Arc::new(AtomicBool::new(false)),
         };
@@ -1304,6 +1392,98 @@ mod managed_sleep_tests {
         assert_eq!(control.state(), ManagedSleepState::Terminated);
         assert_eq!(&*observed.borrow(), &["release-input"]);
         assert!(!control.request(false));
+    }
+}
+
+#[cfg(test)]
+mod sleep_presentation_tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    #[test]
+    fn a_full_sleep_frame_ack_follows_render_update_acceptance_and_completion() {
+        let control = SleepPresentationControl::default();
+        let token = control.request().unwrap();
+        let observed = RefCell::new(Vec::new());
+        finish_sleep_presentation(
+            &control,
+            token,
+            true,
+            || {
+                assert!(!control.completed(token).unwrap());
+                observed.borrow_mut().push("submit-full");
+                Ok(())
+            },
+            || {
+                assert!(!control.completed(token).unwrap());
+                observed.borrow_mut().push("wait-complete");
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(&*observed.borrow(), &["submit-full", "wait-complete"]);
+        assert!(control.completed(token).unwrap());
+    }
+
+    #[test]
+    fn queued_or_failed_sleep_frames_cannot_publish_presentation_success() {
+        let control = SleepPresentationControl::default();
+        let token = control.request().unwrap();
+        assert!(
+            finish_sleep_presentation(
+                &control,
+                token,
+                false,
+                || panic!("An undrawn frame cannot submit an update"),
+                || panic!("An undrawn frame cannot await an update"),
+            )
+            .is_err()
+        );
+        assert!(!control.completed(token).unwrap());
+        assert!(
+            finish_sleep_presentation(
+                &control,
+                token,
+                true,
+                || Err(io::Error::other("synthetic EPDC update rejection")),
+                || panic!("A rejected update cannot be awaited"),
+            )
+            .is_err()
+        );
+        assert!(!control.completed(token).unwrap());
+        assert!(
+            finish_sleep_presentation(
+                &control,
+                token,
+                true,
+                || Ok(()),
+                || Err(io::Error::other("synthetic completion failure")),
+            )
+            .is_err()
+        );
+        assert!(!control.completed(token).unwrap());
+    }
+
+    #[test]
+    fn a_request_issued_during_the_update_needs_its_own_later_full_frame() {
+        let control = SleepPresentationControl::default();
+        let captured = control.request().unwrap();
+        let later = RefCell::new(None);
+        finish_sleep_presentation(
+            &control,
+            captured,
+            true,
+            || {
+                *later.borrow_mut() = Some(control.request().unwrap());
+                Ok(())
+            },
+            || Ok(()),
+        )
+        .unwrap();
+        let later = later.into_inner().unwrap();
+        assert!(control.completed(captured).unwrap());
+        assert!(!control.completed(later).unwrap());
+        assert_eq!(control.pending().unwrap(), Some(later));
     }
 }
 

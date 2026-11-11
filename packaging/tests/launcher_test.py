@@ -42,6 +42,7 @@ class LauncherLifecycleTests(unittest.TestCase):
         fixture_source = (
             SOURCE.read_text()
             .replace("/etc/prettyversion.txt", str(self.root / "firmware"))
+            .replace("/var/local/system/userpasswdenabled", str(self.root / "passcode-enabled"))
             .replace("/dev/fb0", "/dev/null")
             .replace("/tmp/weread-launcher.lock", str(self.root / "lock"))
         )
@@ -73,6 +74,9 @@ class LauncherLifecycleTests(unittest.TestCase):
             TEST_INITIALIZATION_GENERATION="0",
             TEST_HOLD_UNTIL_GENERATION="0",
             TEST_POWER_STATE="active",
+            TEST_BLANKET_AVAILABLE="0",
+            TEST_BLANKET_MODULES="",
+            TEST_BLANKET_QUERIES=str(self.root / "blanket-queries"),
             TEST_EVENT="",
             TEST_SLEEP="0",
             TEST_NATIVE_KIND="",
@@ -117,6 +121,10 @@ class LauncherLifecycleTests(unittest.TestCase):
             '        printf "%s|%s|%s\\n" "$3" "$visible" "$view" >>"$TEST_NATIVE_QUERIES"\n'
             '        if [ "$3" = activeApp ]; then printf "%s\\n" com.lab126.KPPMainApp; else printf "%s\\n" "$view"; fi ;;\n'
             '    com.lab126.powerd:state) printf "%s\\n" "$TEST_POWER_STATE" ;;\n'
+            '    com.lab126.blanket:load)\n'
+            '        printf "%s\\n" load >>"$TEST_BLANKET_QUERIES"\n'
+            '        [ "$TEST_BLANKET_AVAILABLE" = 1 ] || exit 1\n'
+            '        printf "%s\\n" "$TEST_BLANKET_MODULES" ;;\n'
             '    *) exit 1 ;;\n'
             'esac',
         )
@@ -1179,6 +1187,7 @@ class LauncherLifecycleTests(unittest.TestCase):
             TEST_MANAGED_CAPABILITY="1",
             TEST_MANAGED_PREPARE="ready",
             TEST_MANAGED_WAKE="ready",
+            TEST_MANAGED_COVER="ready",
             TEST_MANAGED_EVENTS=str(self.root / "managed-events"),
             TEST_MANAGED_PIDS=str(self.root / "managed-pids"),
             TEST_NATIVE_THEME_FIXTURE="0",
@@ -1336,6 +1345,21 @@ class LauncherLifecycleTests(unittest.TestCase):
                     elif mode == "stale-cycle" and previous_prepare:
                         value = previous_prepare
                     if mode != "none":
+                        cover_request = read_marker("managed-cover-request")
+                        if cover_request == request:
+                            cover_mode = os.environ["TEST_MANAGED_COVER"]
+                            cover_value = cover_request
+                            if cover_mode == "stale-token":
+                                fields = cover_request.split(":")
+                                fields[1] = ("1" if fields[1][0] == "0" else "0") + fields[1][1:]
+                                cover_value = ":".join(fields)
+                            elif cover_mode == "stale-cycle":
+                                fields = cover_request.split(":")
+                                fields[2] = str(int(fields[2]) - 1)
+                                cover_value = ":".join(fields)
+                            if cover_mode != "none":
+                                marker("managed-cover-ready", cover_value)
+                                record("cover-ready", cover_value)
                         marker("managed-sleep-ready", value)
                         record("sleep-ready", value)
                 if signal.SIGUSR2 in pending:
@@ -1358,6 +1382,46 @@ class LauncherLifecycleTests(unittest.TestCase):
         path = self.home / "app" / "weread"
         path.write_text("#!/usr/bin/env python3\n" + body)
         path.chmod(0o755)
+
+    def cover_sleep_fixture(self, modules="splash screensaver", available=True, with_wm=True, **behavior):
+        self.managed_fixture(**behavior)
+        self.env.update(TEST_BLANKET_AVAILABLE="1" if available else "0",
+                        TEST_BLANKET_MODULES=modules)
+        if not with_wm:
+            return None
+        ready = self.root / "cover-awesome-ready"
+        error = self.root / "cover-awesome.stderr"
+        source = self.root / "cover-awesome.py"
+        source.write_text(textwrap.dedent('''
+            from pathlib import Path
+            import signal
+            import sys
+            import time
+            ready, trace = map(Path, sys.argv[1:])
+            def continued(_number, _frame):
+                with trace.open("a") as output:
+                    output.write("wm:CONT\\n")
+            signal.signal(signal.SIGCONT, continued)
+            ready.touch()
+            while True:
+                time.sleep(0.02)
+        ''').lstrip())
+        with error.open("wb") as output:
+            awesome = subprocess.Popen([sys.executable, str(source), str(ready), self.env["TEST_TRACE"]],
+                                       env=self.env, start_new_session=True,
+                                       stdout=subprocess.DEVNULL, stderr=output)
+
+        def reap():
+            if awesome.poll() is None:
+                awesome.send_signal(signal.SIGCONT)
+                awesome.kill()
+            awesome.wait(timeout=3)
+
+        self.addCleanup(reap)
+        self.wait_for_fixture_process_ready(awesome, ready, error, "cover window manager")
+        self.env["TEST_AWESOME_PID"] = str(awesome.pid)
+        self.script(self.bin / "pidof", '[ "${1:-}" = awesome ] || exit 1\nprintf "%s\\n" "$TEST_AWESOME_PID"')
+        return awesome
 
     def native_dark_fixture(self, mode="Y8", stopped=False, profile="scribe", firmware="5.19.5", **behavior):
         self.managed_fixture()
@@ -2215,6 +2279,195 @@ class LauncherLifecycleTests(unittest.TestCase):
         )
         self.assertEqual(self.managed_pids(), [pid])
         self.assertEqual(self.starts(), ["0"])
+
+    def suspend_cover_application(self, pid):
+        released = self.trace().count("xrefresh:")
+        captured = len(self.frame_guard_events("capture"))
+        self.emit("goingToScreenSaver 2")
+        directory = self.root / "lock"
+        self.wait_until(lambda: self.process_state(pid) == "T"
+                        and (directory / "managed-cover-ready").exists())
+        request = (directory / "managed-sleep-request").read_text().strip()
+        self.assertEqual((directory / "managed-cover-request").read_text().strip(), request)
+        self.assertEqual((directory / "managed-cover-ready").read_text().strip(), request)
+        self.assertEqual((directory / "managed-sleep-ready").read_text().strip(), request)
+        self.assertEqual(self.trace().count("xrefresh:"), released)
+        self.assertEqual(len(self.frame_guard_events("capture")), captured)
+        return request
+
+    def wake_cover_application(self, pid, request):
+        self.emit("outOfScreenSaver 1")
+        ready = self.root / "lock" / "managed-wake-ready"
+        self.wait_until(lambda: ready.exists() and ready.read_text().strip() == request
+                        and self.process_state(pid) not in (None, "T", "Z", "X"))
+        self.assertEqual(self.managed_pids(), [pid])
+        self.assertEqual(self.starts(), ["0"])
+
+    def test_cover_sleep_keeps_native_drawing_paused_and_wakes_without_exiting_event(self):
+        awesome = self.cover_sleep_fixture()
+        requests = []
+
+        def drive(_):
+            pid = self.wait_for_managed_application()
+            self.wait_until(lambda: self.process_state(awesome.pid) == "T")
+            native_events = self.trace().count("start:statusbar"), self.trace().count("xrefresh:"), self.trace().count("wm:CONT")
+            for _cycle in range(2):
+                request = self.suspend_cover_application(pid)
+                requests.append(request)
+                self.assertEqual(self.process_state(awesome.pid), "T")
+                self.wake_cover_application(pid, request)
+                self.assertEqual(self.process_state(awesome.pid), "T")
+                self.assertEqual((self.trace().count("start:statusbar"), self.trace().count("xrefresh:"), self.trace().count("wm:CONT")),
+                                 native_events)
+                self.assertFalse((self.root / "lock" / "managed-native-epdc-mode").exists())
+                self.assertFalse((self.root / "lock" / "managed-native-portrait-calibration").exists())
+            self.assertEqual((self.root / "blanket-queries").read_text().splitlines(), ["load"])
+            self.emit("usbConfigured 1")
+
+        status, _, error = self.run_launcher(drive)
+        self.assertEqual(status, 143, error)
+        self.assertEqual(len(set(requests)), 2)
+        self.assertEqual(self.frame_guard_events("capture"), [])
+        self.assertEqual(self.frame_guard_events("align"), [])
+        self.assertFalse(any(":concurrent:" in row or ":cold-restored:" in row for row in self.managed_events()))
+        self.wait_until(lambda: self.process_state(awesome.pid) not in (None, "T", "Z", "X"))
+        self.assert_frame_guards_reaped(1)
+
+    def test_cover_sleep_handles_a_wake_already_queued_during_preparation(self):
+        self.cover_sleep_fixture()
+
+        def drive(_):
+            pid = self.wait_for_managed_application()
+            self.emit("goingToScreenSaver 2", "outOfScreenSaver 1")
+            directory = self.root / "lock"
+            self.wait_until(lambda: (directory / "managed-wake-ready").exists())
+            request = (directory / "managed-cover-request").read_text().strip()
+            self.assertEqual((directory / "managed-wake-ready").read_text().strip(), request)
+            self.assertNotEqual(self.process_state(pid), "T")
+            self.assertEqual(self.starts(), ["0"])
+            self.assertNotIn("xrefresh:", self.trace())
+            self.emit("usbConfigured 1")
+
+        status, _, error = self.run_launcher(drive)
+        self.assertEqual(status, 143, error)
+        self.assertEqual(self.frame_guard_events("capture"), [])
+        self.assertEqual(self.frame_guard_events("align"), [])
+        self.assertFalse(any(":wake-mismatch:" in row for row in self.managed_events()))
+        self.assert_frame_guards_reaped(1)
+
+    def assert_cover_sleep_stock_fallback(self, **behavior):
+        self.cover_sleep_fixture(**behavior)
+
+        def drive(_):
+            pid = self.wait_for_managed_application()
+            request = self.suspend_managed_application(pid)
+            self.assertFalse((self.root / "lock" / "managed-cover-request").exists())
+            self.wake_managed_application(pid, request)
+            self.emit("usbConfigured 1")
+
+        status, _, error = self.run_launcher(drive)
+        self.assertEqual(status, 143, error)
+        self.assertEqual(len(self.frame_guard_events("capture")), 1)
+        self.assertEqual(len(self.frame_guard_events("align")), 1)
+        self.assert_frame_guards_reaped(1)
+
+    def test_cover_sleep_preserves_the_native_passcode_screen(self):
+        (self.root / "passcode-enabled").touch()
+        self.assert_cover_sleep_stock_fallback()
+
+    def test_cover_sleep_preserves_the_advertising_screensaver(self):
+        self.assert_cover_sleep_stock_fallback(modules="splash ad_screensaver screensaver")
+
+    def test_cover_sleep_uses_stock_when_framework_capability_is_unknown(self):
+        self.assert_cover_sleep_stock_fallback(available=False)
+
+    def test_cover_sleep_rejects_an_empty_framework_module_snapshot(self):
+        self.assert_cover_sleep_stock_fallback(modules="")
+
+    def test_cover_sleep_requires_a_window_manager_it_actually_paused(self):
+        self.assert_cover_sleep_stock_fallback(with_wm=False)
+
+    def assert_cover_ready_stock_fallback(self, mode):
+        self.cover_sleep_fixture(TEST_MANAGED_COVER=mode)
+
+        def drive(_):
+            pid = self.wait_for_managed_application()
+            request = self.suspend_managed_application(pid)
+            cover = self.root / "lock" / "managed-cover-ready"
+            self.assertEqual((self.root / "lock" / "managed-cover-request").read_text().strip(), request)
+            self.assertTrue(not cover.exists() or cover.read_text().strip() != request)
+            self.wake_managed_application(pid, request)
+            self.emit("usbConfigured 1")
+
+        status, _, error = self.run_launcher(drive)
+        self.assertEqual(status, 143, error)
+        self.assertEqual(len(self.frame_guard_events("capture")), 1)
+        self.assertEqual(len(self.frame_guard_events("align")), 1)
+        self.assert_frame_guards_reaped(1)
+
+    def test_cover_sleep_rejects_a_presentation_ready_from_another_nonce(self):
+        self.assert_cover_ready_stock_fallback("stale-token")
+
+    def test_cover_sleep_rejects_a_presentation_ready_from_an_old_cycle(self):
+        self.assert_cover_ready_stock_fallback("stale-cycle")
+
+    def test_cover_sleep_falls_back_when_the_application_never_confirms_the_cover(self):
+        self.assert_cover_ready_stock_fallback("none")
+
+    def test_cover_sleep_prepare_timeout_releases_native_before_cold_recovery(self):
+        self.cover_sleep_fixture(TEST_MANAGED_PREPARE="none")
+
+        def drive(_):
+            pid = self.wait_for_managed_application()
+            self.emit("goingToScreenSaver 2")
+            self.wait_until(lambda: "xrefresh:" in self.trace())
+            self.assertNotEqual(self.process_state(pid), "T")
+            self.emit("outOfScreenSaver 1", "exitingScreenSaver 1")
+
+        status, _, error = self.run_launcher(drive)
+        self.assertEqual(status, 0, error)
+        self.assertEqual(self.starts(), ["0", "1"])
+        self.assertTrue(any(":cold-restored:" in row for row in self.managed_events()))
+        self.assertFalse(any(":wake:" in row for row in self.managed_events()))
+        self.assert_frame_guards_reaped(2)
+
+    def test_cover_sleep_usb_cleanup_reaps_the_stopped_application_and_restores_native(self):
+        awesome = self.cover_sleep_fixture()
+        observed = []
+
+        def drive(_):
+            pid = self.wait_for_managed_application()
+            observed.append(pid)
+            self.suspend_cover_application(pid)
+            self.emit("usbConfigured 1")
+
+        status, _, error = self.run_launcher(drive)
+        self.assertEqual(status, 143, error)
+        self.assertIsNone(self.process_state(observed[0]))
+        self.assertTrue(any(":term:" in row for row in self.managed_events()))
+        self.wait_until(lambda: self.process_state(awesome.pid) not in (None, "T", "Z", "X"))
+        self.assertIn("start:statusbar", self.trace())
+        self.assertIn("xrefresh:", self.trace())
+        self.assert_frame_guards_reaped(1)
+
+    def test_cover_sleep_revokes_display_permission_if_a_passcode_appears_before_wake(self):
+        awesome = self.cover_sleep_fixture()
+        observed = []
+
+        def drive(_):
+            pid = self.wait_for_managed_application()
+            observed.append(pid)
+            self.suspend_cover_application(pid)
+            (self.root / "passcode-enabled").touch()
+            self.emit("outOfScreenSaver 1")
+
+        status, _, error = self.run_launcher(drive)
+        self.assertEqual(status, 1, error)
+        self.assertIsNone(self.process_state(observed[0]))
+        self.assertFalse(any(":wake:" in row for row in self.managed_events()))
+        self.wait_until(lambda: self.process_state(awesome.pid) not in (None, "T", "Z", "X"))
+        self.assertIn("xrefresh:", self.trace())
+        self.assert_frame_guards_reaped(1)
 
     def assert_managed_prepare_fallback(self, mode):
         self.managed_fixture(TEST_MANAGED_PREPARE=mode)

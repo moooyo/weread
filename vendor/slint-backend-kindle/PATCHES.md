@@ -50,6 +50,7 @@ The application adapter maps UI and reading partial requests to AUTO, press feed
 - `src/lib.rs`: public refresh, render-mode, and startup APIs, with handle preservation across backend typestates.
 - `src/platform.rs`: queue wiring, render-mode changes, suspend eligibility, post-render execution, bounded startup orientation queries, and termination state.
 - `src/render_control.rs`: night-mode configuration and requests, native-baseline observation, canonical-buffer conversion, and controlled rendering tests.
+- `src/sleep_presentation.rs`: token-bound completion of the application-owned sleep frame.
 - `src/splash.rs`: an exclusive temporary framebuffer owner for startup text, stages, and low-frequency loading feedback.
 - `src/wakeup.rs`: make the existing pipe nudge usable inside this crate and retry interrupted writes.
 - `src/framebuffer/mod.rs`: execute resolved plans through the existing driver, map driver-specific waveforms, and perform checked framebuffer mode I/O.
@@ -82,6 +83,29 @@ desired state, and failures release input before reporting termination.
 These are project-owned additions. `UPSTREAM_REVISION` and the dependency
 licenses remain unchanged. Controlled regressions and physical Kindle results
 must be recorded separately in the application's verification documents.
+
+## Checked sleep presentation
+
+The application-owned sleep cover uses a separate token/acknowledgement API on
+the render handle. The event loop forces a complete Slint render, submits a
+checked full update, and checks panel completion before acknowledging the token
+captured before that draw. Newer requests cannot be acknowledged by an older
+frame. Native handoff cancels unfinished presentation requests, and event-loop
+termination invalidates all tokens. This stage does not change `powerd`, native
+lock settings, or the existing durable managed-sleep acknowledgement.
+
+Each accepted EPDC submission has its own nonzero update marker. A failed
+submission consumes its attempted marker without replacing the last successful
+one; waits identify that successful submission and cache only confirmed
+completion. Sleep-cover presentation also waits for the preceding update before
+rewriting mapped pixels. This follows the reviewed
+[`koreader-base` marker ordering](https://github.com/koreader/koreader-base/blob/1c9682506757d5fd30cfa01c5698929dcc35340f/ffi/framebuffer_mxcfb.lua#L61-L69).
+
+The application hides its cover before requesting managed resume, so the first
+full wake render uses the retained Reader state. The original native-grayscale
+normalization and input-drain boundaries remain in force. See the application's
+[`docs/SLEEP_COVER.md`](../../../docs/SLEEP_COVER.md) for the pinned KOReader
+comparison and the separate software/device acceptance boundaries.
 
 ## Application-local clipboard
 
@@ -184,8 +208,8 @@ The test retains its `None` result and under-one-second assertion, and checks
 successful direct-shell exit, reaping, and parent reply-pipe release. One small
 identity regression covers wrong birth, parent/group mismatch, and an actually
 exited owned anchor. This is a test-fixture safety correction, with no production
-orientation or deadline change. These changed tests have not been executed;
-verification belongs to the next frozen compilation and complete-suite result.
+orientation or deadline change. These cases are included in the 2026-11-12
+complete 95-test remote software run recorded below.
 
 ## Atomic descriptor inheritance
 
@@ -200,14 +224,24 @@ no additional legacy-kernel or physical-device support claim.
 
 ## Verification boundary
 
+On 2026-11-12, the complete standalone backend suite passed 95 tests on
+`test-env`, including the checked sleep-presentation API, independent EPDC
+markers, preceding-update ordering, failed submissions/completion, and existing
+input, orientation, and night-mode cases. The root lock seeded the disposable
+standalone lock; offline resolution and explicit local patch overrides kept the
+reviewed sources. The log is
+`test-env:/tmp/weread-cover-sleep-20261112-r1/backend-tests.log`.
+These are controlled software results; no Kindle framebuffer or physical panel
+was exercised. Hardware acceptance remains in the application documents.
+
 The renderer-owned night-mode patch adds mocked framebuffer regressions for
 hardware 1/2 transitions, unchanged nonmode metadata, software fallback, physical
 pixel equivalence without double inversion, startup restoration, failed writes
 and readbacks, changed layouts/rotation, coherent native-sleep snapshots, fresh
 wake baselines, retained app requests, configuration sealing, and preserved input
-ownership during ordinary night requests. These additions have not yet been
-executed. They require the integrated remote verification run; no physical
-model/firmware acceptance follows from their source alone.
+ownership during ordinary night requests. These additions are included in the
+complete remote software run above. No physical model/firmware acceptance
+follows from that run.
 
 Controlled tests exercise empty/outside rectangles, integer bounds, rotation, region merging, full requests, default AUTO behavior, queue saturation, cross-thread producers, termination, and driver-specific waveform mapping without opening a Kindle framebuffer. Remote ARM cross-compilation checks the code and ABI layout assertions for the intended build target. Neither test class establishes a physical model/firmware support claim, ghosting quality, or panel timing.
 
