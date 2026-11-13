@@ -8,6 +8,9 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 use slint::Rgb8Pixel;
 
+use crate::dithering::{
+    DitheringControl, DitheringError, PhysicalImageRegion, RawImageRegion, software_gray,
+};
 use crate::managed_sleep::{ManagedSleepControl, ManagedSleepState};
 use crate::refresh::PhysicalRect;
 use crate::sleep_presentation::SleepPresentationControl;
@@ -19,6 +22,9 @@ pub enum RenderError {
     PresentationUnavailable,
     PresentationSequenceExhausted,
     InvalidPresentationToken,
+    InvalidRawImageRegions,
+    DitheringUnavailable,
+    DitheringSequenceExhausted,
 }
 
 impl fmt::Display for RenderError {
@@ -29,11 +35,26 @@ impl fmt::Display for RenderError {
             Self::PresentationUnavailable => "the sleep presentation is unavailable or cancelled",
             Self::PresentationSequenceExhausted => "the sleep presentation sequence is exhausted",
             Self::InvalidPresentationToken => "the sleep presentation token was not issued",
+            Self::InvalidRawImageRegions => {
+                "the raw-image regions exceed their count or geometry limits"
+            }
+            Self::DitheringUnavailable => "the frame dithering state is unavailable",
+            Self::DitheringSequenceExhausted => "the frame dithering sequence is exhausted",
         })
     }
 }
 
 impl std::error::Error for RenderError {}
+
+impl From<DitheringError> for RenderError {
+    fn from(error: DitheringError) -> Self {
+        match error {
+            DitheringError::InvalidRegions => Self::InvalidRawImageRegions,
+            DitheringError::SequenceExhausted => Self::DitheringSequenceExhausted,
+            DitheringError::StateUnavailable => Self::DitheringUnavailable,
+        }
+    }
+}
 
 /// Hardware support must be approved for the exact model and firmware.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -115,11 +136,35 @@ pub struct RenderHandle {
     pub(crate) night_mode: Arc<NightModeControl>,
     pub(crate) managed_sleep: Arc<ManagedSleepControl>,
     pub(crate) sleep_presentation: Arc<SleepPresentationControl>,
+    pub(crate) dithering: Arc<DitheringControl>,
     pub(crate) wake: Arc<OwnedFd>,
     pub(crate) quit: Arc<AtomicBool>,
 }
 
 impl RenderHandle {
+    /// Eligibility is based on reviewed hardware identity and native metadata.
+    /// It does not claim that a Y4 update was accepted or completed by the panel.
+    pub fn hardware_y4_available(&self) -> bool {
+        !self.quit.load(Ordering::SeqCst) && self.dithering.hardware_y4_available()
+    }
+
+    /// Publish the raw images belonging to the UI model already installed in
+    /// the scene. Coordinates are physical window pixels before render rotation.
+    /// An empty list means no raw images; it does not change a future preference.
+    pub fn set_hardware_y4_for_frame(
+        &self,
+        regions: Vec<RawImageRegion>,
+    ) -> Result<(), RenderError> {
+        if self.quit.load(Ordering::SeqCst)
+            || self.managed_sleep.state() == ManagedSleepState::Terminated
+        {
+            return Err(RenderError::EventLoopTerminated);
+        }
+        self.dithering.publish(regions)?;
+        crate::wakeup::poke(&self.wake);
+        Ok(())
+    }
+
     /// Configure the renderer before its event loop opens the framebuffer.
     /// An opt-in still requires actual 8-bpp grayscale 1/2 metadata at runtime.
     pub fn configure_night_mode(&self, config: NightModeConfig) -> Result<(), RenderError> {
@@ -236,9 +281,14 @@ impl GrayMode {
     }
 
     fn pixel(self, pixel: Rgb8Pixel) -> u8 {
-        let value = ((77 * u32::from(pixel.r) + 150 * u32::from(pixel.g) + 29 * u32::from(pixel.b))
-            >> 8) as u8;
-        self.grayscale(value)
+        self.grayscale(luminance(pixel))
+    }
+
+    fn image_pixel(self, pixel: Rgb8Pixel, x: usize, y: usize) -> u8 {
+        if self.black_and_white {
+            return self.pixel(pixel);
+        }
+        self.grayscale(software_gray(luminance(pixel), x, y))
     }
 
     pub(crate) fn grayscale(self, value: u8) -> u8 {
@@ -251,6 +301,10 @@ impl GrayMode {
     }
 }
 
+fn luminance(pixel: Rgb8Pixel) -> u8 {
+    ((77 * u32::from(pixel.r) + 150 * u32::from(pixel.g) + 29 * u32::from(pixel.b)) >> 8) as u8
+}
+
 pub(crate) struct FrameWrite {
     pub(crate) region: Option<PhysicalRect>,
     pub(crate) mode_changed: bool,
@@ -261,6 +315,8 @@ pub(crate) struct FrameWrite {
 pub(crate) struct GrayRenderer {
     applied_mode: GrayMode,
     line: Vec<u8>,
+    image_spans: Vec<ImageRowSpan>,
+    image_gaps: Vec<ImageRowSpan>,
 }
 
 impl GrayRenderer {
@@ -268,6 +324,8 @@ impl GrayRenderer {
         Self {
             applied_mode: initial_mode,
             line: vec![0; width],
+            image_spans: Vec::new(),
+            image_gaps: Vec::new(),
         }
     }
 
@@ -282,6 +340,19 @@ impl GrayRenderer {
         dirty: Option<PhysicalRect>,
         mode: GrayMode,
         restore_full: bool,
+        write_line: impl FnMut(usize, Range<usize>, &[u8]),
+    ) -> FrameWrite {
+        self.write_frame_with_image_regions(rgb, panel, dirty, mode, restore_full, &[], write_line)
+    }
+
+    pub(crate) fn write_frame_with_image_regions(
+        &mut self,
+        rgb: &[Rgb8Pixel],
+        panel: (u32, u32),
+        dirty: Option<PhysicalRect>,
+        mode: GrayMode,
+        restore_full: bool,
+        software_regions: &[PhysicalImageRegion],
         mut write_line: impl FnMut(usize, Range<usize>, &[u8]),
     ) -> FrameWrite {
         let mode_changed = mode != self.applied_mode;
@@ -302,11 +373,28 @@ impl GrayRenderer {
             let span = region.width as usize;
             self.line.resize(width, 0);
             for row in y..y + region.height as usize {
+                image_row_spans(
+                    &mut self.image_spans,
+                    &mut self.image_gaps,
+                    software_regions,
+                    row,
+                    x..x + span,
+                );
                 let start = row * width + x;
                 let source = &rgb[start..start + span];
                 let output = &mut self.line[..span];
                 for (destination, source) in output.iter_mut().zip(source) {
                     *destination = mode.pixel(*source);
+                }
+                for image_span in &self.image_spans {
+                    for column in image_span.columns.clone() {
+                        if let Some((image_x, image_y)) =
+                            software_regions[image_span.image_index].image_local(column, row)
+                        {
+                            output[column - x] =
+                                mode.image_pixel(source[column - x], image_x, image_y);
+                        }
+                    }
                 }
                 write_line(row, x..x + span, output);
             }
@@ -318,6 +406,97 @@ impl GrayRenderer {
             mode_changed,
         }
     }
+
+    /// A rejected Y4 update may leave several raw images in the retained frame.
+    /// Rewrite exactly their union from canonical RGB, never a paragraph, and
+    /// never read already transformed framebuffer pixels as another input image.
+    pub(crate) fn rewrite_image_regions(
+        &mut self,
+        rgb: &[Rgb8Pixel],
+        panel: (u32, u32),
+        regions: &[PhysicalImageRegion],
+        mode: GrayMode,
+        mut write_line: impl FnMut(usize, Range<usize>, &[u8]),
+    ) {
+        let width = panel.0 as usize;
+        self.line.resize(width, 0);
+        for row in 0..panel.1 as usize {
+            image_row_spans(
+                &mut self.image_spans,
+                &mut self.image_gaps,
+                regions,
+                row,
+                0..width,
+            );
+            for span in &self.image_spans {
+                let columns = &span.columns;
+                let source = &rgb[row * width + columns.start..row * width + columns.end];
+                let output = &mut self.line[..columns.len()];
+                for (offset, (destination, source)) in output.iter_mut().zip(source).enumerate() {
+                    *destination =
+                        match regions[span.image_index].image_local(columns.start + offset, row) {
+                            Some((image_x, image_y)) => mode.image_pixel(*source, image_x, image_y),
+                            None => mode.pixel(*source),
+                        };
+                }
+                write_line(row, columns.clone(), output);
+            }
+        }
+    }
+}
+
+struct ImageRowSpan {
+    columns: Range<usize>,
+    image_index: usize,
+}
+
+fn image_row_spans(
+    spans: &mut Vec<ImageRowSpan>,
+    gaps: &mut Vec<ImageRowSpan>,
+    regions: &[PhysicalImageRegion],
+    row: usize,
+    bounds: Range<usize>,
+) {
+    spans.clear();
+    for (image_index, image) in regions.iter().enumerate() {
+        let region = image.region;
+        let bottom = u64::from(region.y) + u64::from(region.height);
+        if (row as u64) < u64::from(region.y) || row as u64 >= bottom {
+            continue;
+        }
+        let start = (u64::from(region.x)).max(bounds.start as u64);
+        let end = (u64::from(region.x) + u64::from(region.width)).min(bounds.end as u64);
+        if start < end {
+            let columns = start as usize..end as usize;
+            gaps.clear();
+            for previous in spans.drain(..) {
+                if previous.columns.end <= columns.start || previous.columns.start >= columns.end {
+                    gaps.push(previous);
+                    continue;
+                }
+                if previous.columns.start < columns.start {
+                    gaps.push(ImageRowSpan {
+                        columns: previous.columns.start..columns.start,
+                        image_index: previous.image_index,
+                    });
+                }
+                if previous.columns.end > columns.end {
+                    gaps.push(ImageRowSpan {
+                        columns: columns.end..previous.columns.end,
+                        image_index: previous.image_index,
+                    });
+                }
+            }
+            gaps.push(ImageRowSpan {
+                columns,
+                image_index,
+            });
+            gaps.sort_unstable_by_key(|span| span.columns.start);
+            std::mem::swap(spans, gaps);
+        }
+    }
+    // Disjoint spans preserve scene order without repeatedly processing an
+    // overlap. The last image owns its crop-local phase, matching paint order.
 }
 
 fn clip(rect: PhysicalRect, panel: (u32, u32)) -> Option<PhysicalRect> {
@@ -335,6 +514,10 @@ fn clip(rect: PhysicalRect, panel: (u32, u32)) -> Option<PhysicalRect> {
         height: (bottom - y) as u32,
     })
 }
+
+#[cfg(test)]
+#[path = "render_image_regions_tests.rs"]
+mod image_region_tests;
 
 #[cfg(test)]
 mod tests {
@@ -551,6 +734,7 @@ mod tests {
             night_mode: Arc::new(NightModeControl::default()),
             managed_sleep: Arc::new(ManagedSleepControl::default()),
             sleep_presentation: Arc::new(SleepPresentationControl::default()),
+            dithering: Arc::new(DitheringControl::default()),
             wake: wakeup.write.clone(),
             quit: Arc::new(AtomicBool::new(false)),
         };
@@ -649,6 +833,7 @@ mod tests {
             night_mode: Arc::new(NightModeControl::default()),
             managed_sleep: Arc::new(ManagedSleepControl::default()),
             sleep_presentation: Arc::new(SleepPresentationControl::default()),
+            dithering: Arc::new(DitheringControl::default()),
             wake: wakeup.write.clone(),
             quit: Arc::new(AtomicBool::new(false)),
         };
@@ -691,6 +876,7 @@ mod tests {
             night_mode: Arc::new(NightModeControl::default()),
             managed_sleep: Arc::new(ManagedSleepControl::default()),
             sleep_presentation: Arc::new(SleepPresentationControl::default()),
+            dithering: Arc::new(DitheringControl::default()),
             wake: wakeup.write.clone(),
             quit: Arc::new(AtomicBool::new(false)),
         };
@@ -734,6 +920,48 @@ mod tests {
         );
         assert_eq!(
             handle.request_sleep_presentation(),
+            Err(RenderError::EventLoopTerminated)
+        );
+    }
+
+    #[test]
+    fn image_regions_are_scene_bound_and_can_be_staged_before_a_resident_wake() {
+        let wake = crate::wakeup::make_wakeup().unwrap();
+        let handle = RenderHandle {
+            night_mode: Arc::new(NightModeControl::default()),
+            managed_sleep: Arc::new(ManagedSleepControl::default()),
+            sleep_presentation: Arc::new(SleepPresentationControl::default()),
+            dithering: Arc::new(DitheringControl::new(true)),
+            wake: wake.write,
+            quit: Arc::new(AtomicBool::new(false)),
+        };
+        assert!(handle.hardware_y4_available());
+        let raw = RawImageRegion {
+            x: 9,
+            y: 7,
+            width: 3,
+            height: 2,
+        };
+        handle.set_hardware_y4_for_frame(vec![raw]).unwrap();
+        let retained = handle.dithering.snapshot().unwrap();
+        assert_eq!(retained.regions.as_ref(), &[raw]);
+        handle.set_managed_sleep(true).unwrap();
+        handle.managed_sleep.acknowledge_suspended();
+        handle.set_hardware_y4_for_frame(Vec::new()).unwrap();
+        assert_eq!(handle.managed_sleep_state(), ManagedSleepState::Suspended);
+        assert!(handle.dithering.snapshot().unwrap().regions.is_empty());
+        assert_eq!(retained.regions.as_ref(), &[raw]);
+        assert_eq!(
+            handle.set_hardware_y4_for_frame(vec![raw; 129]),
+            Err(RenderError::InvalidRawImageRegions)
+        );
+        handle.dithering.reject_hardware();
+        assert!(!handle.hardware_y4_available());
+        handle.dithering.set_available(true);
+        assert!(!handle.hardware_y4_available());
+        handle.quit.store(true, Ordering::SeqCst);
+        assert_eq!(
+            handle.set_hardware_y4_for_frame(Vec::new()),
             Err(RenderError::EventLoopTerminated)
         );
     }

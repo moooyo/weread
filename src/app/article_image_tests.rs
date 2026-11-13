@@ -217,7 +217,17 @@ fn collect_transport(runtime: &tokio::runtime::Runtime, app: &App) -> Result<Vec
                         packets.push(ImagePacket {
                             request,
                             account_epoch,
-                            key: format!("article-image:{article_id}:{image_id}"),
+                            key: image_processing::article_cache_key(
+                                &article_id,
+                                &image_id,
+                                &app.article
+                                    .image_work
+                                    .images()
+                                    .iter()
+                                    .find(|image| image.id == image_id)
+                                    .unwrap()
+                                    .url,
+                            ),
                             id: image_id,
                             credits: RefCell::new(credits),
                         });

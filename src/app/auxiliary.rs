@@ -2199,6 +2199,25 @@ impl App {
                         "",
                     ),
                     setting_choice(
+                        "image_dithering",
+                        "image_dithering",
+                        preferences.image_dithering.as_str(),
+                        &[
+                            ("off", "image_dithering_off"),
+                            ("software", "image_dithering_software"),
+                            ("hardware", "image_dithering_hardware"),
+                        ],
+                        true,
+                        if preferences.image_dithering
+                            == crate::preferences::ImageDithering::Hardware
+                            && !self.platform.hardware_y4_available()
+                        {
+                            "image_dithering_fallback"
+                        } else {
+                            ""
+                        },
+                    ),
+                    setting_choice(
                         "refresh_interval",
                         "full_refresh",
                         &preferences.reader.refresh_interval.to_string(),
@@ -2851,9 +2870,15 @@ impl App {
             // Resolve existing local pictures once per document. Reflow and
             // idle ticks reuse these identities without rehashing every file.
             for index in 0..work.images().len() {
-                let image_id = work.image(index).unwrap().id.as_str();
-                let (key, _key_owner) =
-                    budget.format(format_args!("article-image:{id}:{image_id}"))?;
+                let image = work.image(index).unwrap();
+                let image_id = image.id.as_str();
+                budget.work(
+                    id.len()
+                        .saturating_add(image_id.len())
+                        .saturating_add(image.url.len()),
+                )?;
+                let source_key = image_processing::article_cache_key(id, image_id, &image.url);
+                let (key, _key_owner) = budget.copy(&source_key)?;
                 #[cfg(test)]
                 {
                     cache_checks += 1;
@@ -3203,11 +3228,7 @@ impl App {
                 .into_iter()
                 .flatten()
             {
-                let picture = self
-                    .article
-                    .loaded_images
-                    .get(&block.id)
-                    .and_then(|path| slint::Image::load_from_path(path).ok());
+                let picture = self.article.loaded_images.get(&block.id);
                 let pending = self
                     .pending_article_images
                     .contains(&format!("article-image:{}:{}", self.article.id, block.id));
@@ -3222,7 +3243,7 @@ impl App {
                     }
                     .into(),
                     loaded: picture.is_some(),
-                    picture: picture.unwrap_or_default(),
+                    picture: slint::Image::default(),
                     height: block.height.min(i32::MAX as u32) as i32,
                     letter_spacing: block.letter_spacing,
                     frame_height: block.frame_height,
@@ -3235,6 +3256,7 @@ impl App {
                 });
             }
         }
+        let (blocks, image_scene) = self.prepare_article_image_scene(blocks)?;
         let font = self
             .fonts
             .iter()
@@ -3279,7 +3301,6 @@ impl App {
         global.set_account(account.into());
         global.set_meta(meta.into());
         global.set_current_id(article_projection_owned(&self.article.id).into());
-        global.set_blocks(model(blocks));
         global.set_page((self.article.page + 1) as i32);
         global.set_page_count(self.article.pages.len().max(1) as i32);
         global.set_footer(
@@ -3314,7 +3335,7 @@ impl App {
         global.set_articles(model(entries));
         global.set_list_page((projection.page + 1) as i32);
         global.set_list_pages(projection.pages as i32);
-        Ok(())
+        self.publish_article_images(blocks, image_scene)
     }
 
     pub(super) fn article_action(&mut self, action: &str, value: &str) -> Result<()> {
@@ -3642,13 +3663,14 @@ impl App {
                 continue;
             }
             let key = format!("article-image:{}:{id}", self.article.id);
+            let cache_key = image_processing::article_cache_key(&self.article.id, &id, &url);
             if !checked || previous_path.is_some() {
                 self.article.image_work.mark_cache_checked(index);
                 #[cfg(test)]
                 {
                     self.article.image_cache_checks += 1;
                 }
-                match self.cache.get(&key) {
+                match self.cache.get(&cache_key) {
                     Ok(Some(path)) => {
                         loaded |= previous_path.as_ref() != Some(&path);
                         self.article.loaded_images.insert(id, path);

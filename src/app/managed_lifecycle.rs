@@ -58,6 +58,9 @@ impl App {
     fn prepare_resident_sleep_inner(&mut self) -> Result<()> {
         ensure!(!self.closing.get(), "the application is already closing");
         self.managed_sleep_blocked = true;
+        // Native snapshots cannot depend on the application's Y4 update flag.
+        // Only already prepared scene models are switched here; no image I/O.
+        self.suspend_image_processing_for_sleep()?;
         let writing_thought = self
             .ui
             .upgrade()

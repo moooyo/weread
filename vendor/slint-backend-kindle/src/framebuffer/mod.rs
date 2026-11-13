@@ -1,19 +1,21 @@
 mod ffi;
 mod night_mode;
+#[cfg(test)]
+mod raw_submission_tests;
 
-use crate::refresh::{RefreshWaveform, ResolvedRefresh};
+use crate::refresh::{PhysicalRect, RefreshWaveform, ResolvedRefresh};
 use std::cell::Cell;
 use std::ops::Range;
 use std::os::fd::AsRawFd;
 
 use ffi::{
     EPDC_FLAG_FORCE_MONOCHROME, FBIOGET_FSCREENINFO, FBIOGET_VSCREENINFO, FBIOPUT_VSCREENINFO,
-    FbFixScreeninfo, FbVarScreeninfo, MXCFB_SEND_UPDATE, MXCFB_SEND_UPDATE_MTK,
-    MXCFB_SEND_UPDATE_REX, MXCFB_SEND_UPDATE_ZELDA, MXCFB_WAIT_FOR_UPDATE_COMPLETE,
-    TEMP_USE_AMBIENT, UPDATE_MODE_FULL, UPDATE_MODE_PARTIAL, UpdateMarkerData, UpdateRect,
-    UpdateRequest, UpdateRequestMtk, UpdateRequestRex, UpdateRequestZelda, WAVEFORM_MODE_A2_LEGACY,
-    WAVEFORM_MODE_A2_MODERN, WAVEFORM_MODE_AUTO, WAVEFORM_MODE_DU, WAVEFORM_MODE_GC16,
-    WAVEFORM_MODE_GCK16_MTK,
+    FbFixScreeninfo, FbVarScreeninfo, MTK_EPDC_FLAG_USE_DITHERING_Y4, MXCFB_SEND_UPDATE,
+    MXCFB_SEND_UPDATE_MTK, MXCFB_SEND_UPDATE_REX, MXCFB_SEND_UPDATE_ZELDA,
+    MXCFB_WAIT_FOR_UPDATE_COMPLETE, TEMP_USE_AMBIENT, UPDATE_MODE_FULL, UPDATE_MODE_PARTIAL,
+    UpdateMarkerData, UpdateRect, UpdateRequest, UpdateRequestMtk, UpdateRequestRex,
+    UpdateRequestZelda, WAVEFORM_MODE_A2_LEGACY, WAVEFORM_MODE_A2_MODERN, WAVEFORM_MODE_AUTO,
+    WAVEFORM_MODE_DU, WAVEFORM_MODE_GC16, WAVEFORM_MODE_GCK16_MTK,
 };
 pub(crate) use night_mode::NightModeApplied;
 use night_mode::{ModeIo, ModeSnapshot, NightModeState};
@@ -49,6 +51,18 @@ enum PackedUpdateRequest {
     Mtk(UpdateRequestMtk),
 }
 
+/// Submission acceptance is separate from completed panel presentation.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct RefreshSubmission {
+    pub(crate) accepted: bool,
+    /// The reserved identity for this logical attempt, including rejected ones.
+    pub(crate) marker: Option<u32>,
+    pub(crate) attempts: u32,
+    pub(crate) last_errno: Option<i32>,
+    pub(crate) hardware_y4_submitted: bool,
+    pub(crate) hardware_y4_attempted: bool,
+}
+
 /// Memory-mapped handle to the Kindle's e-ink framebuffer.
 ///
 /// Pixel format is 8-bit grayscale (one byte per pixel) on most models, or
@@ -71,6 +85,9 @@ pub(crate) struct Framebuffer {
     last_issued_marker: Cell<u32>,
     last_submitted_marker: Cell<Option<u32>>,
     last_completed_marker: Cell<Option<u32>>,
+    y4_metadata_supported: bool,
+    /// Outer Some means delivery is uncertain; the inner value preserves errno.
+    dithering_delivery_failure: Cell<Option<Option<i32>>>,
     night_mode: NightModeState,
 }
 
@@ -157,11 +174,14 @@ impl Framebuffer {
             last_issued_marker: Cell::new(0),
             last_submitted_marker: Cell::new(None),
             last_completed_marker: Cell::new(None),
+            y4_metadata_supported: hardware_y4_metadata_supported(snapshot),
+            dithering_delivery_failure: Cell::new(None),
             night_mode: NightModeState::new(snapshot, enabled),
         })
     }
 
     pub(crate) fn apply_night_mode(&mut self, desired: bool) -> std::io::Result<NightModeApplied> {
+        self.require_known_dithering_delivery()?;
         self.night_mode
             .apply(&mut FramebufferModeIo(&self.file), desired)
     }
@@ -178,8 +198,217 @@ impl Framebuffer {
         self.night_mode.software_inverse(desired)
     }
 
+    /// Actual metadata and an already accepted driver ABI are required in
+    /// addition to the separately checked public hardware identity.
+    pub(crate) fn hardware_y4_supported(&self) -> bool {
+        self.y4_metadata_supported
+            && self.bytes_per_pixel == 1
+            && self.update_variant.get() == Some(UpdateVariant::Mtk)
+            && !self.night_mode.software_inverse(false)
+            && self.dithering_delivery_failure.get().is_none()
+    }
+
+    pub(crate) fn require_known_dithering_delivery(&self) -> std::io::Result<()> {
+        match self.dithering_delivery_failure.get() {
+            None => Ok(()),
+            Some(Some(errno)) => Err(std::io::Error::from_raw_os_error(errno)),
+            Some(None) => Err(std::io::Error::other(
+                "the display driver returned an unknown update outcome",
+            )),
+        }
+    }
+
+    fn latch_dithering_failure(&self, error: &std::io::Error) {
+        if self.dithering_delivery_failure.get().is_none() {
+            self.dithering_delivery_failure
+                .set(Some(error.raw_os_error()));
+        }
+    }
+
+    /// Only call after a rejected raw frame has been converted to software.
+    /// ENOTTY invalidates the ABI; parameter rejection alone does not.
+    pub(crate) fn reset_raw_abi_after_rejection(&self, errno: Option<i32>) {
+        if self.dithering_delivery_failure.get().is_none() && errno == Some(libc::ENOTTY) {
+            self.update_variant.set(None);
+        }
+    }
+
+    /// Failed raw completion leaves possible DMA readers in flight. Unlike the
+    /// ordinary defensive wait, this permanently blocks this mapping on failure.
+    pub(crate) fn wait_for_raw_update_complete_checked(&self) -> std::io::Result<()> {
+        self.raw_completion_with(|| self.wait_for_pending_update_complete_checked())
+    }
+
+    fn raw_completion_with(
+        &self,
+        wait: impl FnOnce() -> std::io::Result<()>,
+    ) -> std::io::Result<()> {
+        self.require_known_dithering_delivery()?;
+        let result = wait();
+        if let Err(error) = &result {
+            self.latch_dithering_failure(error);
+        }
+        result
+    }
+
+    /// Submit the currently presented raw-image scene. The caller rewrites only
+    /// its raw image regions after a definite rejection and retries with a new
+    /// marker. An uncertain result must never authorize such a rewrite.
+    pub(crate) fn refresh_raw_checked(
+        &self,
+        refresh: ResolvedRefresh,
+        hardware_y4: bool,
+    ) -> std::io::Result<RefreshSubmission> {
+        self.require_known_dithering_delivery()?;
+        let region = raw_refresh_region(refresh.region, self.width, self.height);
+        if region.width == 0 || region.height == 0 {
+            return Ok(RefreshSubmission::default());
+        }
+        let mode = if refresh.flashing {
+            UPDATE_MODE_FULL
+        } else {
+            UPDATE_MODE_PARTIAL
+        };
+        self.submit_raw_update_with(hardware_y4, |variant, marker| {
+            let request = self
+                .pack_raw_update_request(variant, region, mode, marker, hardware_y4)
+                .ok_or_else(|| std::io::Error::from_raw_os_error(libc::ENOTTY))?;
+            self.send_packed_update_checked(&request)
+        })
+    }
+
+    fn submit_raw_update_with(
+        &self,
+        hardware_y4: bool,
+        mut send: impl FnMut(UpdateVariant, u32) -> std::io::Result<()>,
+    ) -> std::io::Result<RefreshSubmission> {
+        self.require_known_dithering_delivery()?;
+        if hardware_y4 && !self.hardware_y4_supported() {
+            return Ok(RefreshSubmission {
+                last_errno: Some(libc::EINVAL),
+                ..Default::default()
+            });
+        }
+        let marker = self
+            .last_issued_marker
+            .get()
+            .checked_add(1)
+            .ok_or_else(|| std::io::Error::from_raw_os_error(libc::EOVERFLOW))?;
+        self.last_issued_marker.set(marker);
+        let cached = self.update_variant.get();
+        let variants = if hardware_y4 {
+            [Some(UpdateVariant::Mtk), None, None, None]
+        } else {
+            match cached {
+                Some(UpdateVariant::Unsupported) => [None; 4],
+                Some(variant) => [Some(variant), None, None, None],
+                None => UpdateVariant::PROBE_ORDER.map(Some),
+            }
+        };
+        let mut result = RefreshSubmission {
+            marker: Some(marker),
+            ..Default::default()
+        };
+        for variant in variants.into_iter().flatten() {
+            result.attempts += 1;
+            result.hardware_y4_attempted |= hardware_y4 && variant == UpdateVariant::Mtk;
+            match send(variant, marker) {
+                Ok(()) => {
+                    result.accepted = true;
+                    result.last_errno = None;
+                    result.hardware_y4_submitted = hardware_y4;
+                    self.last_submitted_marker.set(Some(marker));
+                    self.update_variant.set(Some(variant));
+                    return Ok(result);
+                }
+                Err(error) => {
+                    result.last_errno = error.raw_os_error();
+                    if !explicit_update_rejection(result.last_errno) {
+                        self.latch_dithering_failure(&error);
+                        log::error!(
+                            "Raw display delivery is uncertain; marker={marker}, hardware_y4={hardware_y4}, errno={:?}",
+                            result.last_errno,
+                        );
+                        return Err(error);
+                    }
+                }
+            }
+        }
+        if cached.is_none() {
+            self.update_variant.set(Some(UpdateVariant::Unsupported));
+        }
+        if result.last_errno.is_none() {
+            result.last_errno = Some(libc::ENOTTY);
+        }
+        Ok(result)
+    }
+
+    fn pack_raw_update_request(
+        &self,
+        variant: UpdateVariant,
+        region: UpdateRect,
+        mode: u32,
+        marker: u32,
+        hardware_y4: bool,
+    ) -> Option<PackedUpdateRequest> {
+        if !hardware_y4 {
+            return self.pack_update_request(variant, region, WAVEFORM_MODE_GC16, mode, marker);
+        }
+        if variant != UpdateVariant::Mtk {
+            return None;
+        }
+        Some(PackedUpdateRequest::Mtk(UpdateRequestMtk {
+            update_region: region,
+            waveform_mode: WAVEFORM_MODE_GC16,
+            update_mode: mode,
+            update_marker: marker,
+            temperature: TEMP_USE_AMBIENT,
+            flags: MTK_EPDC_FLAG_USE_DITHERING_Y4,
+            dither_mode: 0,
+            quant_bit: 0,
+            hist_bw_waveform_mode: WAVEFORM_MODE_DU,
+            hist_gray_waveform_mode: WAVEFORM_MODE_GC16,
+            ..Default::default()
+        }))
+    }
+
+    fn send_packed_update_checked(&self, request: &PackedUpdateRequest) -> std::io::Result<()> {
+        match request {
+            PackedUpdateRequest::Legacy(update) => {
+                self.send_update_ioctl_checked(MXCFB_SEND_UPDATE, update)
+            }
+            PackedUpdateRequest::Rex(update) => {
+                self.send_update_ioctl_checked(MXCFB_SEND_UPDATE_REX, update)
+            }
+            PackedUpdateRequest::Zelda(update) => {
+                self.send_update_ioctl_checked(MXCFB_SEND_UPDATE_ZELDA, update)
+            }
+            PackedUpdateRequest::Mtk(update) => {
+                self.send_update_ioctl_checked(MXCFB_SEND_UPDATE_MTK, update)
+            }
+        }
+    }
+
+    fn send_update_ioctl_checked<T>(
+        &self,
+        request: libc::c_ulong,
+        update: &T,
+    ) -> std::io::Result<()> {
+        self.require_known_dithering_delivery()?;
+        // SAFETY: update has the selected driver's complete repr(C) layout and
+        // lives until this synchronous ioctl returns.
+        let result =
+            unsafe { libc::ioctl(self.file.as_raw_fd(), request as _, update as *const _) };
+        if result < 0 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    }
+
     /// Returns the compensation for the retained, already presented app mode.
     pub(crate) fn prepare_native_snapshot(&mut self) -> std::io::Result<bool> {
+        self.require_known_dithering_delivery()?;
         self.night_mode
             .prepare_native_snapshot(&mut FramebufferModeIo(&self.file))
     }
@@ -211,6 +440,9 @@ impl Framebuffer {
 
     /// Write a horizontal span of grayscale pixels into the mmap at row `y`.
     pub(crate) fn write_line(&mut self, y: usize, x_range: Range<usize>, pixels: &[u8]) {
+        if self.dithering_delivery_failure.get().is_some() {
+            return;
+        }
         let bpp = self.bytes_per_pixel;
         let row_span = unsafe {
             std::slice::from_raw_parts_mut(
@@ -230,6 +462,9 @@ impl Framebuffer {
 
     /// Fill the entire visible area with a single grayscale value (0x00 = black, 0xff = white).
     pub(crate) fn fill(&mut self, value: u8) {
+        if self.dithering_delivery_failure.get().is_some() {
+            return;
+        }
         let bpp = self.bytes_per_pixel;
         for y in 0..self.height as usize {
             let row = unsafe {
@@ -265,6 +500,9 @@ impl Framebuffer {
     }
 
     fn submit_update_with(&self, mut send: impl FnMut(UpdateVariant, u32) -> bool) -> bool {
+        if self.dithering_delivery_failure.get().is_some() {
+            return false;
+        }
         let Some(marker) = self.last_issued_marker.get().checked_add(1) else {
             return false;
         };
@@ -371,6 +609,9 @@ impl Framebuffer {
     /// Hand one of the `UpdateRequest*` structs to the kernel. Returns whether
     /// the ioctl succeeded.
     fn send_update_ioctl<T>(&self, request: libc::c_ulong, update: &T) -> bool {
+        if self.dithering_delivery_failure.get().is_some() {
+            return false;
+        }
         // SAFETY: `update` outlives the ioctl and matches the kernel's struct.
         unsafe { libc::ioctl(self.file.as_raw_fd(), request as _, update as *const _) != -1 }
     }
@@ -405,6 +646,57 @@ impl Framebuffer {
                 0
             },
             ..Default::default()
+        }
+    }
+
+    /// Strict ordinary updates may coexist with a retained raw image elsewhere
+    /// on screen. They keep their original region and waveform, without Y4.
+    pub(crate) fn refresh_planned_checked(&self, refresh: ResolvedRefresh) -> std::io::Result<()> {
+        self.refresh_planned_checked_with(refresh, |request| {
+            self.send_packed_update_checked(request)
+        })
+    }
+
+    fn refresh_planned_checked_with(
+        &self,
+        refresh: ResolvedRefresh,
+        mut send: impl FnMut(&PackedUpdateRequest) -> std::io::Result<()>,
+    ) -> std::io::Result<()> {
+        self.require_known_dithering_delivery()?;
+        if refresh.region.width == 0 || refresh.region.height == 0 {
+            return Ok(());
+        }
+        // Resolve once before probing, as refresh_planned does. In particular,
+        // A2 with an unknown ABI must remain AUTO throughout that first probe.
+        let waveform = if refresh.flashing {
+            WAVEFORM_MODE_GC16
+        } else {
+            waveform_for_driver(refresh.waveform, self.update_variant.get())
+        };
+        let region = UpdateRect {
+            top: refresh.region.y as u32,
+            left: refresh.region.x as u32,
+            width: refresh.region.width,
+            height: refresh.region.height,
+        };
+        let mode = if refresh.flashing {
+            UPDATE_MODE_FULL
+        } else {
+            UPDATE_MODE_PARTIAL
+        };
+        let result = self.submit_raw_update_with(false, |variant, marker| {
+            let request = self
+                .pack_update_request(variant, region, waveform, mode, marker)
+                .ok_or_else(|| std::io::Error::from_raw_os_error(libc::ENOTTY))?;
+            send(&request)
+        })?;
+        if result.accepted {
+            Ok(())
+        } else {
+            Err(result
+                .last_errno
+                .map(std::io::Error::from_raw_os_error)
+                .unwrap_or_else(|| std::io::Error::other("the EPDC rejected the planned update")))
         }
     }
 
@@ -505,6 +797,7 @@ impl Framebuffer {
     /// Keep a preceding asynchronous update from reading a rewritten framebuffer.
     /// With no submitted update there is no preceding DMA operation to await.
     pub(crate) fn wait_for_pending_update_complete_checked(&self) -> std::io::Result<()> {
+        self.require_known_dithering_delivery()?;
         if self.last_submitted_marker.get().is_none() {
             return Ok(());
         }
@@ -515,6 +808,7 @@ impl Framebuffer {
         &self,
         wait: impl FnOnce(&mut UpdateMarkerData) -> std::io::Result<()>,
     ) -> std::io::Result<()> {
+        self.require_known_dithering_delivery()?;
         let submitted = self
             .last_submitted_marker
             .get()
@@ -580,6 +874,76 @@ fn waveform_for_driver(waveform: RefreshWaveform, variant: Option<UpdateVariant>
     }
 }
 
+fn explicit_update_rejection(errno: Option<i32>) -> bool {
+    matches!(errno, Some(libc::EINVAL | libc::ENOTTY | libc::EOPNOTSUPP))
+}
+
+fn raw_refresh_region(region: PhysicalRect, width: u32, height: u32) -> UpdateRect {
+    let left = i64::from(region.x).clamp(0, i64::from(width));
+    let top = i64::from(region.y).clamp(0, i64::from(height));
+    let right = (i64::from(region.x) + i64::from(region.width)).clamp(0, i64::from(width));
+    let bottom = (i64::from(region.y) + i64::from(region.height)).clamp(0, i64::from(height));
+    if right <= left || bottom <= top {
+        return UpdateRect::default();
+    }
+    aligned_dither_region(
+        UpdateRect {
+            left: left as u32,
+            top: top as u32,
+            width: (right - left) as u32,
+            height: (bottom - top) as u32,
+        },
+        width,
+        height,
+    )
+}
+
+/// Same outward alignment as the reviewed Bili/KOReader MTK path. The physical
+/// right and bottom edges may be shorter than eight pixels after clipping.
+fn aligned_dither_region(region: UpdateRect, width: u32, height: u32) -> UpdateRect {
+    if region.width == 0 || region.height == 0 {
+        return region;
+    }
+    let left = region.left.min(width);
+    let top = region.top.min(height);
+    if left == width || top == height {
+        return UpdateRect {
+            left,
+            top,
+            width: 0,
+            height: 0,
+        };
+    }
+    let right = (u64::from(region.left) + u64::from(region.width)).min(u64::from(width));
+    let bottom = (u64::from(region.top) + u64::from(region.height)).min(u64::from(height));
+    let left = left / 8 * 8;
+    let top = top / 8 * 8;
+    let right = right.div_ceil(8).saturating_mul(8).min(u64::from(width)) as u32;
+    let bottom = bottom.div_ceil(8).saturating_mul(8).min(u64::from(height)) as u32;
+    UpdateRect {
+        left,
+        top,
+        width: right - left,
+        height: bottom - top,
+    }
+}
+
+fn hardware_y4_metadata_supported(snapshot: ModeSnapshot) -> bool {
+    let variable = snapshot.variable;
+    let fixed = snapshot.fixed;
+    variable.bits_per_pixel == 8
+        && matches!(variable.grayscale, 1 | 2)
+        && variable.xres > 0
+        && variable.yres > 0
+        && variable.xoffset == 0
+        && variable.yoffset == 0
+        && variable.xres_virtual >= variable.xres
+        && variable.yres_virtual >= variable.yres
+        && variable.rotate <= 3
+        && fixed.line_length >= variable.xres
+        && u64::from(fixed.line_length) * u64::from(variable.yres) <= u64::from(fixed.smem_len)
+}
+
 fn read_variable_info(file: &std::fs::File) -> std::io::Result<FbVarScreeninfo> {
     let mut info = FbVarScreeninfo::default();
     // SAFETY: The initialized structure matches FBIOGET_VSCREENINFO and lives
@@ -639,11 +1003,24 @@ pub(crate) fn probe_framebuffer_rotation() -> std::io::Result<u32> {
     validated_portrait_rotation(read_variable_info(&file)?.rotate)
 }
 
+/// Read only framebuffer metadata. Hardware identity is checked separately;
+/// neither display memory nor an update/input resource is acquired here.
+pub(crate) fn probe_hardware_y4_metadata() -> std::io::Result<bool> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK | libc::O_CLOEXEC)
+        .open("/dev/fb0")?;
+    Ok(hardware_y4_metadata_supported(
+        FramebufferModeIo(&file).read()?,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn update_test_framebuffer(night_mode: NightModeState) -> Framebuffer {
+    pub(super) fn update_test_framebuffer(night_mode: NightModeState) -> Framebuffer {
         // This is anonymous memory and a non-device file; no Kindle is probed.
         let map = unsafe {
             libc::mmap(
@@ -668,6 +1045,8 @@ mod tests {
             last_issued_marker: Cell::new(0),
             last_submitted_marker: Cell::new(None),
             last_completed_marker: Cell::new(None),
+            y4_metadata_supported: true,
+            dithering_delivery_failure: Cell::new(None),
             night_mode,
         }
     }
@@ -685,7 +1064,11 @@ mod tests {
         }
     }
 
-    fn observed_night_mode(startup: u32, enabled: bool, desired: bool) -> NightModeState {
+    pub(super) fn observed_night_mode(
+        startup: u32,
+        enabled: bool,
+        desired: bool,
+    ) -> NightModeState {
         let snapshot = ModeSnapshot {
             variable: FbVarScreeninfo {
                 xres: 2,

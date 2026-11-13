@@ -4,6 +4,8 @@ mod auxiliary;
 mod backend;
 mod book_images;
 mod download_recovery;
+mod image_processing;
+mod image_raster;
 mod library;
 mod lighting;
 mod lighting_worker;
@@ -352,6 +354,7 @@ pub struct App {
     managed_sleep_blocked: bool,
     managed_sleep: managed_sleep::ManagedSleep,
     sleep_screen: sleep_screen::SleepScreenState,
+    image_processing: image_processing::ImageProcessingState,
     resident_lifecycle: managed_lifecycle::ResidentLifecycle,
     lighting: lighting::LightingState,
     store: Store,
@@ -540,6 +543,7 @@ impl App {
             managed_sleep_blocked: false,
             managed_sleep: managed_sleep::ManagedSleep::default(),
             sleep_screen: sleep_screen::SleepScreenState::default(),
+            image_processing: image_processing::ImageProcessingState::default(),
             resident_lifecycle: managed_lifecycle::ResidentLifecycle::default(),
             lighting: lighting::LightingState::default(),
             store,
@@ -858,7 +862,7 @@ impl App {
             return Ok(());
         }
         if section == "reader" && matches!(action, "reader.move" | "move") {
-            return Ok(());
+            return self.sync_presented_image_processing();
         }
         self.render()
     }
@@ -928,7 +932,7 @@ impl App {
             self.flush_cover_ui();
             self.refill_deferred_visible_covers();
         }
-        Ok(())
+        self.sync_presented_image_processing()
     }
 
     pub fn shutdown(&mut self) -> Result<()> {
@@ -1080,6 +1084,7 @@ impl App {
     }
 
     pub(super) fn invalidate_account_work(&mut self) -> Result<()> {
+        self.clear_presented_image_processing()?;
         self.clear_prepared_sleep_screen();
         self.clear_article_image_work();
         self.interrupt_read_reports()?;
@@ -1382,6 +1387,12 @@ impl App {
 
     fn view_capacity(error: &anyhow::Error) -> bool {
         error.chain().any(|cause| {
+            if cause
+                .downcast_ref::<image_raster::RasterLimitError>()
+                .is_some()
+            {
+                return true;
+            }
             cause
                 .downcast_ref::<crate::reader::LayoutLimitError>()
                 .is_some()
@@ -1524,7 +1535,7 @@ impl App {
         self.download_ui_changes.clear();
         self.download_ui_refresh_at = Instant::now() + Duration::from_secs(1);
         self.cover_ui_changes.clear();
-        Ok(())
+        self.sync_presented_image_processing()
     }
 
     fn render_clock(&self) {

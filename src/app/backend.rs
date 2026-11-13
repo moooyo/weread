@@ -1626,13 +1626,20 @@ impl App {
             return Ok(false);
         };
         let key = format!("article-image:{article_id}:{id}");
+        let url = self
+            .article
+            .image_work
+            .image(index)
+            .map(|image| image.url.as_str())
+            .unwrap_or("");
+        let cache_key = image_processing::article_cache_key(article_id, id, url);
         self.pending_article_images.remove(&key);
         let mut loaded = false;
         let outcome = match result {
             Ok(bytes) => {
                 let (width, height) = self.profile.physical_size();
-                match self.cache.put_cover(
-                    &key,
+                match self.cache.put_gray8(
+                    &cache_key,
                     &bytes,
                     width.saturating_sub(128).min(2048),
                     height.min(2048),

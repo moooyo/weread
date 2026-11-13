@@ -210,6 +210,9 @@ pub(super) const WAVEFORM_MODE_DU: u32 = 1;
 pub(super) const WAVEFORM_MODE_A2_LEGACY: u32 = 4;
 pub(super) const WAVEFORM_MODE_A2_MODERN: u32 = 6;
 pub(super) const EPDC_FLAG_FORCE_MONOCHROME: u32 = 2;
+// Reviewed MediaTek Y8-to-Y4 processing flag. 0x8000 is REGAL on this ABI.
+// Bili 7241a85fac8aa032b79f4e7f2f6eb29aacdbebd3 / FBInk ded92fa5.
+pub(super) const MTK_EPDC_FLAG_USE_DITHERING_Y4: u32 = 0x4000;
 pub(super) const WAVEFORM_MODE_AUTO: u32 = 257; // Let the driver pick the best waveform
 pub(super) const UPDATE_MODE_PARTIAL: u32 = 0; // Only redraw the dirty region
 pub(super) const UPDATE_MODE_FULL: u32 = 1; // Flash the whole screen (clears ghosting)

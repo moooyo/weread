@@ -107,6 +107,33 @@ normalization and input-drain boundaries remain in force. See the application's
 [`docs/SLEEP_COVER.md`](../../../docs/SLEEP_COVER.md) for the pinned KOReader
 comparison and the separate software/device acceptance boundaries.
 
+## Device-gated image Y4 processing
+
+The project adapts the reviewed behavior of BiliComics
+[`7241a85fac8aa032b79f4e7f2f6eb29aacdbebd3`](https://github.com/moooyo/bilicomics/commit/7241a85fac8aa032b79f4e7f2f6eb29aacdbebd3)
+to mixed text/image pages. The existing MIT/Apache notices and upstream baseline
+remain unchanged; no application license or new runtime dependency is selected.
+
+`RenderHandle::set_hardware_y4_for_frame` publishes bounded raw-image regions
+with the matching UI scene. The backend snapshots actual rendered ownership,
+keeps canonical RGB, and maps crop-local picture phase through render rotation.
+CPU fallback converts only picture spans. A native Y4 flag applies to its whole
+update rectangle; independent local updates outside pictures retain the normal
+refresh path. Sleep/native snapshots software-complete retained raw pictures
+without replacing pending or retained scene identity.
+
+Eligibility uses a fixed-width, bounded hardware identity read and actual MTK
+eight-bit metadata, never a UI profile or resolution. The MTK Y4 flag is `0x4000`
+with zero dither/quant fields; native inversion uses the conservative software
+path. Typed errno results distinguish definite rejection from unknown delivery.
+Only definite rejection permits old-marker completion, software rewriting, and
+new-marker submission. An uncertain update or wait latches all later mapped
+writes and submissions, including across mode revisions, and ends the loop.
+
+See [`docs/HARDWARE_Y4_DITHERING.md`](../../../docs/HARDWARE_Y4_DITHERING.md) for
+the fixed primary-source references, current storage boundary, software results,
+and the separate physical acceptance gate.
+
 ## Application-local clipboard
 
 The native platform implements [Slint 1.17.1's public platform trait](https://github.com/slint-ui/slint/blob/v1.17.1/internal/core/platform.rs): `Platform::set_clipboard_text(&self, text: &str, clipboard: Clipboard)` and `Platform::clipboard_text(&self, clipboard: Clipboard) -> Option<String>`. `DefaultClipboard` and `SelectionClipboard` use separate owned text slots. Unknown future clipboard kinds are ignored or return `None`.

@@ -79,6 +79,17 @@ This specification expects an exact visible framebuffer of 1272 x 1696 with zero
 
 ## Lifecycle
 
+The 2026-11-13 hardware Y4 development source adds a required current
+`image_dithering` preference. Unsupported older development preference snapshots
+are rejected without conversion or deletion; use a fresh, separate data
+directory instead of resetting an existing account or book library implicitly.
+The default image policy remains Off. Hardware selection requires recognized
+monochrome Scribe identity, actual eight-bit MTK support, and safe image-scene
+ownership; unsupported hardware, layout, and native inversion use software
+processing. This is not a native 256-level panel claim. See
+[hardware Y4 image processing](../../docs/HARDWARE_Y4_DITHERING.md) for the current
+format, reference revision, and separate software/device gates.
+
 The launcher checks the allowlist before modifying services. It leaves `powerd` and `lab126_gui` running. It stops `statusbar` only if Upstart reported it running and pauses only `awesome` processes that were running. Each display takeover records its own baseline, and restoration returns the services changed by that takeover. Exit and signal cleanup retain those ownership boundaries.
 
 Startup feedback displays the project name, startup stage, and activity dots from embedded grayscale artwork before runtime font decompression. Dot animation is limited to 0.8 Hz. Its temporary worker is joined before backend environment changes and releases its framebuffer before the normal event loop opens display and input resources. The current Reader defaults to the body view with `notes_panel=false`. These source behaviors do not imply that the latest executable has completed physical acceptance.

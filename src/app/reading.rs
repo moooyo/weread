@@ -2177,8 +2177,7 @@ impl App {
             &remote_ranges,
             selected_notes,
         )?;
-        state.set_images(image_rows);
-        Ok(())
+        self.publish_reader_images(image_rows)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -4439,7 +4438,7 @@ impl App {
     }
 }
 
-fn reader_margin(scribe: bool, index: u32) -> f32 {
+pub(super) fn reader_margin(scribe: bool, index: u32) -> f32 {
     (if scribe {
         [40.0, 64.0, 96.0]
     } else {

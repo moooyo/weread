@@ -15,12 +15,17 @@ use slint::platform::software_renderer::{
 use slint::platform::{Clipboard, EventLoopProxy, Platform, PlatformError, WindowAdapter};
 
 use crate::clipboard::{ClipboardKind, ClipboardStore};
+use crate::dithering::{
+    DitheringControl, DitheringSnapshot, PhysicalImageRegion, physical_image_regions,
+};
 use crate::framebuffer::Framebuffer;
 use crate::gyro::GyroObserver;
 use crate::managed_sleep::ManagedSleepControl;
 use crate::orientation::{NativeOrientationHandle, OrientationRequest, PortraitController};
 use crate::power::{arm_wakealarm, find_wakealarm, suspend_to_mem};
-use crate::refresh::{PendingRefresh, PhysicalRect, RefreshHandle};
+use crate::refresh::{
+    PendingRefresh, PhysicalRect, RefreshHandle, RefreshWaveform, ResolvedRefresh,
+};
 use crate::render_control::{
     GrayMode, GrayRenderer, NightModeConfig, NightModeControl, RenderHandle,
 };
@@ -47,6 +52,8 @@ pub(crate) struct KindlePlatform {
     night_mode: Arc<NightModeControl>,
     managed_sleep: Arc<ManagedSleepControl>,
     sleep_presentation: Arc<SleepPresentationControl>,
+    dithering: Arc<DitheringControl>,
+    dithering_identity_supported: bool,
     rotation: Arc<AtomicU32>,
     native_orientation: Arc<Mutex<OrientationRequest>>,
     initialized: Arc<AtomicBool>,
@@ -63,6 +70,7 @@ impl KindlePlatform {
     ) -> std::io::Result<Self> {
         let window = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
         let wakeup = wakeup::make_wakeup()?;
+        let dithering_identity_supported = native_hardware_y4_eligible();
         Ok(Self {
             window,
             start: Instant::now(),
@@ -75,6 +83,8 @@ impl KindlePlatform {
             night_mode: Arc::new(NightModeControl::default()),
             managed_sleep: Arc::new(ManagedSleepControl::default()),
             sleep_presentation: Arc::new(SleepPresentationControl::default()),
+            dithering: Arc::new(DitheringControl::new(dithering_identity_supported)),
+            dithering_identity_supported,
             rotation,
             native_orientation: Arc::new(Mutex::new(OrientationRequest::default())),
             initialized: Arc::new(AtomicBool::new(false)),
@@ -96,6 +106,7 @@ impl KindlePlatform {
             night_mode: self.night_mode.clone(),
             managed_sleep: self.managed_sleep.clone(),
             sleep_presentation: self.sleep_presentation.clone(),
+            dithering: self.dithering.clone(),
             wake: self.wakeup.write.clone(),
             quit: self.quit_flag.clone(),
         }
@@ -122,6 +133,14 @@ impl KindlePlatform {
         self.sleep_presentation
             .pending()
             .map_err(|error| PlatformError::Other(format!("sleep presentation failed: {error}")))
+    }
+
+    fn synchronize_dithering_eligibility(&self, framebuffer: &Framebuffer) {
+        self.dithering.set_available(
+            self.dithering_identity_supported
+                && !self.black_and_white.load(Ordering::Relaxed)
+                && framebuffer.hardware_y4_supported(),
+        );
     }
 
     /// Suspend the device to RAM once it's been idle for `stay_awake` with no
@@ -265,6 +284,7 @@ impl Platform for KindlePlatform {
         let initial_mode = self.output_mode(initial_night_mode.software_inverse);
         frame_buffer.fill(initial_mode.paper());
         frame_buffer.refresh_full();
+        self.synchronize_dithering_eligibility(&frame_buffer);
 
         let width = frame_buffer.width as usize;
         // The retained frame must describe the paper already filled above even
@@ -278,6 +298,7 @@ impl Platform for KindlePlatform {
             width * frame_buffer.height as usize
         ];
         let mut gray_renderer = GrayRenderer::new(width, initial_mode);
+        let mut rendered_image_scene = RenderedImageScene::default();
 
         let (panel_width, panel_height) = (frame_buffer.width, frame_buffer.height);
         let mut portrait = PortraitRuntime::new(launch_render_offset());
@@ -306,7 +327,14 @@ impl Platform for KindlePlatform {
                 &mut portrait,
                 &mut input_generation,
                 &self.window,
-                || prepare_native_display(&mut frame_buffer, &mut gray_renderer, &rgb_buffer),
+                || {
+                    prepare_native_display(
+                        &mut frame_buffer,
+                        &mut gray_renderer,
+                        &rgb_buffer,
+                        &rendered_image_scene.regions,
+                    )
+                },
             )? {
                 restore_full_frame = false;
                 presentation_barrier = false;
@@ -442,7 +470,14 @@ impl Platform for KindlePlatform {
                 &mut portrait,
                 &mut input_generation,
                 &self.window,
-                || prepare_native_display(&mut frame_buffer, &mut gray_renderer, &rgb_buffer),
+                || {
+                    prepare_native_display(
+                        &mut frame_buffer,
+                        &mut gray_renderer,
+                        &rgb_buffer,
+                        &rendered_image_scene.regions,
+                    )
+                },
             )? {
                 restore_full_frame = false;
                 presentation_barrier = false;
@@ -549,7 +584,14 @@ impl Platform for KindlePlatform {
                 &mut portrait,
                 &mut input_generation,
                 &self.window,
-                || prepare_native_display(&mut frame_buffer, &mut gray_renderer, &rgb_buffer),
+                || {
+                    prepare_native_display(
+                        &mut frame_buffer,
+                        &mut gray_renderer,
+                        &rgb_buffer,
+                        &rendered_image_scene.regions,
+                    )
+                },
             )? {
                 restore_full_frame = false;
                 presentation_barrier = false;
@@ -576,12 +618,21 @@ impl Platform for KindlePlatform {
                     PlatformError::Other(format!("failed to apply night mode: {error}"))
                 })?;
             let output_mode = self.output_mode(night_mode.software_inverse);
+            frame_buffer
+                .require_known_dithering_delivery()
+                .map_err(y4_platform_error)?;
+            self.synchronize_dithering_eligibility(&frame_buffer);
+            let image_snapshot = self.dithering.snapshot().map_err(|error| {
+                PlatformError::Other(format!("frame dithering state failed: {error}"))
+            })?;
+            let image_scene_changed = image_snapshot.revision != rendered_image_scene.revision;
             // Hardware inversion can change while the software transform stays
             // identical. It still needs a complete framebuffer rewrite and FULL.
             let mode_changed = night_mode.changed || output_mode != gray_renderer.mode();
             let force_full = restore_full_frame
                 || presentation_barrier
                 || sleep_presentation_token.is_some()
+                || image_scene_changed
                 || (post_frame_input.waiting && mode_changed);
             let render_rotation = (applied_rotation + portrait.controller.render_offset()) % 360;
             if force_full {
@@ -628,7 +679,31 @@ impl Platform for KindlePlatform {
                     height: size.height,
                 });
             });
-            if sleep_presentation_token.is_some() {
+            if (sleep_presentation_token.is_some() || image_scene_changed) && !did_render {
+                return Err(PlatformError::Other(
+                    "the requested image-processing scene did not render a complete Slint frame"
+                        .into(),
+                ));
+            }
+            let previous_raw_images = !rendered_image_scene.regions.is_empty();
+            if did_render {
+                rendered_image_scene = RenderedImageScene::capture(
+                    &image_snapshot,
+                    (panel_width, panel_height),
+                    render_rotation,
+                );
+            }
+            let has_raw_images = !rendered_image_scene.regions.is_empty();
+            let hardware_y4 = has_raw_images
+                && image_snapshot.hardware_available
+                && !output_mode.black_and_white
+                && frame_buffer.hardware_y4_supported();
+            let framebuffer_write_pending = force_full || mode_changed || dirty_region.is_some();
+            if framebuffer_write_pending && (previous_raw_images || has_raw_images) {
+                frame_buffer
+                    .wait_for_raw_update_complete_checked()
+                    .map_err(y4_platform_error)?;
+            } else if sleep_presentation_token.is_some() {
                 frame_buffer
                     .wait_for_pending_update_complete_checked()
                     .map_err(|error| {
@@ -637,16 +712,46 @@ impl Platform for KindlePlatform {
                         ))
                     })?;
             }
-            let written = gray_renderer.write_frame(
+            let software_regions = if has_raw_images && !hardware_y4 {
+                rendered_image_scene.regions.as_slice()
+            } else {
+                &[]
+            };
+            let written = gray_renderer.write_frame_with_image_regions(
                 &rgb_buffer,
                 (panel_width, panel_height),
                 dirty_region,
                 output_mode,
                 force_full || mode_changed,
+                software_regions,
                 |row, columns, pixels| frame_buffer.write_line(row, columns, pixels),
             );
             if force_full {
-                if let Some(token) = sleep_presentation_token {
+                if has_raw_images {
+                    submit_raw_frame(
+                        &mut frame_buffer,
+                        &mut gray_renderer,
+                        &rgb_buffer,
+                        output_mode,
+                        &rendered_image_scene.regions,
+                        &self.dithering,
+                        full_image_refresh(panel_width, panel_height),
+                        hardware_y4,
+                    )?;
+                    if let Some(token) = sleep_presentation_token {
+                        finish_sleep_presentation(
+                            &self.sleep_presentation,
+                            token,
+                            did_render,
+                            || Ok(()),
+                            || frame_buffer.wait_for_raw_update_complete_checked(),
+                        )?;
+                    } else {
+                        frame_buffer
+                            .wait_for_raw_update_complete_checked()
+                            .map_err(y4_platform_error)?;
+                    }
+                } else if let Some(token) = sleep_presentation_token {
                     finish_sleep_presentation(
                         &self.sleep_presentation,
                         token,
@@ -675,9 +780,24 @@ impl Platform for KindlePlatform {
                 restore_full_frame = false;
                 last_interaction = Instant::now();
             } else if night_mode.changed || written.mode_changed {
-                frame_buffer.refresh_full_checked().map_err(|error| {
-                    PlatformError::Other(format!("failed to refresh night-mode output: {error}"))
-                })?;
+                if has_raw_images {
+                    submit_raw_frame(
+                        &mut frame_buffer,
+                        &mut gray_renderer,
+                        &rgb_buffer,
+                        output_mode,
+                        &rendered_image_scene.regions,
+                        &self.dithering,
+                        full_image_refresh(panel_width, panel_height),
+                        hardware_y4,
+                    )?;
+                } else {
+                    frame_buffer.refresh_full_checked().map_err(|error| {
+                        PlatformError::Other(format!(
+                            "failed to refresh night-mode output: {error}"
+                        ))
+                    })?;
+                }
             } else if let Some(refresh) = crate::refresh::resolve(
                 pending,
                 written.region,
@@ -685,11 +805,162 @@ impl Platform for KindlePlatform {
                 panel_height,
                 render_rotation,
             ) {
-                frame_buffer.refresh_planned(refresh);
+                if has_raw_images
+                    && raw_images_intersect_refresh(refresh.region, &rendered_image_scene.regions)
+                {
+                    submit_raw_frame(
+                        &mut frame_buffer,
+                        &mut gray_renderer,
+                        &rgb_buffer,
+                        output_mode,
+                        &rendered_image_scene.regions,
+                        &self.dithering,
+                        refresh,
+                        hardware_y4,
+                    )?;
+                } else if has_raw_images {
+                    // This update contains only ordinary UI pixels. Keep its
+                    // normal waveform and bounds even while a raw image remains
+                    // elsewhere in the retained scene, but still fail closed
+                    // if the driver's delivery outcome becomes uncertain.
+                    frame_buffer
+                        .refresh_planned_checked(refresh)
+                        .map_err(y4_platform_error)?;
+                } else {
+                    frame_buffer.refresh_planned(refresh);
+                }
             }
         }
         Ok(())
     }
+}
+
+#[derive(Default)]
+struct RenderedImageScene {
+    revision: u64,
+    regions: Vec<PhysicalImageRegion>,
+}
+
+impl RenderedImageScene {
+    fn capture(snapshot: &DitheringSnapshot, panel: (u32, u32), rotation: u32) -> Self {
+        Self {
+            revision: snapshot.revision,
+            regions: physical_image_regions(&snapshot.regions, panel, rotation),
+        }
+    }
+}
+
+fn native_hardware_y4_eligible() -> bool {
+    #[cfg(not(test))]
+    {
+        std::fs::File::open("/proc/usid")
+            .and_then(crate::dithering::read_supported_scribe)
+            .unwrap_or(false)
+            && crate::framebuffer::probe_hardware_y4_metadata().unwrap_or(false)
+    }
+    #[cfg(test)]
+    {
+        // Host unit tests must never inspect a workstation's hardware identity.
+        false
+    }
+}
+
+fn y4_platform_error(error: io::Error) -> PlatformError {
+    PlatformError::Other(format!("raw-image presentation failed: {error}"))
+}
+
+fn full_image_refresh(width: u32, height: u32) -> ResolvedRefresh {
+    ResolvedRefresh {
+        region: PhysicalRect {
+            x: 0,
+            y: 0,
+            width,
+            height,
+        },
+        waveform: RefreshWaveform::Gc16,
+        flashing: true,
+    }
+}
+
+fn raw_images_intersect_refresh(region: PhysicalRect, images: &[PhysicalImageRegion]) -> bool {
+    if region.width == 0 || region.height == 0 {
+        return false;
+    }
+    let left = i64::from(region.x);
+    let top = i64::from(region.y);
+    let right = left + i64::from(region.width);
+    let bottom = top + i64::from(region.height);
+    images.iter().any(|image| {
+        let image = image.region;
+        image.width > 0
+            && image.height > 0
+            && left < i64::from(image.x) + i64::from(image.width)
+            && i64::from(image.x) < right
+            && top < i64::from(image.y) + i64::from(image.height)
+            && i64::from(image.y) < bottom
+    })
+}
+
+/// A definite driver rejection is the only permission to replace Raw pixels.
+/// The retained canonical frame supplies exactly the current image regions;
+/// this fallback is completed here without waiting for an application timer.
+fn submit_raw_frame(
+    framebuffer: &mut Framebuffer,
+    renderer: &mut GrayRenderer,
+    rgb: &[Rgb8Pixel],
+    mode: GrayMode,
+    regions: &[PhysicalImageRegion],
+    dithering: &DitheringControl,
+    refresh: ResolvedRefresh,
+    hardware_y4: bool,
+) -> Result<(), PlatformError> {
+    framebuffer
+        .require_known_dithering_delivery()
+        .map_err(y4_platform_error)?;
+    let result = framebuffer
+        .refresh_raw_checked(refresh, hardware_y4)
+        .map_err(y4_platform_error)?;
+    if result.accepted {
+        log::debug!(
+            "Y4 frame requested=true available={} submitted={} software_fallback={} marker={:?}",
+            dithering.hardware_y4_available(),
+            result.hardware_y4_submitted,
+            !hardware_y4,
+            result.marker,
+        );
+        return Ok(());
+    }
+    if !hardware_y4 {
+        return Err(PlatformError::Other(format!(
+            "the driver rejected the software raw-image update: {:?}",
+            result.last_errno,
+        )));
+    }
+    // The failed Y4 marker was not committed. Settle the preceding successful
+    // marker before changing any byte that its DMA operation may still read.
+    framebuffer
+        .wait_for_raw_update_complete_checked()
+        .map_err(y4_platform_error)?;
+    dithering.reject_hardware();
+    let panel = (framebuffer.width, framebuffer.height);
+    renderer.rewrite_image_regions(rgb, panel, regions, mode, |row, columns, pixels| {
+        framebuffer.write_line(row, columns, pixels);
+    });
+    framebuffer.reset_raw_abi_after_rejection(result.last_errno);
+    let fallback = framebuffer
+        .refresh_raw_checked(full_image_refresh(panel.0, panel.1), false)
+        .map_err(y4_platform_error)?;
+    if !fallback.accepted {
+        return Err(PlatformError::Other(format!(
+            "the driver rejected the image-only software fallback: {:?}",
+            fallback.last_errno,
+        )));
+    }
+    log::info!(
+        "Y4 frame requested=true available=false submitted=false software_fallback=true marker={:?}",
+        fallback.marker,
+    );
+    Ok(())
 }
 
 /// A pending sleep frame needs stronger completion evidence than an ordinary
@@ -964,8 +1235,18 @@ fn prepare_native_display(
     framebuffer: &mut Framebuffer,
     renderer: &mut GrayRenderer,
     rgb: &[Rgb8Pixel],
+    raw_image_regions: &[PhysicalImageRegion],
 ) -> Result<(), PlatformError> {
-    framebuffer.wait_for_update_complete();
+    framebuffer
+        .require_known_dithering_delivery()
+        .map_err(y4_platform_error)?;
+    if raw_image_regions.is_empty() {
+        framebuffer.wait_for_update_complete();
+    } else {
+        framebuffer
+            .wait_for_raw_update_complete_checked()
+            .map_err(y4_platform_error)?;
+    }
     let software_inverse = framebuffer.prepare_native_snapshot().map_err(|error| {
         PlatformError::Other(format!(
             "failed to restore native framebuffer mode for sleep: {error}"
@@ -975,12 +1256,13 @@ fn prepare_native_display(
         dark_mode: software_inverse,
         ..renderer.mode()
     };
-    renderer.write_frame(
+    renderer.write_frame_with_image_regions(
         rgb,
         (framebuffer.width, framebuffer.height),
         None,
         mode,
         true,
+        raw_image_regions,
         |row, columns, pixels| framebuffer.write_line(row, columns, pixels),
     );
     framebuffer.yield_native_display();
@@ -1191,6 +1473,207 @@ fn retire_orientation_child(mut child: Child) {
 }
 
 #[cfg(test)]
+mod image_scene_tests {
+    use super::*;
+    use crate::dithering::RawImageRegion;
+
+    #[test]
+    fn native_snapshots_keep_the_actual_scene_when_the_next_model_is_only_pending() {
+        let control = DitheringControl::new(true);
+        let image = RawImageRegion {
+            x: 1,
+            y: 2,
+            width: 3,
+            height: 2,
+        };
+        control.publish(vec![image]).unwrap();
+        let actual = RenderedImageScene::capture(&control.snapshot().unwrap(), (8, 6), 180);
+        assert_eq!(actual.regions.len(), 1);
+        assert_eq!(
+            actual.regions[0].region,
+            RawImageRegion {
+                x: 4,
+                y: 2,
+                width: 3,
+                height: 2,
+            }
+        );
+        assert_eq!(actual.regions[0].image_local(4, 2), Some((2, 1)));
+        control.publish(Vec::new()).unwrap();
+        let pending_cover = control.snapshot().unwrap();
+        assert_ne!(actual.revision, pending_cover.revision);
+        assert_eq!(actual.regions[0].source, image);
+        let rendered_cover = RenderedImageScene::capture(&pending_cover, (8, 6), 0);
+        assert!(rendered_cover.regions.is_empty());
+        control.publish(vec![image]).unwrap();
+        // A pending wake model cannot change the cover already in canonical RGB.
+        assert!(rendered_cover.regions.is_empty());
+        let rendered_wake = RenderedImageScene::capture(&control.snapshot().unwrap(), (8, 6), 180);
+        assert_eq!(rendered_wake.regions, actual.regions);
+    }
+
+    #[test]
+    fn image_refresh_routing_keeps_outside_ui_updates_on_their_original_waveform() {
+        let control = DitheringControl::new(true);
+        control
+            .publish(vec![RawImageRegion {
+                x: 1,
+                y: 2,
+                width: 3,
+                height: 2,
+            }])
+            .unwrap();
+        let scene = RenderedImageScene::capture(&control.snapshot().unwrap(), (8, 6), 180);
+        // The displayed image is x=4..7, y=2..4 after rotation. Its old source
+        // coordinates must never route a footer or paragraph through Y4.
+        for waveform in [
+            RefreshWaveform::Auto,
+            RefreshWaveform::Du,
+            RefreshWaveform::A2,
+        ] {
+            for region in [
+                PhysicalRect {
+                    x: 0,
+                    y: 0,
+                    width: 8,
+                    height: 1,
+                },
+                PhysicalRect {
+                    x: 0,
+                    y: 5,
+                    width: 8,
+                    height: 1,
+                },
+                PhysicalRect {
+                    x: 1,
+                    y: 2,
+                    width: 2,
+                    height: 2,
+                },
+                PhysicalRect {
+                    x: 7,
+                    y: 2,
+                    width: 1,
+                    height: 2,
+                },
+                PhysicalRect {
+                    x: 4,
+                    y: 4,
+                    width: 3,
+                    height: 1,
+                },
+            ] {
+                let refresh = ResolvedRefresh {
+                    region,
+                    waveform,
+                    flashing: false,
+                };
+                let original = refresh;
+                assert!(!raw_images_intersect_refresh(
+                    refresh.region,
+                    &scene.regions
+                ));
+                assert_eq!(refresh, original);
+            }
+        }
+    }
+
+    #[test]
+    fn crossing_an_image_edge_or_overlapping_image_regions_uses_the_raw_route() {
+        let control = DitheringControl::new(true);
+        control
+            .publish(vec![
+                RawImageRegion {
+                    x: 1,
+                    y: 2,
+                    width: 3,
+                    height: 2,
+                },
+                RawImageRegion {
+                    x: 2,
+                    y: 1,
+                    width: 3,
+                    height: 3,
+                },
+            ])
+            .unwrap();
+        let scene = RenderedImageScene::capture(&control.snapshot().unwrap(), (8, 6), 0);
+        for region in [
+            PhysicalRect {
+                x: 0,
+                y: 2,
+                width: 2,
+                height: 1,
+            },
+            PhysicalRect {
+                x: 3,
+                y: 2,
+                width: 2,
+                height: 1,
+            },
+            PhysicalRect {
+                x: 2,
+                y: 0,
+                width: 1,
+                height: 2,
+            },
+            PhysicalRect {
+                x: 4,
+                y: 3,
+                width: 2,
+                height: 2,
+            },
+        ] {
+            assert!(raw_images_intersect_refresh(region, &scene.regions));
+        }
+        assert!(!raw_images_intersect_refresh(
+            PhysicalRect {
+                x: 5,
+                y: 1,
+                width: 1,
+                height: 3
+            },
+            &scene.regions,
+        ));
+    }
+
+    #[test]
+    fn full_updates_include_raw_images_but_empty_or_absent_regions_do_not() {
+        let control = DitheringControl::new(true);
+        control
+            .publish(vec![RawImageRegion {
+                x: 1,
+                y: 2,
+                width: 3,
+                height: 2,
+            }])
+            .unwrap();
+        let scene = RenderedImageScene::capture(&control.snapshot().unwrap(), (8, 6), 180);
+        let full = full_image_refresh(8, 6);
+        assert!(raw_images_intersect_refresh(full.region, &scene.regions));
+        assert_eq!(full.waveform, RefreshWaveform::Gc16);
+        assert!(full.flashing);
+        assert!(!raw_images_intersect_refresh(full.region, &[]));
+        for region in [
+            PhysicalRect {
+                x: 5,
+                y: 3,
+                width: 0,
+                height: 1,
+            },
+            PhysicalRect {
+                x: 5,
+                y: 3,
+                width: 1,
+                height: 0,
+            },
+        ] {
+            assert!(!raw_images_intersect_refresh(region, &scene.regions));
+        }
+    }
+}
+
+#[cfg(test)]
 mod managed_sleep_tests {
     use super::{begin_managed_resume, pause_managed_input as pause_with_display};
     use crate::managed_sleep::{ManagedSleepControl, ManagedSleepState};
@@ -1223,6 +1706,7 @@ mod managed_sleep_tests {
             sleep_presentation: Arc::new(
                 crate::sleep_presentation::SleepPresentationControl::default(),
             ),
+            dithering: Arc::new(crate::dithering::DitheringControl::default()),
             wake: wake.write,
             quit: Arc::new(AtomicBool::new(false)),
         };

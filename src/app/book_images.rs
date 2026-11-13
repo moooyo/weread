@@ -159,14 +159,13 @@ impl App {
         let budget = LayoutBudget::default();
         let _old = budget.hold(self.retained_layout_metadata()?)?;
         let images = self.prepare_reader_image_rows(&budget)?;
-        ui.global::<ReaderModel>().set_images(images);
-        Ok(())
+        self.publish_reader_images(images)
     }
 
     pub(super) fn prepare_reader_image_rows(
         &self,
         budget: &LayoutBudget,
-    ) -> Result<ModelRc<ReaderImage>> {
+    ) -> Result<super::image_processing::PreparedReaderImages> {
         let snapshot = self.reader_image_snapshot_for(
             &self.reader.book_id,
             self.reader.chapter_index,
@@ -192,8 +191,29 @@ impl App {
             .flat_map(|image| [image.id.as_str(), image.caption.as_str()]);
         self.preflight_view_fields::<ReaderImage>(budget, count, fields, 0)?;
         let mut images = LayoutVec::with_capacity(budget, count)?;
+        let (requested, mut effective) = self.image_processing_choices();
+        let hardware = effective == crate::preferences::ImageDithering::Hardware;
+        let mut fallback = LayoutVec::with_capacity(budget, if hardware { count } else { 0 })?;
+        let (viewport, scale) = self.image_viewport();
+        let mut raster = super::image_raster::RasterBudget::new(viewport)?;
+        let mut regions = Vec::new();
+        let mut clean = true;
+        let mut identity = sha2::Sha256::new();
+        use sha2::Digest;
+        identity.update((self.reader.book_id.len() as u64).to_be_bytes());
+        identity.update(self.reader.book_id.as_bytes());
+        identity.update(self.reader.chapter_index.to_be_bytes());
         let Some(snapshot) = snapshot else {
-            return self.admitted_view_model(images, budget);
+            let rows = self.admitted_view_model(images, budget)?;
+            return self.prepared_reader_scene(
+                rows.clone(),
+                rows,
+                requested,
+                effective,
+                regions,
+                String::new(),
+                budget,
+            );
         };
         if let Some(page) = self
             .reader
@@ -214,27 +234,99 @@ impl App {
                 if !valid_placement(placed.y, placed.width, placed.height) {
                     continue;
                 }
+                let mut row = ReaderImage {
+                    y: placed.y,
+                    width: placed.width,
+                    height: placed.height,
+                    ..Default::default()
+                };
+                let (frame, clip) = self.reader_image_box(&row);
+                let target = (
+                    (frame.2 * scale).round().max(1.0) as u32,
+                    (frame.3 * scale).round().max(1.0) as u32,
+                );
                 let picture = snapshot.paths[index]
                     .as_ref()
-                    .and_then(|path| slint::Image::load_from_path(path).ok());
+                    .map(|path| {
+                        super::image_raster::prepare_picture(
+                            path,
+                            target,
+                            super::image_raster::PictureFit::Contain,
+                            effective,
+                            &mut raster,
+                        )
+                    })
+                    .transpose()?;
+                let mut fallback_picture = slint::Image::default();
+                if let Some(picture) = picture {
+                    row.loaded = true;
+                    row.picture = picture.primary;
+                    fallback_picture = picture.software;
+                    identity.update(image.asset_id.as_deref().unwrap_or("").as_bytes());
+                    identity.update(picture.dimensions.0.to_be_bytes());
+                    identity.update(picture.dimensions.1.to_be_bytes());
+                    if hardware {
+                        let ratio = (frame.2 / f64::from(picture.dimensions.0))
+                            .min(frame.3 / f64::from(picture.dimensions.1));
+                        let width = f64::from(picture.dimensions.0) * ratio;
+                        let height = f64::from(picture.dimensions.1) * ratio;
+                        let actual = (
+                            frame.0 + (frame.2 - width) / 2.0,
+                            frame.1 + (frame.3 - height) / 2.0,
+                            width,
+                            height,
+                        );
+                        if let Some(region) =
+                            super::image_processing::clean_region(actual, clip, scale)
+                        {
+                            budget.preflight(
+                                (regions.len() + 1)
+                                    * std::mem::size_of::<crate::platform::ImageRegion>(),
+                                0,
+                            )?;
+                            regions.push(region);
+                        } else {
+                            clean = false;
+                        }
+                    }
+                }
                 let (id, mut owner) = self.admitted_shared_string(&image.id, budget)?;
                 let (caption, next) = self.admitted_shared_string(&image.caption, budget)?;
                 owner.merge(next);
-                images.push_owned(
-                    ReaderImage {
-                        id,
-                        loaded: picture.is_some(),
-                        picture: picture.unwrap_or_default(),
-                        y: placed.y,
-                        width: placed.width,
-                        height: placed.height,
-                        caption,
-                    },
-                    owner,
-                )?;
+                row.id = id;
+                row.caption = caption;
+                if hardware {
+                    let mut software = row.clone();
+                    software.picture = fallback_picture;
+                    let shared = budget.copy_storage(row.id.len() + row.caption.len() + 2)?;
+                    fallback.push_owned(software, shared)?;
+                }
+                images.push_owned(row, owner)?;
             }
         }
-        self.admitted_view_model(images, budget)
+        let primary = self.admitted_view_model(images, budget)?;
+        let software = if hardware {
+            self.admitted_view_model(fallback, budget)?
+        } else {
+            primary.clone()
+        };
+        let primary = if hardware && !clean {
+            effective = crate::preferences::ImageDithering::Software;
+            regions.clear();
+            software.clone()
+        } else {
+            primary
+        };
+        identity.update(effective.as_str().as_bytes());
+        self.prepared_reader_scene(
+            primary,
+            software,
+            requested,
+            effective,
+            regions,
+            hex::encode(identity.finalize()),
+            budget,
+        )
     }
 
     pub(super) fn load_reader_image(&mut self, id: &str) -> Result<()> {

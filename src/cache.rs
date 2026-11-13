@@ -2276,6 +2276,42 @@ impl FileCache {
         self.put_with_extension(key, output.get_ref(), "png", None)
     }
 
+    /// Keep canonical eight-bit luminance for later display-specific processing.
+    /// Cover thumbnails deliberately retain their independent sixteen-level path.
+    pub fn put_gray8(&self, key: &str, bytes: &[u8], width: u32, height: u32) -> Result<PathBuf> {
+        ensure!(
+            width > 0 && height > 0 && width <= 2048 && height <= 2048,
+            "invalid canonical image geometry"
+        );
+        ensure!(
+            bytes.len() <= 16 * 1024 * 1024,
+            "canonical image download exceeds size limit"
+        );
+        let mut reader = image::ImageReader::new(Cursor::new(bytes)).with_guessed_format()?;
+        let mut limits = image::Limits::default();
+        limits.max_image_width = Some(8192);
+        limits.max_image_height = Some(8192);
+        limits.max_alloc = Some(64 * 1024 * 1024);
+        reader.limits(limits);
+        let mut rgba = reader
+            .decode()
+            .context("decode canonical image")?
+            .thumbnail(width, height)
+            .into_rgba8();
+        for pixel in rgba.pixels_mut() {
+            let alpha = u32::from(pixel[3]);
+            for channel in &mut pixel.0[..3] {
+                *channel = ((u32::from(*channel) * alpha + 255 * (255 - alpha) + 127) / 255) as u8;
+            }
+            pixel[3] = 255;
+        }
+        let grayscale = image::DynamicImage::ImageRgba8(rgba).into_luma8();
+        let mut output = Cursor::new(Vec::new());
+        image::DynamicImage::ImageLuma8(grayscale)
+            .write_to(&mut output, image::ImageFormat::Png)?;
+        self.put_with_extension(key, output.get_ref(), "png", None)
+    }
+
     pub fn set_pinned(&self, key: &str, pinned: bool) -> Result<bool> {
         let Some(current) = self.pinned_state(key)? else {
             return Ok(false);
@@ -3900,6 +3936,92 @@ mod tests {
         let result = image::open(path)?.to_luma8();
         assert_eq!(result.dimensions(), (3, 2));
         assert!(result.pixels().all(|pixel| pixel[0] % 17 == 0));
+        drop(cache);
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn canonical_gray8_cache_preserves_all_input_luminances() -> Result<()> {
+        let root = temporary_root();
+        let cache = FileCache::open(&root, 1024 * 1024)?;
+        let source = image::GrayImage::from_fn(256, 1, |x, _| image::Luma([x as u8]));
+        let mut encoded = Cursor::new(Vec::new());
+        image::DynamicImage::ImageLuma8(source).write_to(&mut encoded, image::ImageFormat::Png)?;
+        let path = cache.put_gray8("canonical-ramp", encoded.get_ref(), 256, 1)?;
+        let result = image::open(path)?.into_luma8();
+        assert_eq!(result.dimensions(), (256, 1));
+        assert_eq!(result.into_raw(), (0_u8..=255).collect::<Vec<_>>());
+        drop(cache);
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn canonical_gray8_cache_composites_transparency_on_white() -> Result<()> {
+        let root = temporary_root();
+        let cache = FileCache::open(&root, 1024 * 1024)?;
+        let source =
+            image::RgbaImage::from_raw(3, 1, vec![0, 0, 0, 0, 0, 0, 0, 128, 64, 64, 64, 255])
+                .unwrap();
+        let mut encoded = Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(source).write_to(&mut encoded, image::ImageFormat::Png)?;
+        let path = cache.put_gray8("canonical-alpha", encoded.get_ref(), 3, 1)?;
+        let result = image::open(path)?.into_luma8();
+        assert_eq!(result.into_raw(), vec![255, 127, 64]);
+        drop(cache);
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn canonical_gray8_limits_reject_without_replacing_cached_objects() -> Result<()> {
+        let root = temporary_root();
+        let cache = FileCache::open(&root, 1024 * 1024)?;
+        let retained = cache.put("canonical-limits", b"retained")?;
+        let original_usage = cache.usage()?;
+        let original_payloads = payload_footprint(&cache)?;
+        for (width, height) in [(0, 1), (1, 0), (2049, 1), (1, 2049)] {
+            let error = cache
+                .put_gray8("canonical-limits", b"not an image", width, height)
+                .unwrap_err();
+            assert!(error.to_string().contains("geometry"));
+        }
+        let oversized = vec![0; 16 * 1024 * 1024 + 1];
+        let error = cache
+            .put_gray8("canonical-limits", &oversized, 1, 1)
+            .unwrap_err();
+        assert!(error.to_string().contains("size limit"));
+        assert!(
+            cache
+                .put_gray8("canonical-limits", b"not an image", 1, 1)
+                .is_err()
+        );
+        assert_eq!(fs::read(&retained)?, b"retained");
+        assert_eq!(cache.get_for_commit("canonical-limits")?, Some(retained));
+        assert_eq!(cache.usage()?, original_usage);
+        assert_eq!(payload_footprint(&cache)?, original_payloads);
+        drop(cache);
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn canonical_gray8_cache_respects_source_edges_and_target_aspect() -> Result<()> {
+        let root = temporary_root();
+        let cache = FileCache::open(&root, 1024 * 1024)?;
+        let mut encoded = Cursor::new(Vec::new());
+        image::DynamicImage::new_luma8(8193, 1).write_to(&mut encoded, image::ImageFormat::Png)?;
+        assert!(
+            cache
+                .put_gray8("canonical-too-wide", encoded.get_ref(), 2048, 1)
+                .is_err()
+        );
+        assert!(cache.get_for_commit("canonical-too-wide")?.is_none());
+        let mut encoded = Cursor::new(Vec::new());
+        image::DynamicImage::new_luma8(6, 4).write_to(&mut encoded, image::ImageFormat::Png)?;
+        let path = cache.put_gray8("canonical-aspect", encoded.get_ref(), 3, 3)?;
+        assert_eq!(image::open(path)?.into_luma8().dimensions(), (3, 2));
         drop(cache);
         fs::remove_dir_all(root)?;
         Ok(())

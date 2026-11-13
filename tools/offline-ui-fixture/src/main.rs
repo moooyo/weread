@@ -18,11 +18,13 @@ use clap::Parser;
 use flate2::read::GzDecoder;
 use serde::Deserialize;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use slint::{ComponentHandle, Model, fontique_010::fontique};
 use weread::{
     app::{App, AppOptions, FontRecord, model},
     i18n,
     platform::{self, DeviceProfile, Platform},
+    preferences::{AppPreferences, ImageDithering},
     reader::TextMetrics,
     ui::{
         AppWindow, ArticleModel, AuxiliaryModel, DetailModel, DetailReview, LibraryModel,
@@ -32,6 +34,8 @@ use weread::{
 
 const MAX_FONT_BYTES: u64 = 64 * 1024 * 1024;
 const SLEEP_COVER_SIZE: (u32, u32) = (300, 450);
+const RAMP_SIZE: (u32, u32) = (1024, 256);
+const RAMP_FORMAT: &str = "weread-offline-gray8-ramp-v1";
 
 #[derive(Parser)]
 #[command(about = "Render isolated offline UI states with observable public models")]
@@ -45,7 +49,7 @@ struct Arguments {
     #[arg(long)]
     data_dir: PathBuf,
     #[arg(long)]
-    capture: PathBuf,
+    capture: Option<PathBuf>,
     #[arg(long)]
     actions: Option<PathBuf>,
     /// Accepted for command compatibility; fixture mode always uses demo data.
@@ -56,8 +60,14 @@ struct Arguments {
     offline: bool,
     #[arg(long, default_value_t = 1_200)]
     exit_after_ms: u64,
-    #[arg(long, value_parser = ["login-qr", "login-code", "detail-reviews", "detail-notes", "article-qr", "sleep-cover", "sleep-title", "sleep-neutral"])]
+    #[arg(long, value_parser = ["login-qr", "login-code", "detail-reviews", "detail-notes", "article-qr", "sleep-cover", "sleep-title", "sleep-neutral", "image-processing-default", "image-processing-software", "image-processing-hardware", "image-processing-persisted"])]
     fixture: Option<String>,
+    /// Create only public synthetic current-layout data for a separate offline process.
+    #[arg(long)]
+    seed_image_ramp_only: bool,
+    /// A complete current preference snapshot; never a legacy payload patch.
+    #[arg(long, value_parser = ["off", "software", "hardware"])]
+    image_method: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -87,6 +97,38 @@ fn run(arguments: Arguments) -> Result<()> {
     if arguments.exit_after_ms == 0 {
         bail!("A nonzero bounded deadline is required");
     }
+    let image_fixture = arguments
+        .fixture
+        .as_deref()
+        .is_some_and(|name| name.starts_with("image-processing-"));
+    if arguments.seed_image_ramp_only || image_fixture {
+        let method = arguments
+            .image_method
+            .as_deref()
+            .or(match arguments.fixture.as_deref() {
+                Some("image-processing-software") => Some("software"),
+                Some("image-processing-hardware") => Some("hardware"),
+                _ => None,
+            });
+        seed_image_ramp(
+            &arguments.data_dir,
+            arguments.device,
+            method,
+            arguments.seed_image_ramp_only,
+            arguments.fixture.as_deref() == Some("image-processing-persisted"),
+        )?;
+        if arguments.seed_image_ramp_only {
+            println!(
+                "Synthetic current-layout image data: {}",
+                arguments.data_dir.display()
+            );
+            return Ok(());
+        }
+    }
+    let capture = arguments
+        .capture
+        .clone()
+        .context("A UI capture path is required")?;
     let mut actions: Vec<Action> = arguments
         .actions
         .as_ref()
@@ -130,7 +172,7 @@ fn run(arguments: Arguments) -> Result<()> {
             initial_screen: arguments.screen.clone(),
             fonts,
         },
-        platform,
+        platform.clone(),
         &runtime,
     )?;
     let fixture_qr = fixture_qr()?;
@@ -149,7 +191,8 @@ fn run(arguments: Arguments) -> Result<()> {
     let timer_application = application.clone();
     let timer_failures = failures.clone();
     let fixture = arguments.fixture.clone();
-    let fixture_capture = arguments.capture.clone();
+    let fixture_capture = capture.clone();
+    let timer_platform = platform.clone();
     let profile = arguments.device;
     let deadline = arguments.exit_after_ms;
     let started = Instant::now();
@@ -190,6 +233,7 @@ fn run(arguments: Arguments) -> Result<()> {
                                 &ui,
                                 &fixture_capture,
                                 profile,
+                                &timer_platform,
                                 fixture.as_deref(),
                                 &action.value,
                             )?,
@@ -240,14 +284,193 @@ fn run(arguments: Arguments) -> Result<()> {
     if !failures.borrow().is_empty() {
         bail!("{}", failures.borrow().join("\n"));
     }
-    capture_window(&ui, &arguments.capture, arguments.device)?;
+    capture_window(&ui, &capture, arguments.device)?;
+    if image_fixture {
+        capture_reader_picture_buffers(&ui, &capture)?;
+    }
     fs::write(
-        arguments.capture.with_extension("state.json"),
-        serde_json::to_vec_pretty(&model_state(&ui, arguments.fixture.as_deref()))?,
+        capture.with_extension("state.json"),
+        serde_json::to_vec_pretty(&model_state(&ui, arguments.fixture.as_deref(), &platform))?,
     )?;
     ui.hide()?;
     drop(application);
     runtime.shutdown_timeout(Duration::from_secs(3));
+    Ok(())
+}
+
+fn seed_image_ramp(
+    root: &Path,
+    profile: DeviceProfile,
+    method: Option<&str>,
+    fresh_only: bool,
+    persisted_only: bool,
+) -> Result<()> {
+    use weread::{
+        book_assets::{BookAssetStore, DEFAULT_IMAGE_BUDGET},
+        source::images::{DownloadedChapterImages, ImageAsset},
+        store::Store,
+    };
+
+    let receipt_path = root.join("synthetic-image-ramp.json");
+    let existing = receipt_path.is_file();
+    if fresh_only && root.exists() && fs::read_dir(root)?.next().is_some() {
+        bail!("Seed-only export requires a fresh empty data directory");
+    }
+    if persisted_only && !existing {
+        bail!("A persisted image fixture requires a previously seeded synthetic directory");
+    }
+    if !existing && root.exists() && fs::read_dir(root)?.next().is_some() {
+        bail!("Refusing to seed a nonempty directory without a synthetic fixture receipt");
+    }
+    if existing {
+        let receipt: Value = serde_json::from_slice(&fs::read(&receipt_path)?)?;
+        if receipt["format"] != RAMP_FORMAT || receipt["synthetic"] != true {
+            bail!("The existing directory does not identify this public synthetic fixture");
+        }
+    }
+    let data = root.join("demo");
+    fs::create_dir_all(&data)?;
+    let store = Store::open(data.join("library.sqlite"))?;
+    if !existing {
+        weread::demo::seed(&store)?;
+        let assets = BookAssetStore::open(data.join("images"), DEFAULT_IMAGE_BUDGET)?;
+        let image = image::GrayImage::from_fn(RAMP_SIZE.0, RAMP_SIZE.1, |x, y| {
+            let value = if y < 4 || y >= RAMP_SIZE.1 - 4 || x == 0 || x == RAMP_SIZE.0 - 1 {
+                0
+            } else {
+                (x / 4) as u8
+            };
+            image::Luma([value])
+        });
+        let mut encoded = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageLuma8(image).write_to(&mut encoded, image::ImageFormat::Png)?;
+        let bytes = encoded.into_inner();
+        let digest = hex::encode(Sha256::digest(&bytes));
+        let source_name = "synthetic-gray8-ramp.png";
+        fs::write(root.join(source_name), &bytes)?;
+        let packet = DownloadedChapterImages {
+            assets: vec![ImageAsset {
+                id: digest.clone(),
+                media_type: "image/png".into(),
+                extension: "png".into(),
+                source_names: vec![source_name.into()],
+                bytes,
+            }],
+            source_to_asset: BTreeMap::from([(source_name.into(), digest.clone())]),
+        };
+        let mut chapters = Vec::new();
+        for index in [0, 1] {
+            let chapter = store
+                .chapter("demo-0", index)?
+                .context("The public demo chapter is missing")?;
+            let body = chapter
+                .body
+                .context("The public demo chapter has no canonical body")?;
+            let mut html = String::new();
+            for (paragraph, text) in body.split('\n').enumerate() {
+                let escaped = text
+                    .replace('&', "&amp;")
+                    .replace('<', "&lt;")
+                    .replace('>', "&gt;")
+                    .replace('"', "&quot;");
+                html.push_str(&format!("<p>{escaped}</p>"));
+                if paragraph == 0 {
+                    html.push_str(&format!(
+                        "<img src=\"{source_name}\" alt=\"Synthetic Gray8 ramp\" />"
+                    ));
+                }
+            }
+            let manifest = assets.commit_chapter(
+                &store,
+                "demo-0",
+                &chapter.id,
+                &html,
+                &body,
+                Some(&packet),
+            )?;
+            if !manifest.complete
+                || manifest.images.len() != 1
+                || !assets.complete(&store, "demo-0", &chapter.id)?
+            {
+                bail!("The public asset API did not publish a complete ramp manifest");
+            }
+            let picture = &manifest.images[0];
+            let path = assets
+                .image_path(picture)?
+                .context("The canonical ramp image is unavailable")?;
+            chapters.push(json!({
+                "index": index, "chapter_uid": chapter.id,
+                "text_sha256": manifest.text_sha256, "anchor": picture.anchor,
+                "asset_id": picture.asset_id, "cache_key": picture.cache_key,
+                "canonical_path": path, "size": [picture.width, picture.height],
+                "caption": picture.caption,
+            }));
+        }
+        // The normal demo initializer must retain these complete replacement assets.
+        store.set_setting("demo.images-seeded", &true)?;
+        fs::write(
+            &receipt_path,
+            serde_json::to_vec_pretty(&json!({
+                "format": RAMP_FORMAT, "synthetic": true, "current_layout": true,
+                "purpose": "Public offline Gray8 input fixture; no account or source entitlement proof",
+                "book_id": "demo-0", "source_file": source_name,
+                "source_sha256": digest, "source_size": [RAMP_SIZE.0, RAMP_SIZE.1],
+                "chapters": chapters,
+                "native_usage": "Use a fresh isolated root with production --demo --offline --screen reader",
+                "coverage_limit": "Seed data do not establish hardware Y4 application, completion, panel levels or device support",
+            }))?,
+        )?;
+    }
+    if let Some(method) = method {
+        let mut preferences = store
+            .setting::<AppPreferences>("preferences")?
+            .unwrap_or_else(|| AppPreferences::for_device(profile.is_scribe()));
+        preferences.image_dithering = ImageDithering::parse(method);
+        store.set_setting("preferences", &preferences)?;
+    } else if persisted_only && store.setting::<AppPreferences>("preferences")?.is_none() {
+        bail!("The persisted fixture has no complete current preferences snapshot");
+    }
+    Ok(())
+}
+
+fn capture_reader_picture_buffers(ui: &AppWindow, capture: &Path) -> Result<()> {
+    let mut pictures = Vec::new();
+    let stem = capture
+        .file_stem()
+        .context("The capture has no filename")?
+        .to_string_lossy();
+    for (index, row) in ui.global::<ReaderModel>().get_images().iter().enumerate() {
+        if !row.loaded {
+            continue;
+        }
+        let pixels = row
+            .picture
+            .to_rgb8()
+            .context("The actual App picture is not an inspectable prepared RGB buffer")?;
+        let path = capture.with_file_name(format!("{stem}.picture-{index}.png"));
+        image::save_buffer_with_format(
+            &path,
+            pixels.as_bytes(),
+            pixels.width(),
+            pixels.height(),
+            image::ColorType::Rgb8,
+            image::ImageFormat::Png,
+        )?;
+        pictures.push(json!({
+            "id": row.id.to_string(), "path": path,
+            "size": [pixels.width(), pixels.height()],
+            "y": row.y, "width": row.width, "height": row.height,
+            "caption": row.caption.to_string(),
+            "origin": "Actual public ReaderModel image produced by App image preparation",
+        }));
+    }
+    if pictures.is_empty() {
+        bail!("The real Reader pipeline did not publish the synthetic ramp image");
+    }
+    fs::write(
+        capture.with_extension("images.json"),
+        serde_json::to_vec_pretty(&pictures)?,
+    )?;
     Ok(())
 }
 
@@ -508,6 +731,7 @@ fn capture_fixture_checkpoint(
     ui: &AppWindow,
     capture: &Path,
     profile: DeviceProfile,
+    platform: &Platform,
     fixture: Option<&str>,
     checkpoint: &str,
 ) -> Result<()> {
@@ -522,7 +746,7 @@ fn capture_fixture_checkpoint(
     capture_window(ui, &path, profile)?;
     fs::write(
         path.with_extension("state.json"),
-        serde_json::to_vec_pretty(&model_state(ui, fixture))?,
+        serde_json::to_vec_pretty(&model_state(ui, fixture, platform))?,
     )?;
     Ok(())
 }
@@ -637,7 +861,7 @@ fn capture_window(ui: &AppWindow, path: &Path, profile: DeviceProfile) -> Result
     Ok(())
 }
 
-fn model_state(ui: &AppWindow, fixture: Option<&str>) -> Value {
+fn model_state(ui: &AppWindow, fixture: Option<&str>, platform: &Platform) -> Value {
     let shell = ui.global::<ShellModel>();
     let library = ui.global::<LibraryModel>();
     let detail = ui.global::<DetailModel>();
@@ -651,6 +875,8 @@ fn model_state(ui: &AppWindow, fixture: Option<&str>) -> Value {
     json!({
         "fixture": fixture,
         "boundary": "Offline public demo fixture; no account or physical Kindle verification",
+        "image_processing": {"hardware_y4_available": platform.hardware_y4_available(),
+            "boundary": "Desktop availability is observed; no hardware submission is simulated"},
         "sleep_screen": {"active": sleep.get_active(), "has_cover": sleep.get_has_cover(),
             "title": sleep.get_title().to_string(), "author": sleep.get_author().to_string(),
             "cover_size": [sleep_cover_size.width, sleep_cover_size.height]},
@@ -681,6 +907,7 @@ fn model_state(ui: &AppWindow, fixture: Option<&str>) -> Value {
         "login": {"step": login.get_step().to_string(), "code_length": login.get_code_length(),
             "digits": login.get_digits().iter().map(|value| value.to_string()).collect::<Vec<_>>()},
         "reader": {"menu": reader.get_menu(), "tool": reader.get_tool().to_string(), "subtool": reader.get_subtool().to_string(),
+            "show_heading": reader.get_show_heading(), "margin": reader.get_margin(),
             "font_size": reader.get_font_size(), "font_choice": reader.get_font_choice().to_string(),
             "font_family": reader.get_font_family().to_string(), "page": reader.get_page(), "page_count": reader.get_page_count(),
             "toc_open": reader.get_toc_open(), "toc_tab": reader.get_toc_tab().to_string(),

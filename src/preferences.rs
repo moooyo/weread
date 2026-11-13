@@ -6,6 +6,36 @@ use serde::{Deserialize, Serialize};
 pub const DEFAULT_DOWNLOAD_CONCURRENCY: u32 = 8;
 pub const MAX_DOWNLOAD_CONCURRENCY: u32 = 16;
 
+/// A requested image policy, separate from a device's effective processing.
+/// Off preserves the application's existing sixteen-level, non-Bayer default.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImageDithering {
+    #[default]
+    Off,
+    Hardware,
+    #[serde(other)]
+    Software,
+}
+
+impl ImageDithering {
+    pub fn parse(value: &str) -> Self {
+        match value {
+            "off" => Self::Off,
+            "hardware" => Self::Hardware,
+            _ => Self::Software,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Software => "software",
+            Self::Hardware => "hardware",
+        }
+    }
+}
+
 /// Read a best-effort startup appearance hint before mutable application state
 /// is opened. The existing database is opened read-only without migration or
 /// creation. SQLite may maintain its required WAL shared-memory bookkeeping.
@@ -73,6 +103,7 @@ pub struct AppPreferences {
     pub keep_awake: bool,
     pub wifi_idle: bool,
     pub sleep_cover: bool,
+    pub image_dithering: ImageDithering,
 }
 
 impl Default for AppPreferences {
@@ -103,6 +134,7 @@ impl Default for AppPreferences {
             keep_awake: true,
             wifi_idle: true,
             sleep_cover: true,
+            image_dithering: ImageDithering::Off,
         }
     }
 }
@@ -279,6 +311,9 @@ impl AppPreferences {
         let key = canonical_key(key);
         match key.as_str() {
             "view_mode" if ["cover", "list"].contains(&value) => self.view_mode = value.into(),
+            "image_dithering" if ["off", "software", "hardware"].contains(&value) => {
+                self.image_dithering = ImageDithering::parse(value);
+            }
             "popup_position" if ["side", "center", "bottom"].contains(&value) => {
                 self.popup_position = value.into();
             }
@@ -352,6 +387,7 @@ impl AppPreferences {
         let key = canonical_key(key);
         match key.as_str() {
             "view_mode" => self.view_mode.clone(),
+            "image_dithering" => self.image_dithering.as_str().into(),
             "night_mode" | "dark_mode" => self.dark_mode.to_string(),
             "reader_font" | "font" => self.reader.font.clone(),
             "reader_font_size" | "font_size" => self.reader.font_size.to_string(),
@@ -689,6 +725,27 @@ mod tests {
             .unwrap()
             .remove("download_concurrency");
         assert!(serde_json::from_value::<AppPreferences>(snapshot).is_err());
+        let mut snapshot = serde_json::to_value(AppPreferences::default()).unwrap();
+        snapshot.as_object_mut().unwrap().remove("image_dithering");
+        assert!(serde_json::from_value::<AppPreferences>(snapshot).is_err());
+    }
+
+    #[test]
+    fn image_dithering_is_explicit_and_preserves_the_existing_off_default() {
+        let mut preferences = AppPreferences::default();
+        assert_eq!(preferences.image_dithering, ImageDithering::Off);
+        for value in ["software", "hardware", "off"] {
+            assert!(preferences.set_choice("image_dithering", value));
+            let restored: AppPreferences =
+                serde_json::from_str(&serde_json::to_string(&preferences).unwrap()).unwrap();
+            assert_eq!(restored.value("image_dithering"), value);
+        }
+        assert!(!preferences.set_choice("image_dithering", "unsupported"));
+        assert_eq!(preferences.image_dithering, ImageDithering::Off);
+        assert_eq!(
+            serde_json::from_str::<ImageDithering>("\"future\"").unwrap(),
+            ImageDithering::Software
+        );
     }
 
     #[test]

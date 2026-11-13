@@ -18,6 +18,7 @@
 //! ```
 
 mod clipboard;
+mod dithering;
 mod framebuffer;
 mod gyro;
 mod managed_sleep;
@@ -31,6 +32,7 @@ mod splash;
 mod touch;
 mod wakeup;
 
+pub use dithering::RawImageRegion;
 pub use managed_sleep::ManagedSleepState;
 pub use orientation::{NativeOrientationError, NativeOrientationHandle, NativePortraitOrientation};
 pub use refresh::{

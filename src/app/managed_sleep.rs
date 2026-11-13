@@ -74,6 +74,9 @@ trait ManagedSleepHost {
     fn hide_cover(&mut self) -> Result<()> {
         Ok(())
     }
+    fn restore_image_processing(&mut self) -> Result<()> {
+        Ok(())
+    }
     fn native_base(&self) -> Option<bool> {
         None
     }
@@ -127,8 +130,11 @@ impl ManagedSleepHost for App {
     }
 
     fn hide_cover(&mut self) -> Result<()> {
-        self.hide_sleep_screen();
-        Ok(())
+        self.hide_sleep_screen()
+    }
+
+    fn restore_image_processing(&mut self) -> Result<()> {
+        self.restore_image_processing_after_sleep()
     }
 
     fn native_base(&self) -> Option<bool> {
@@ -385,6 +391,8 @@ impl ManagedSleep {
                         // The backend renders updated Slint state before its
                         // first full wake refresh, so that frame is the Reader.
                         host.hide_cover()?;
+                    } else {
+                        host.restore_image_processing()?;
                     }
                     host.set_sleeping(false)?;
                     self.phase = Phase::Resuming {

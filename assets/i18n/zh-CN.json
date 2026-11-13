@@ -470,5 +470,10 @@
   "reader_locked_hint": "本章未解锁 · 请在手机微信读书解锁",
   "reader_unverified_hint": "全文状态待校验",
   "retry_after_unlock": "解锁后重试",
-  "verify_content_access": "校验并补齐"
+  "verify_content_access": "校验并补齐",
+  "image_dithering": "图像灰阶处理",
+  "image_dithering_off": "标准灰阶",
+  "image_dithering_software": "软件抖动",
+  "image_dithering_hardware": "硬件抖动",
+  "image_dithering_fallback": "当前使用软件回退"
 }

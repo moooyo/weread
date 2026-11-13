@@ -4,6 +4,40 @@ Recorded: 2026-11-03 (Asia/Shanghai).
 
 The date above identifies the original implementation record. Subsequent observations below retain their own artifact boundaries without assigning a new run date. Development continues; acceptance of the latest complete application is not finished.
 
+## Hardware Y4 image processing
+
+The 2026-11-13 [Y4 implementation](HARDWARE_Y4_DITHERING.md) retains canonical
+Gray8 inputs and attaches processing to the displayed image scene rather than
+pending preferences. Hardware capability and submission remain separate from
+software fallback and panel completion. Ordinary nonraw scenes and the temporary
+sleep cover retain their own processing and ownership boundaries.
+
+The final designated-worker run passed 137 backend tests and the complete
+application run of 1,643 library tests plus 52 Main tests, with four existing
+benchmarks explicitly ignored. The real App image fixture passed all 22 checks
+across PW6 and Scribe desktop layouts: current source/manifest integrity,
+canonical 256-value Gray8 input, the default Off palette, Software Bayer,
+unsupported Hardware fallback, surrounding text, and cold restart. All 133
+general desktop UI/persistence checks also passed. Formatting and completeness
+of all 477 translation keys passed on `test-env`.
+
+Authoritative logs are under `test-env:/run/weread-y4-20261113-r1/logs/` and
+generated evidence is under that run's `artifacts/`. Earlier failed attempts
+retain their original scope in the feature record; they are not passing runs.
+The ARM release build completed in 6 minutes 48 seconds. Four package contracts
+and the development ZIP's CRC check passed. The stripped static ARM ELF32 EABI5
+executable has no dynamic section and SHA-256
+`d04ec035d08c156a9308d559b61104acb5f4e11cf94b2adbf121e810369425e7`.
+The ZIP SHA-256 is
+`ff26515d2f8a8df95cb034c9b9e85a41f50b7ce4b1a396ec28b4e056075d04c0`.
+The feature record binds the source, desktop fixture, general UI, and package
+identities and preserves the initial host-wrapper execution failure separately.
+No WeRead Y4 binary was installed or executed on a Kindle.
+Desktop fallback, controlled backend tests, and BiliComics physical observations
+do not establish WeRead native-driver acceptance, completed Y4 output, physical
+panel quality, a grayscale-level count, or sleep/wake behavior. The historical
+book-cover sleep observation below remains limited to its identified artifacts.
+
 The subsequent [Library-entry correction](PHYSICAL_TESTING.md#fresh-launches-enter-library) changes only the physical experience wrapper, not the ARM ELF. Remote syntax and three existing startup/sleep launcher regressions passed; the installed wrapper launched generation 1 with `--screen library` and recovery disabled. The physical record distinguishes these observations from visual confirmation and sleep-cycle acceptance.
 
 The later [normal-mode private trial deployment](PHYSICAL_TESTING.md#normal-mode-private-trial-deployment) replaced the supervised demo with the retained release ELF and standard document launcher. Installed hashes, normal arguments without a deadline, state initialization, the visible catalog entry, and the user's login-screen observation were recorded. Off-device backup verification preceded removal of the old test installation. This adds deployment and first-screen evidence, not authenticated-service or new physical sleep-cycle acceptance.

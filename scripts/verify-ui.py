@@ -678,7 +678,8 @@ def book_image_asset(database: Path) -> dict[str, Any]:
     with Image.open(path) as source:
         require(source.size == (960, 540), "The prepared local illustration has incorrect dimensions")
         grayscale = source.convert("L")
-        require(all(count == 0 or value % 17 == 0 for value, count in enumerate(grayscale.histogram())), "Cached book images were not quantized to sixteen grayscale steps")
+        require(source.mode == "L", "The canonical illustration is not an eight-bit grayscale PNG")
+        require(all(count == 0 or value % 17 == 0 for value, count in enumerate(grayscale.histogram())), "The intentionally sixteen-tone demo source changed")
         for point, expected in (((1, 1), 0), ((100, 50), 255), ((730, 100), 170), ((720, 300), 221), ((720, 500), 68)):
             require(grayscale.getpixel(point) == expected, "The cache contains a placeholder instead of the real geometric illustration")
     return {
@@ -732,6 +733,9 @@ def match_book_image(screenshot: Path, payload: Path) -> dict[str, Any] | None:
             candidate_height = round(source.height * candidate_width / source.width)
             candidate_scale = candidate_width / source.width
             expected = source.resize((candidate_width, candidate_height), Image.Resampling.BILINEAR)
+            # These isolated cases retain the default Off policy. Canonical
+            # Gray8 stays untouched on disk; quantization follows final sizing.
+            expected = expected.point(lambda value: min(15, (value + 8) // 17) * 17)
             predicted_left = observed_x - round(reference_x * candidate_scale)
             predicted_top = observed_y - round(reference_y * candidate_scale)
             for dx in range(-2, 3):

@@ -226,11 +226,12 @@ impl App {
             state.set_cover(slint::Image::default());
         }
         state.set_active(true);
+        self.suspend_image_processing_for_sleep()?;
         Ok(())
     }
 
     /// Hiding before the wake request lets the first full frame be the Reader.
-    pub(super) fn hide_sleep_screen(&mut self) {
+    pub(super) fn hide_sleep_screen(&mut self) -> Result<()> {
         if let Some(ui) = self.ui.upgrade() {
             let state = ui.global::<SleepScreenModel>();
             state.set_active(false);
@@ -241,6 +242,7 @@ impl App {
             state.set_title("".into());
             state.set_author("".into());
         }
+        self.restore_image_processing_after_sleep()
     }
 }
 

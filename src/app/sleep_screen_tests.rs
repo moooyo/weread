@@ -51,7 +51,7 @@ fn prepared_pixels_survive_cache_removal_without_reading_metadata() -> Result<()
                 assert_eq!(state.get_author(), "Prepared sleep author");
                 assert_eq!(state.get_cover().size(), pixels);
                 assert_eq!(app.store.book_read_stats().metadata_rows, 0);
-                app.hide_sleep_screen();
+                app.hide_sleep_screen()?;
                 assert!(!state.get_active());
                 let empty = state.get_cover().size();
                 assert_eq!((empty.width, empty.height), (0, 0));
@@ -98,7 +98,7 @@ fn fallback_requires_the_current_reader_and_drops_account_data() -> Result<()> {
         assert!(!state.get_has_cover());
         assert_eq!(state.get_title(), "WeRead for Kindle");
         assert!(state.get_author().is_empty());
-        app.hide_sleep_screen();
+        app.hide_sleep_screen()?;
     }
     fixture.finish()
 }
@@ -124,7 +124,7 @@ fn cover_results_bind_to_the_current_book_and_account_epoch() -> Result<()> {
         let state = fixture.ui().global::<SleepScreenModel>();
         assert!(state.get_has_cover());
         let pixels = state.get_cover().size();
-        app.hide_sleep_screen();
+        app.hide_sleep_screen()?;
 
         assert!(!app.handle_job(JobEvent::new(
             2,
@@ -149,7 +149,7 @@ fn cover_results_bind_to_the_current_book_and_account_epoch() -> Result<()> {
         assert!(state.get_has_cover());
         assert_eq!(state.get_cover().size(), pixels);
         assert_eq!(state.get_title(), "Prepared sleep title");
-        app.hide_sleep_screen();
+        app.hide_sleep_screen()?;
     }
     fixture.finish()
 }
@@ -256,7 +256,7 @@ fn late_source_a_cannot_publish_or_retire_source_b() -> Result<()> {
         assert_eq!(app.sleep_screen.source_key, cover_key(BOOK, second));
         app.show_sleep_screen()?;
         assert!(fixture.ui().global::<SleepScreenModel>().get_has_cover());
-        app.hide_sleep_screen();
+        app.hide_sleep_screen()?;
     }
     fixture.finish()
 }
@@ -305,7 +305,7 @@ fn sleep_cover_setting_is_enabled_saved_and_refreshes_preparation() -> Result<()
             fixture.ui().global::<SleepScreenModel>().get_title(),
             "Prepared sleep title"
         );
-        app.hide_sleep_screen();
+        app.hide_sleep_screen()?;
     }
     fixture.finish()
 }

@@ -76,6 +76,57 @@ pub enum ManagedSleepState {
     Terminated,
 }
 
+/// A complete raw image rectangle in unrotated physical framebuffer pixels.
+/// This deliberately differs from RefreshRect's logical design coordinates.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ImageRegion {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[cfg(test)]
+mod image_region_tests {
+    use super::*;
+
+    struct RecordingImages(Mutex<Vec<ImageRegion>>);
+
+    impl RenderSink for RecordingImages {
+        fn set_dark_mode(&self, _: bool) -> Result<(), PlatformError> {
+            Ok(())
+        }
+        fn hardware_y4_available(&self) -> bool {
+            true
+        }
+        fn set_hardware_y4_for_frame(&self, regions: &[ImageRegion]) -> Result<(), PlatformError> {
+            *self.0.lock().unwrap() = regions.to_vec();
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn image_processing_requires_a_capable_sink_and_keeps_physical_coordinates() {
+        let platform = Platform::new(DeviceProfile::Scribe, false).unwrap();
+        assert!(!platform.hardware_y4_available());
+        assert!(platform.set_hardware_y4_for_frame(&[]).is_ok());
+        let rectangle = ImageRegion {
+            x: 3,
+            y: 5,
+            width: 7,
+            height: 9,
+        };
+        assert!(platform.set_hardware_y4_for_frame(&[rectangle]).is_err());
+        let sink = Arc::new(RecordingImages(Mutex::new(Vec::new())));
+        platform.set_render_sink(sink.clone()).unwrap();
+        assert!(platform.hardware_y4_available());
+        platform.set_hardware_y4_for_frame(&[rectangle]).unwrap();
+        assert_eq!(&*sink.0.lock().unwrap(), &[rectangle]);
+        platform.set_hardware_y4_for_frame(&[]).unwrap();
+        assert!(sink.0.lock().unwrap().is_empty());
+    }
+}
+
 /// Hardware details stay behind a replaceable service boundary.
 pub trait DeviceControl: Send + Sync {
     /// Return the approved visible framebuffer dimensions in physical pixels.
@@ -114,6 +165,21 @@ pub trait RefreshSink: Send + Sync {
 /// framebuffer inversion without changing native system preferences.
 pub trait RenderSink: Send + Sync {
     fn set_dark_mode(&self, enabled: bool) -> Result<(), PlatformError>;
+
+    /// Eligibility is not proof that a hardware update was accepted or displayed.
+    fn hardware_y4_available(&self) -> bool {
+        false
+    }
+
+    /// Publish raw-image ownership with the matching UI image model.
+    /// Empty ownership is valid for desktop and non-image scenes.
+    fn set_hardware_y4_for_frame(&self, regions: &[ImageRegion]) -> Result<(), PlatformError> {
+        if regions.is_empty() {
+            Ok(())
+        } else {
+            Err(PlatformError::Unsupported("hardware_y4"))
+        }
+    }
 
     /// A renderer that reads native framebuffer metadata on every real resume
     /// does not require the launcher's optional LIPC appearance snapshot.
@@ -452,6 +518,27 @@ impl Platform {
         sink.is_some_and(|sink| sink.managed_sleep_supported())
     }
 
+    pub fn hardware_y4_available(&self) -> bool {
+        self.render_sink
+            .lock()
+            .ok()
+            .and_then(|sink| sink.clone())
+            .is_some_and(|sink| sink.hardware_y4_available())
+    }
+
+    pub fn set_hardware_y4_for_frame(&self, regions: &[ImageRegion]) -> Result<(), PlatformError> {
+        let sink = self
+            .render_sink
+            .lock()
+            .map_err(|_| PlatformError::Operation("render sink lock was poisoned".into()))?
+            .clone();
+        match sink {
+            Some(sink) => sink.set_hardware_y4_for_frame(regions),
+            None if regions.is_empty() => Ok(()),
+            None => Err(PlatformError::Unsupported("hardware_y4")),
+        }
+    }
+
     /// Ask the renderer to hand off or restore ownership; poll its state for ACK.
     pub fn set_managed_sleep(&self, sleeping: bool) -> Result<(), PlatformError> {
         let sink = self
@@ -763,6 +850,29 @@ impl KindleRenderSink {
 
 #[cfg(all(feature = "kindle", target_os = "linux"))]
 impl RenderSink for KindleRenderSink {
+    fn hardware_y4_available(&self) -> bool {
+        self.handle.hardware_y4_available()
+    }
+
+    fn set_hardware_y4_for_frame(&self, regions: &[ImageRegion]) -> Result<(), PlatformError> {
+        const MAX_REGIONS: usize = 128;
+        if regions.len() > MAX_REGIONS {
+            return Err(PlatformError::InvalidValue("too many raw image regions"));
+        }
+        let regions = regions
+            .iter()
+            .map(|region| slint_backend_kindle::RawImageRegion {
+                x: region.x,
+                y: region.y,
+                width: region.width,
+                height: region.height,
+            })
+            .collect();
+        self.handle
+            .set_hardware_y4_for_frame(regions)
+            .map_err(|error| PlatformError::Operation(error.to_string()))
+    }
+
     fn request_sleep_presentation(&self) -> Result<u64, PlatformError> {
         self.handle
             .request_sleep_presentation()

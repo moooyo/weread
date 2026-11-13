@@ -1,4 +1,4 @@
-//! Materialized book images, separate from evictable cover and article thumbnails.
+//! Canonical Gray8 book images, separate from evictable cover and article thumbnails.
 use std::{
     cell::Cell,
     collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
@@ -26,7 +26,7 @@ use crate::{
 pub const DEFAULT_IMAGE_BUDGET: u64 = 512 * 1024 * 1024;
 pub const DEFAULT_PREPARED_IMAGE_CACHE_BYTES: usize = 8 * 1024 * 1024;
 const MANIFEST_PREFIX: &str = "chapter.assets:";
-const CACHE_PREFIX: &str = "book-image:v1:";
+const CACHE_PREFIX: &str = "book-image:v2:";
 const MAX_HTML_BYTES: usize = 8 * 1024 * 1024;
 const MAX_IMAGE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_IMAGE_PIXELS: u64 = 16_000_000;
@@ -42,8 +42,8 @@ pub const DEFAULT_IMAGE_VERIFICATION_WORK_BYTES: u64 =
     MAX_PREPARED_PACKET_BYTES as u64 + MAX_IMAGE_REFERENCES as u64;
 const OUTPUT_WIDTH: u32 = 1860;
 const OUTPUT_HEIGHT: u32 = 2480;
-const PREPARED_CONVERSION_VERSION: u32 = 1;
-const OUTPUT_GRAY_LEVELS: u8 = 16;
+const PREPARED_CONVERSION_VERSION: u32 = 2;
+const OUTPUT_GRAY_LEVELS: u16 = 256;
 const OUTPUT_ALPHA_BACKGROUND: u8 = 255;
 
 #[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -527,7 +527,7 @@ impl std::io::Write for JsonByteCounter {
 
 const FORECAST_DIGEST: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 const FORECAST_IMAGE_KEY: &str = concat!(
-    "book-image:v1:",
+    "book-image:v2:",
     "0000000000000000000000000000000000000000000000000000000000000000"
 );
 
@@ -830,7 +830,7 @@ struct PreparedImageKey {
     conversion_version: u32,
     width: u32,
     height: u32,
-    gray_levels: u8,
+    gray_levels: u16,
     alpha_background: u8,
 }
 
@@ -3112,13 +3112,10 @@ fn prepare_asset(asset: &ImageAsset) -> Result<PreparedAsset> {
         }
         pixel[3] = 255;
     }
-    let mut grayscale = image::DynamicImage::ImageRgba8(rgba).into_luma8();
-    let gray_step = 255 / (u16::from(OUTPUT_GRAY_LEVELS) - 1);
-    for pixel in grayscale.pixels_mut() {
-        pixel[0] = (((u16::from(pixel[0]) + gray_step / 2) / gray_step)
-            .min(u16::from(OUTPUT_GRAY_LEVELS) - 1)
-            * gray_step) as u8;
-    }
+    // Display processing belongs to a later, geometry-bound presentation.
+    // Keeping Gray8 here prevents a software or Off choice from destroying
+    // source luminance needed by a subsequent hardware-Y4 presentation.
+    let grayscale = image::DynamicImage::ImageRgba8(rgba).into_luma8();
     let (width, height) = grayscale.dimensions();
     validate_output_dimensions(width, height)?;
     let mut encoded = Cursor::new(Vec::new());
@@ -3861,6 +3858,29 @@ mod tests {
         })
     }
 
+    fn gray8_ramp_asset() -> Result<ImageAsset> {
+        let raster = image::GrayImage::from_fn(256, 1, |x, _| image::Luma([x as u8]));
+        let mut encoded = Cursor::new(Vec::new());
+        image::DynamicImage::ImageLuma8(raster).write_to(&mut encoded, image::ImageFormat::Png)?;
+        let bytes = encoded.into_inner();
+        Ok(ImageAsset {
+            id: digest(&bytes),
+            media_type: "image/png".into(),
+            extension: "png".into(),
+            source_names: vec!["images/a.png".into()],
+            bytes,
+        })
+    }
+
+    fn sixteen_level_ramp_png() -> Result<Vec<u8>> {
+        let raster = image::GrayImage::from_fn(256, 1, |x, _| {
+            image::Luma([(((x + 8) / 17).min(15) * 17) as u8])
+        });
+        let mut encoded = Cursor::new(Vec::new());
+        image::DynamicImage::ImageLuma8(raster).write_to(&mut encoded, image::ImageFormat::Png)?;
+        Ok(encoded.into_inner())
+    }
+
     fn packet(assets: Vec<ImageAsset>) -> DownloadedChapterImages {
         let source_to_asset = assets
             .iter()
@@ -4278,9 +4298,95 @@ mod tests {
         );
         let raster = image::open(&path)?.to_luma8();
         assert_eq!(raster.dimensions(), (8, 6));
-        assert!(raster.pixels().all(|pixel| pixel[0] % 17 == 0));
+        assert_eq!(
+            raster,
+            image::load_from_memory(&downloaded.assets[0].bytes)?.to_luma8()
+        );
         assert_eq!(assets.cache.pinned_keys()?.len(), 1);
         assert!(assets.complete(&store, "book", "uid")?);
+        Ok(())
+    }
+
+    #[test]
+    fn canonical_chapter_images_preserve_every_gray8_luminance() -> Result<()> {
+        let (_directory, store, assets) = setup(DEFAULT_IMAGE_BUDGET)?;
+        let original = gray8_ramp_asset()?;
+        let id = original.id.clone();
+        let manifest = assets.commit_chapter(
+            &store,
+            "book",
+            "uid",
+            HTML,
+            TEXT,
+            Some(&packet(vec![original])),
+        )?;
+        assert!(manifest.complete);
+        let occurrence = &manifest.images[0];
+        assert_eq!(occurrence.asset_id.as_deref(), Some(id.as_str()));
+        assert_eq!(occurrence.cache_key, Some(asset_cache_key(&id)?));
+        let path = assets.image_path(occurrence)?.unwrap();
+        let prepared = image::open(path)?;
+        assert_eq!(prepared.color(), image::ColorType::L8);
+        assert_eq!(prepared.width(), 256);
+        assert_eq!(prepared.height(), 1);
+        assert!(prepared.to_luma8().as_raw().iter().copied().eq(0_u8..=255));
+        assert_eq!(assets.cache.pinned_keys()?.len(), 1);
+        assert!(assets.complete(&store, "book", "uid")?);
+        Ok(())
+    }
+
+    #[test]
+    fn obsolete_quantized_cache_keys_are_rejected_without_erasing_the_payload() -> Result<()> {
+        let (_directory, _store, assets) = setup(DEFAULT_IMAGE_BUDGET)?;
+        let original = gray8_ramp_asset()?;
+        let old_key = format!("book-image:v1:{}", original.id);
+        let bytes = sixteen_level_ramp_png()?;
+        let old_path = assets.cache.put_png(&old_key, &bytes)?;
+        let occurrence = StoredImage {
+            id: "old-quantized-occurrence".into(),
+            asset_id: Some(original.id.clone()),
+            cache_key: Some(old_key.clone()),
+            width: 256,
+            height: 1,
+            ..Default::default()
+        };
+        assert!(assets.image_path(&occurrence).is_err());
+        assert!(
+            assets
+                .cache
+                .get_for_commit(&asset_cache_key(&original.id)?)?
+                .is_none()
+        );
+        assert_eq!(std::fs::read(old_path)?, bytes);
+        assert!(assets.cache.get_for_commit(&old_key)?.is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn task_reuse_cannot_substitute_a_quantized_conversion_for_canonical_gray8() -> Result<()> {
+        let original = gray8_ramp_asset()?;
+        let id = original.id.clone();
+        let current_key = PreparedImageKey::new(&id);
+        assert_eq!(current_key.conversion_version, 2);
+        assert_eq!(current_key.gray_levels, 256);
+        let mut previous_key = current_key.clone();
+        previous_key.conversion_version = 1;
+        previous_key.gray_levels = 16;
+        let previous = Arc::new(PreparedAsset {
+            bytes: sixteen_level_ramp_png()?,
+            width: 256,
+            height: 1,
+        });
+        let cache = PreparedImageCache::default();
+        cache.insert(previous_key.clone(), previous.clone());
+        assert!(cache.get(&current_key).is_none());
+        let prepared = prepare_downloaded_with_cache(packet(vec![original]), &cache)?;
+        let current = &prepared.assets[&id];
+        assert!(!Arc::ptr_eq(&previous, current));
+        let raster = image::load_from_memory(&current.bytes)?.to_luma8();
+        assert!(raster.as_raw().iter().copied().eq(0_u8..=255));
+        assert!(cache.get(&previous_key).is_some());
+        assert!(Arc::ptr_eq(&cache.get(&current_key).unwrap(), current));
         Ok(())
     }
 
@@ -4545,7 +4651,7 @@ mod tests {
         let raster = image::load_from_memory(&prepared.bytes)?.to_luma8();
         assert_eq!(raster.get_pixel(0, 0)[0], 255);
         assert_eq!(raster.get_pixel(1, 0)[0], 0);
-        assert!(raster.get_pixel(2, 0)[0] >= 119 && raster.get_pixel(2, 0)[0] <= 136);
+        assert_eq!(raster.get_pixel(2, 0)[0], 127);
         Ok(())
     }
 
@@ -4988,7 +5094,10 @@ mod tests {
         let png = image::load_from_memory(&fresh[0].assets[&id].bytes)?;
         assert_eq!((png.width(), png.height()), (WIDTH, HEIGHT));
         assert_eq!(png.color(), image::ColorType::L8);
-        assert!(png.to_luma8().pixels().all(|pixel| pixel[0] % 17 == 0));
+        assert_eq!(
+            png.to_luma8(),
+            image::load_from_memory(&original.bytes)?.to_luma8()
+        );
         for prepared in fresh.iter().chain(reused.iter()) {
             let image = &prepared.assets[&id];
             assert_eq!((image.width, image.height), (WIDTH, HEIGHT));
