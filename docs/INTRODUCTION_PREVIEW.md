@@ -5,9 +5,11 @@ Accepted: 2026-11-14 (Asia/Shanghai).
 Status: implementation is source-frozen and the focused host checks passed.
 The corrected candidate's ARM/package, current short/long/empty Scribe native
 scope, raw-capture package, ordinary UI restoration, and task cleanup passed.
-This authorized preview iteration is complete within those bounds. Paperwhite
-retains host-only coverage, and physical-device acceptance is not claimed.
-Initial-candidate failures and earlier Detail hub results keep their own scope.
+The later authorized normal deployment on physical Scribe 2022 / firmware
+5.19.5 received operator functional acceptance on 2026-11-14/15. Its data reset
+and administrative closeout are recorded separately below. Paperwhite retains
+host-only coverage. Initial-candidate failures and earlier Detail hub results
+keep their own scope.
 
 ## Behavior
 
@@ -41,8 +43,10 @@ dependency declaration adds `blob` and `limits` features; the version and
 lockfile do not change. The integration uses the safe API's `main` database
 name and handles the Result returned by `set_limit`.
 
-The database layout, private introductions, annotations, and reading anchors
-remain unchanged. No migration or historical-payload alias is introduced.
+The bounded-read implementation preserves the database layout, private
+introductions, annotations, and reading anchors. No migration or historical
+payload alias is introduced. The later operator-authorized physical data
+reset is a separate deployment action recorded below.
 
 ## Frozen source and environment
 
@@ -130,7 +134,8 @@ complete application-suite result.
 | Current long and empty native cases | Passed: five original PNGs, 12 visual/pixel and 12 itemized data checks |
 | Current ordinary UI exit/restoration | Passed: normal confirmation, lock removed, status bar/window manager restored |
 | Task cleanup and raw-capture package | Passed: task-owned Scribe QEMU closed and eight-source-PNG archive CRC passed |
-| Physical-device acceptance | Not performed |
+| Physical normal deployment and operator acceptance | Accepted: same ARM on Scribe 2022 / firmware 5.19.5; limited functional feedback, not a hardware matrix |
+| Physical staging/transports/lease closeout | Completed: owned staging removed, all device SSH exited, exact lease released and independently absent |
 
 ## Built artifacts and bounded native scope
 
@@ -206,8 +211,40 @@ observations. Its size is 1,262,519 bytes, SHA-256
 ARM/source identities. The earlier independent five-image archive remains
 separate; no original PNG or failure label was retouched.
 
-Application verification runs only on `test-env`. Native work for this request
-targets Scribe only; Paperwhite retains host-only unchanged-path coverage.
-Firmware-emulator screenshots are separate from physical Kindle observations.
+Software and firmware-emulator verification ran on `test-env`. Its native
+captures target Scribe only; Paperwhite retains host-only unchanged-path
+coverage. Firmware-emulator screenshots remain separate from the later
+physical Kindle observations.
 The prior PW6 font-startup CRC failures retain their recorded scope and are
 not investigated by this task. No cause or resolution is claimed.
+
+## Later scoped physical deployment
+
+On 2026-11-14/15 (Asia/Shanghai), the operator authorized deployment of the same
+`64e66a8a243c` ARM, `689ef367eabe` guard, and `71316711` launcher to the live
+identified Scribe 2022 / firmware 5.19.5. All 36 installed public member hashes
+matched. The operator then chose a fresh data reset after an old preference
+snapshot was found to lack `image_dithering`; the proposed field repair was
+not executed. Only the application's data directory was cleared and its
+device configuration recreated. No compatibility path, migration, or old
+record restoration was added.
+
+Normal startup used only `--kindle --device scribe --data-dir
+/mnt/us/weread/data`, reached state-open and a fresh unversioned empty Library,
+and had no observed startup stderr error. The operator independently tested
+the device and reported the functions correct. This is operator functional
+acceptance on that exact model/firmware, not invented per-gesture, latency,
+sleep, or Y4 measurements. No physical PNG was taken; the original eight
+images remain emulator 5.20.1 evidence.
+
+After the feedback, no additional tests were performed. The user had exited
+the application before closeout; no further TERM was sent. Readback found no
+app, guard, or lock and observed native Home/status bar/window manager and
+grayscale 2 restored. Owned staging was removed after path/mount/process
+checks, device transports exited, and the exact lease was released at
+2026-11-15 00:03:21.966660 +08:00 with an independent host absence check.
+No device was accessed after release. The sanitized summary is
+`test-env:/root/weread-intro-physical-20261114-r1/evidence/public/physical-deployment.json`;
+its status is `passed_scoped_physical_deployment_with_operator_acceptance`.
+See [the physical record](PHYSICAL_TESTING.md#introduction-preview-deployment-and-operator-acceptance)
+for the installation, data, evidence-privacy, and closeout scope.

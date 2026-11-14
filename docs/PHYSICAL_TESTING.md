@@ -1,15 +1,100 @@
 # Physical Kindle testing
 
-Development is continuing. The observations in this document do not complete acceptance of the latest source or establish a supported model/firmware matrix. Historical artifact identifiers and dates remain attached to their own results.
+Development is continuing. The latest Scribe deployment below has scoped
+operator functional acceptance. It does not establish a general supported
+model/firmware matrix or acceptance of untested hardware features. Historical
+artifact identifiers and dates remain attached to their own results.
 
 ## Identified physical environment
 
 - Device: first-generation Kindle Scribe released in 2022.
 - Firmware: 5.19.5.
-- Application mode: earlier isolated offline demonstrations, followed by a normal-mode private daily trial with a real account.
+- Application mode: artifact-specific offline demonstrations and normal-mode
+  trials; the latest normal installation starts from operator-authorized fresh
+  current-layout data.
 - Scope: supervised device iterations and private daily-trial observations, separate from the Scribe 2022 firmware 5.20.1 VM experiments.
 
 No device address, credential, serial number, private note text, or account content is part of this record. Offline demonstration results do not establish live-account authentication, content entitlements, or upstream writes.
+
+## Introduction-preview deployment and operator acceptance
+
+Window: 2026-11-14/15 (Asia/Shanghai). The previously identified Scribe 2022
+was checked through the same pinned transport's live profile/firmware readback,
+confirming firmware 5.19.5 without collecting a new unique device identifier.
+The coordinator acquired a fresh exclusive lease. Initially WeRead had exited,
+native Home owned the display, and no
+application lock remained. The previous installation was main `d8b3df1f`,
+launcher `71316711`, and guard `a235b41c`.
+
+The operator authorized physical deployment, then explicitly authorized
+discarding the old application data instead of requiring compatibility.
+Private off-device old-database and public-file rollback backups remain on
+`test-env` only. No private backup, credential, device address, or identifier
+is copied into this repository.
+
+The same remotely verified application was deployed:
+
+| Installed public artifact | SHA-256 |
+| --- | --- |
+| ARM application | `64e66a8a243c66de5ab291cf4661168c27094afe6586978b8f627f78219eb5d7` |
+| Native frame guard | `689ef367eabe7f780ec51a20a033961badceb6c1ff56524e51cad30a4e44372d` |
+| Launcher | `713167110d4839f14505cd03c6b30753476772c729fe92890a86fbd0085fe6be` |
+
+All 36 public package members were replaced and their installed SHA-256 values
+matched before the data reset. The old preferences lacked `image_dithering`;
+the contemplated field repair was not executed. Instead, only
+`/mnt/us/weread/data` was cleared under the operator's instruction and recreated
+with the device profile and exact `scribe 5.19.5` allowlist. Fresh current-layout
+data then initialized. No compatibility code, migration, or restoration of
+old records was performed.
+
+The normal document entry ran `/mnt/us/weread/app/weread` with exactly:
+
+```text
+--kindle --device scribe --data-dir /mnt/us/weread/data
+```
+
+There were no demo, offline, scripted-action, capture, or exit-deadline
+arguments. Startup reached the state-open marker, with fresh
+`PRAGMA user_version=0` and zero Library books. That count belongs only to fresh
+startup; no post-operator-test empty-data inventory is claimed. The observed framebuffer was
+1860 x 2480 visible, stride 1872, virtual 1872 x 4960, 8 bpp, rotation 3.
+Application-owned native operation reported grayscale 1. The observed startup
+stderr contained no error. These are startup observations, not live-account
+or acquisition qualification.
+
+The operator then tested the device independently and explicitly reported
+that the functions worked correctly, followed by a request to merge and push.
+This is scoped operator functional acceptance of this artifact on the
+identified Scribe/firmware. No individual gesture sequence, physical pixel
+ROI, latency, sleep, or hardware Y4 test is inferred from that feedback.
+No new physical PNG was produced. The eight introduction PNGs remain the
+Scribe firmware-5.20.1 emulator evidence and are not relabeled as physical
+captures. Repository main and origin were reported aligned at `18dd570`
+before this documentation closeout; that does not create a new binary test.
+
+No additional physical tests followed the operator's acceptance. The operator
+had exited the application before coordinator closeout; no further TERM was
+sent. Readback found the app, guard, and lock absent. The status bar was
+running, `awesome` was in state S, native `KPPMainApp` was foreground, and
+grayscale 2 was restored. No exact UI gesture sequence or numeric process exit
+code is inferred from that readback.
+
+Only the owned staging area was removed after canonical-path, mount, and
+process-reference checks. All device SSH processes exited before exact
+owner/token-checked lease release at **2026-11-15 00:03:21.966660 +08:00**
+(`2026-11-14T16:03:21.966660Z`). An independent host check confirmed the lease
+absent. No device access occurred after release.
+
+The evidence root is
+`test-env:/root/weread-intro-physical-20261114-r1/`. Its metadata-only sanitized
+summary, `evidence/public/physical-deployment.json`, has status
+`passed_scoped_physical_deployment_with_operator_acceptance`. It contains no
+private account, address, or serial data. Private logs/backups remain outside
+the repository. The model was confirmed through the pinned transport's live
+profile/firmware readback without publishing a unique device identifier.
+Paperwhite and other firmware or hardware conditions gain no new acceptance
+from this completed window.
 
 ## Book-cover sleep observation
 
