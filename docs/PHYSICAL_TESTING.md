@@ -1,6 +1,6 @@
 # Physical Kindle testing
 
-Development is continuing. The latest QR Login candidate has normal-startup
+Development is continuing. The latest Skills guide candidate has normal-startup
 and restoration evidence; authenticated Login acceptance remains separate.
 The preceding introduction-preview deployment has scoped operator functional
 acceptance. Neither establishes a general supported model/firmware matrix or
@@ -16,6 +16,43 @@ dates remain attached to their own results.
 - Scope: supervised device iterations and private daily-trial observations, separate from the Scribe 2022 firmware 5.20.1 VM experiments.
 
 No device address, credential, serial number, private note text, or account content is part of this record. Offline demonstration results do not establish live-account authentication, content entitlements, or upstream writes.
+
+## Skills guide preserved-data deployment
+
+On 2026-11-15 (Asia/Shanghai), the operator requested main merge/push and
+deployment of the approved Skills guide and viewport-capacity implementation.
+Main and origin/main already contained code commit `5a66fe7`. The reviewed
+package `8446935f6d9d` was checked against the frozen runtime source, and the
+same pinned physical target reported Kindle Scribe / firmware 5.19.5.
+
+The installation used ARM `4c4df58d13cd`, unchanged guard `689ef367eabe`, and
+unchanged launcher `71316711`. All 36 public members matched after replacement.
+Private backups of the previous public files, existing data, and actual
+configuration were retained on `test-env` only. Forty-six protected regular
+files retained their content hashes across public replacement. No reset,
+conversion, logout, schema upgrade, or private-data replacement was performed.
+
+The owned installation stage was removed before ordinary launch. The normal
+document entry reached `state-open`; its current executable hash, process birth
+and parentage, and six ordinary native/profile/data-directory arguments matched.
+No demo/offline fixture, capture, action script, or exit deadline was used.
+No real credentials were entered and no functional scanning or Reader test was
+performed during this installation batch.
+
+For the authorized shared-device handoff, the coordinator sent TERM only to
+the identified current managed launcher after rechecking process births and
+parentage. The app, guard, and launch lock disappeared, statusbar and the window
+manager were running, and native Home was confirmed. Every task device transport
+ended before the owner/token-checked lease release at
+2026-11-15 07:24:49.289969 +08:00. The new version remains installed and stopped;
+it can be opened through the ordinary document entry in a subsequent user trial.
+No physical access occurred after release in this batch.
+
+The sanitized completion record is
+`test-env:/root/weread-skills-physical-20261115-r1/evidence/public/deployment-complete.json`.
+This establishes preserved-data installation, ordinary startup, and native
+restoration on the identified device. It does not establish full authenticated
+acceptance or qualify another model/firmware combination.
 
 ## QR Login deployment and manual-trial closeout
 

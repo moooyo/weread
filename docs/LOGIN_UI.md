@@ -129,8 +129,8 @@ The unchanged native guard remains `689ef367eabe` and launcher `71316711`.
 Original development ZIP `bdf6f8cb27c092d27350972a91e6285ec86a74fe9cb0e862571f0259764fe2d6`
 passed CRC and contained the matching application and guard. The original
 compiler package and any documentation-only delivery repack retain separate
-receipts. The new application has not been installed or tested on a physical
-Kindle in this scope.
+receipts. A later preserved-data physical installation and ordinary startup
+are recorded separately below; authenticated acceptance remains separate.
 
 Final reviewed delivery is `weread-kindle-skills-reviewed-dev.zip`, 68,276,537
 bytes, SHA-256
@@ -252,6 +252,18 @@ Documentation-only closeout differences after the frozen runtime snapshot do
 not change the executable or require recompilation.
 
 ## Deployment and acceptance boundary
+
+The operator subsequently requested deployment of the Skills guide after main
+was pushed at code commit `5a66fe7`. ARM `4c4df58d13cd` was installed normally
+on the pinned Scribe 2022 / firmware 5.19.5. All 36 public members matched, and
+46 protected data/configuration files retained their content hashes across
+replacement. Ordinary startup, the running binary identity, and default
+arguments passed. The application was normally stopped after this check for
+the shared-device handoff; native Home was restored and the exact lease was
+released at 2026-11-15 07:24:49 +08:00. The
+[physical record](PHYSICAL_TESTING.md#skills-guide-preserved-data-deployment)
+limits this result to installation/startup/restoration rather than real
+scanning, verification-code submission, Reader functions, or another device.
 
 After the software and packaging checkpoint, the operator requested deployment
 to the identified Scribe 2022 / firmware 5.19.5. ARM `8da54b9b111d`, launcher
