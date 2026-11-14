@@ -309,36 +309,38 @@ struct NativeEditor {
 
 impl NativeEditor {
     fn find(window: &slint::Window, kind: EditorKind) -> Self {
+        Self::try_find(window, kind).expect("The actual AppWindow native editor is missing")
+    }
+
+    fn try_find(window: &slint::Window, kind: EditorKind) -> Option<Self> {
         let inner = WindowInner::from_pub(window);
         let root = ItemRc::new_root(inner.component());
-        let item = root
-            .visit_descendants(|item| {
-                let Some(input) = item.downcast::<TextInput>() else {
-                    return ControlFlow::Continue(());
+        let item = root.visit_descendants(|item| {
+            let Some(input) = item.downcast::<TextInput>() else {
+                return ControlFlow::Continue(());
+            };
+            let input = input.as_pin_ref();
+            let matches = !input.read_only()
+                && input.enabled()
+                && match kind {
+                    EditorKind::Search => {
+                        input.single_line() && input.input_type() == InputType::Text
+                    }
+                    EditorKind::Thought => {
+                        !input.single_line() && input.input_type() == InputType::Text
+                    }
+                    EditorKind::Password => input.input_type() == InputType::Password,
+                    EditorKind::Numeric => input.input_type() == InputType::Number,
                 };
-                let input = input.as_pin_ref();
-                let matches = !input.read_only()
-                    && input.enabled()
-                    && match kind {
-                        EditorKind::Search => {
-                            input.single_line() && input.input_type() == InputType::Text
-                        }
-                        EditorKind::Thought => {
-                            !input.single_line() && input.input_type() == InputType::Text
-                        }
-                        EditorKind::Password => input.input_type() == InputType::Password,
-                        EditorKind::Numeric => input.input_type() == InputType::Number,
-                    };
-                if matches && item.is_visible() {
-                    ControlFlow::Break(item.clone())
-                } else {
-                    ControlFlow::Continue(())
-                }
-            })
-            .expect("The actual AppWindow native editor is missing");
+            if matches && item.is_visible() {
+                ControlFlow::Break(item.clone())
+            } else {
+                ControlFlow::Continue(())
+            }
+        })?;
         let adapter = inner.window_adapter();
         inner.set_focus_item(&item, true, FocusReason::PointerClick);
-        Self { item, adapter }
+        Some(Self { item, adapter })
     }
 
     fn with<T>(&self, operation: impl FnOnce(Pin<&TextInput>) -> T) -> T {
@@ -832,61 +834,40 @@ fn genuine_native_numeric_dialog_preserves_its_existing_policy_and_rejects_after
     )
 }
 
-fn password_scope() -> Result<()> {
+fn qr_only_login_scope() -> Result<()> {
     let fixture = Fixture::new("Search draft")?;
     {
         let mut state = fixture.app();
         state.navigate(Route::Login, true)?;
         state.render()?;
     }
-    fixture
-        .ui()
-        .global::<LoginModel>()
-        .invoke_event("step".into(), "key".into());
-    fixture
-        .ui()
-        .global::<LoginModel>()
-        .invoke_event("edit-key".into(), "A".into());
-    let editor = NativeEditor::find(fixture.ui().window(), EditorKind::Password);
-    editor.select_end();
-    fixture.paste_text("B");
-    editor.paste();
-    assert_eq!(fixture.app().login_key, "AB");
-    let before = editor.snapshot();
-    let edits = fixture.edits.get();
-    fixture.paste_text(&"x".repeat(16_385));
-    for _ in 0..4 {
-        editor.paste();
-        assert_eq!(editor.snapshot(), before);
+    let login = fixture.ui().global::<LoginModel>();
+    login.set_busy(false);
+    for step in ["qr", "code", "key"] {
+        if step == "key" {
+            login.invoke_event("step".into(), "key".into());
+            login.invoke_event("edit-key".into(), "synthetic-stale-key".into());
+        }
+        // A stale model value must not restore the removed manual-key pane.
+        login.set_step(step.into());
+        assert!(
+            NativeEditor::try_find(fixture.ui().window(), EditorKind::Password).is_none(),
+            "QR-only login must not expose a native password editor in step {step}"
+        );
+        assert!(
+            NativeEditor::try_find(fixture.ui().window(), EditorKind::Search).is_none(),
+            "QR-only login must not replace the removed password pane with a plain-text credential editor"
+        );
     }
-    assert_eq!(fixture.edits.get(), edits);
-    editor.undo();
-    assert_eq!(fixture.app().login_key, "A");
-    editor.redo();
-    assert_eq!(fixture.app().login_key, "AB");
-    {
-        let mut state = fixture.app();
-        state.navigate(Route::Search, true)?;
-        state.render()?;
-    }
-    let before = editor.snapshot();
-    let edits = fixture.edits.get();
-    fixture.paste_text("obsolete");
-    editor.paste();
-    editor.undo();
-    assert_eq!(editor.snapshot(), before);
-    assert_eq!(fixture.edits.get(), edits);
-    assert_eq!(fixture.app().login_key, "AB");
     assert_eq!(fixture.app().query.query, "Search draft");
-    drop(editor);
     fixture.finish()
 }
 
 #[test]
-fn genuine_native_password_rejections_keep_valid_undo_and_current_login_scope() -> Result<()> {
+fn qr_only_login_does_not_expose_a_manual_password_editor() -> Result<()> {
     isolated(
-        "app::native_edit_tests::genuine_native_password_rejections_keep_valid_undo_and_current_login_scope",
-        password_scope,
+        "app::native_edit_tests::qr_only_login_does_not_expose_a_manual_password_editor",
+        qr_only_login_scope,
     )
 }
 

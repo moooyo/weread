@@ -27,13 +27,14 @@ fn assert_qr_pixels(image: &slint::Image, selected_uri: &str) -> Result<()> {
     assert_eq!(expected.width(), 17 + 4 * version as usize);
     assert_eq!(expected.error_correction_level(), qrcode::EcLevel::M);
     let pixels = image
-        .to_rgb8()
+        .to_rgba8()
         .expect("The published QR must retain its actual CPU pixel buffer");
     let edge = expected.width() + 8;
     assert_eq!(
         (pixels.width(), pixels.height()),
         (edge as u32, edge as u32)
     );
+    assert_eq!(pixels.as_bytes().len(), edge * edge * 4);
     for (index, pixel) in pixels.as_slice().iter().enumerate() {
         let (x, y) = (index % edge, index / edge);
         let ink = x >= 4
@@ -41,10 +42,9 @@ fn assert_qr_pixels(image: &slint::Image, selected_uri: &str) -> Result<()> {
             && x < edge - 4
             && y < edge - 4
             && expected[(x - 4, y - 4)] == qrcode::Color::Dark;
-        let channel = if ink { 0 } else { 255 };
         assert_eq!(
-            (pixel.r, pixel.g, pixel.b),
-            (channel, channel, channel),
+            (pixel.r, pixel.g, pixel.b, pixel.a),
+            (0, 0, 0, if ink { 255 } else { 0 }),
             "QR module or quiet-zone mismatch at {x},{y}"
         );
     }
@@ -53,7 +53,7 @@ fn assert_qr_pixels(image: &slint::Image, selected_uri: &str) -> Result<()> {
 
 fn qr_pixels(image: &slint::Image) -> Vec<u8> {
     image
-        .to_rgb8()
+        .to_rgba8()
         .expect("The actual QR pixel buffer must remain available")
         .as_bytes()
         .to_vec()
@@ -66,6 +66,71 @@ fn assert_resource_error(error: &anyhow::Error) {
     assert!(matches!(error, source::SourceError::ResponseTooLarge));
     assert!(!error.requires_login());
     assert!(!error.retryable());
+}
+
+#[test]
+fn shared_qr_alpha_mask_preserves_encoded_modules_and_transparent_quiet_zone() -> Result<()> {
+    let payload = "ALPHA MASK QR FIXTURE";
+    let image = qr_image(payload)?;
+    assert_qr_pixels(&image, payload)?;
+    let pixels = image.to_rgba8().unwrap();
+    assert!(pixels.as_slice().iter().any(|pixel| pixel.a == 255));
+    assert!(pixels.as_slice().iter().any(|pixel| pixel.a == 0));
+    assert!(
+        pixels
+            .as_slice()
+            .iter()
+            .all(|pixel| pixel.r == 0 && pixel.g == 0 && pixel.b == 0),
+        "Neither light modules nor the quiet zone may contain a baked white RGB surface"
+    );
+    Ok(())
+}
+
+#[test]
+fn enlarged_qr_mask_keeps_quiet_zone_and_light_modules_on_each_paper_color() -> Result<()> {
+    let payload = "ALPHA COMPOSITE QR FIXTURE";
+    let expected = qrcode::QrCode::new(payload.as_bytes())?;
+    let pixels = qr_image(payload)?.to_rgba8().unwrap();
+    let edge = pixels.width();
+    let source = image::RgbaImage::from_raw(edge, edge, pixels.as_bytes().to_vec()).unwrap();
+    let scale = 24;
+    let inner_light = (0..expected.width())
+        .flat_map(|y| (0..expected.width()).map(move |x| (x, y)))
+        .find(|&(x, y)| expected[(x, y)] == qrcode::Color::Light)
+        .unwrap();
+    for (paper, ink) in [
+        ([240, 240, 240, 255], [0, 0, 0]),
+        ([232, 227, 215, 255], [0, 0, 0]),
+        ([12, 17, 24, 255], [255, 255, 255]),
+    ] {
+        let mut tinted = source.clone();
+        for pixel in tinted.pixels_mut() {
+            pixel.0[..3].copy_from_slice(&ink);
+        }
+        let enlarged = image::imageops::resize(
+            &tinted,
+            edge * scale,
+            edge * scale,
+            image::imageops::FilterType::Nearest,
+        );
+        assert!(enlarged.pixels().all(|pixel| matches!(pixel[3], 0 | 255)));
+        let mut composite =
+            image::RgbaImage::from_pixel(edge * scale, edge * scale, image::Rgba(paper));
+        image::imageops::overlay(&mut composite, &enlarged, 0, 0);
+        let quiet = 4 * scale;
+        for (x, y, pixel) in composite.enumerate_pixels() {
+            if x < quiet || y < quiet || x >= edge * scale - quiet || y >= edge * scale - quiet {
+                assert_eq!(
+                    pixel.0, paper,
+                    "Compositing must retain paper across the full quiet zone"
+                );
+            }
+        }
+        let x = (inner_light.0 as u32 + 4) * scale + scale / 2;
+        let y = (inner_light.1 as u32 + 4) * scale + scale / 2;
+        assert_eq!(composite.get_pixel(x, y).0, paper);
+    }
+    Ok(())
 }
 
 #[test]
@@ -541,6 +606,10 @@ fn login_challenge_uses_shared_qr() -> Result<()> {
         assert_eq!(login.get_step().as_str(), "qr");
         assert!(!login.get_busy());
         assert!(login.get_qr().size().width > 0);
+        assert_qr_pixels(
+            &login.get_qr(),
+            "https://weread.qq.com/web/confirm?uid=synthetic-qr-login",
+        )?;
         assert!(state.login_challenge.is_some());
     }
     fixture.finish()

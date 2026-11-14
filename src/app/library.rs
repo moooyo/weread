@@ -503,7 +503,7 @@ pub(super) fn qr_image(value: &str) -> Result<slint::Image> {
     let qr = qrcode::QrCode::new(value.as_bytes())?;
     let quiet = 4;
     let edge = qr.width() + quiet * 2;
-    let mut buffer = slint::SharedPixelBuffer::<slint::Rgb8Pixel>::new(edge as u32, edge as u32);
+    let mut buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(edge as u32, edge as u32);
     for (index, pixel) in buffer.make_mut_slice().iter_mut().enumerate() {
         let x = index % edge;
         let y = index / edge;
@@ -512,14 +512,15 @@ pub(super) fn qr_image(value: &str) -> Result<slint::Image> {
             && x < edge - quiet
             && y < edge - quiet
             && qr[(x - quiet, y - quiet)] == qrcode::Color::Dark;
-        let value = if ink { 0 } else { 255 };
-        *pixel = slint::Rgb8Pixel {
-            r: value,
-            g: value,
-            b: value,
+        // The UI supplies ink and paper colors; only module coverage is baked in.
+        *pixel = slint::Rgba8Pixel {
+            r: 0,
+            g: 0,
+            b: 0,
+            a: if ink { 255 } else { 0 },
         };
     }
-    Ok(slint::Image::from_rgb8(buffer))
+    Ok(slint::Image::from_rgba8(buffer))
 }
 
 pub(super) fn download_account_key(session: &source::AuthSession) -> Option<String> {

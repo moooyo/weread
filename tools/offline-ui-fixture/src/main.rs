@@ -3,7 +3,7 @@
 #![recursion_limit = "256"]
 
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     collections::BTreeMap,
     fs,
     io::Read,
@@ -60,7 +60,7 @@ struct Arguments {
     offline: bool,
     #[arg(long, default_value_t = 1_200)]
     exit_after_ms: u64,
-    #[arg(long, value_parser = ["login-qr", "login-code", "detail-reviews", "detail-notes", "article-qr", "sleep-cover", "sleep-title", "sleep-neutral", "image-processing-default", "image-processing-software", "image-processing-hardware", "image-processing-persisted"])]
+    #[arg(long, value_parser = ["login-qr", "login-loading", "login-expired", "login-code", "login-code-empty", "detail-reviews", "detail-notes", "article-qr", "sleep-cover", "sleep-title", "sleep-neutral", "image-processing-default", "image-processing-software", "image-processing-hardware", "image-processing-persisted"])]
     fixture: Option<String>,
     /// Create only public synthetic current-layout data for a separate offline process.
     #[arg(long)]
@@ -177,13 +177,13 @@ fn run(arguments: Arguments) -> Result<()> {
     )?;
     let fixture_qr = fixture_qr()?;
     let fixture_cover = fixture_sleep_cover();
-    let mut fixture_visible = true;
+    let fixture_visible = Rc::new(Cell::new(true));
     apply_fixture(
         &ui,
         arguments.fixture.as_deref(),
         &fixture_qr,
         &fixture_cover,
-        fixture_visible,
+        fixture_visible.get(),
     );
     let failures = Rc::new(RefCell::new(Vec::<String>::new()));
     let timer = slint::Timer::default();
@@ -193,6 +193,7 @@ fn run(arguments: Arguments) -> Result<()> {
     let fixture = arguments.fixture.clone();
     let fixture_capture = capture.clone();
     let timer_platform = platform.clone();
+    let timer_fixture_visible = fixture_visible.clone();
     let profile = arguments.device;
     let deadline = arguments.exit_after_ms;
     let started = Instant::now();
@@ -220,21 +221,23 @@ fn run(arguments: Arguments) -> Result<()> {
                         break;
                     }
                     if action.section == "fixture" {
-                        if !fixture
-                            .as_deref()
-                            .is_some_and(|name| name.starts_with("sleep-"))
-                        {
-                            bail!("Fixture actions require an explicit sleep overlay fixture");
+                        if !fixture.as_deref().is_some_and(|name| {
+                            name.starts_with("sleep-") || name.starts_with("login-")
+                        }) {
+                            bail!(
+                                "Fixture actions require an explicit login or sleep view overlay"
+                            );
                         }
                         match action.action.as_str() {
-                            "hide" => fixture_visible = false,
-                            "show" => fixture_visible = true,
+                            "hide" => timer_fixture_visible.set(false),
+                            "show" => timer_fixture_visible.set(true),
                             "capture" => capture_fixture_checkpoint(
                                 &ui,
                                 &fixture_capture,
                                 profile,
                                 &timer_platform,
                                 fixture.as_deref(),
+                                timer_fixture_visible.get(),
                                 &action.value,
                             )?,
                             _ => bail!("Unsupported fixture action {}", action.action),
@@ -260,7 +263,7 @@ fn run(arguments: Arguments) -> Result<()> {
                     fixture.as_deref(),
                     &fixture_qr,
                     &fixture_cover,
-                    fixture_visible,
+                    timer_fixture_visible.get(),
                 );
                 if elapsed >= deadline {
                     if next_action != actions.len() {
@@ -290,7 +293,12 @@ fn run(arguments: Arguments) -> Result<()> {
     }
     fs::write(
         capture.with_extension("state.json"),
-        serde_json::to_vec_pretty(&model_state(&ui, arguments.fixture.as_deref(), &platform))?,
+        serde_json::to_vec_pretty(&model_state(
+            &ui,
+            arguments.fixture.as_deref(),
+            fixture_visible.get(),
+            &platform,
+        ))?,
     )?;
     ui.hide()?;
     drop(application);
@@ -602,8 +610,8 @@ fn fixture_qr() -> Result<slint::Image> {
     let quiet = 4usize;
     let scale = 8usize;
     let side = (code.width() + quiet * 2) * scale;
-    let mut buffer = slint::SharedPixelBuffer::<slint::Rgb8Pixel>::new(side as u32, side as u32);
-    for (index, pixel) in buffer.make_mut_bytes().chunks_exact_mut(3).enumerate() {
+    let mut buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(side as u32, side as u32);
+    for (index, pixel) in buffer.make_mut_bytes().chunks_exact_mut(4).enumerate() {
         let x = index % side / scale;
         let y = index / side / scale;
         let dark = x >= quiet
@@ -611,9 +619,9 @@ fn fixture_qr() -> Result<slint::Image> {
             && x < code.width() + quiet
             && y < code.width() + quiet
             && code[(x - quiet, y - quiet)] == qrcode::Color::Dark;
-        pixel.fill(if dark { 0 } else { 255 });
+        pixel.copy_from_slice(&[0, 0, 0, if dark { 255 } else { 0 }]);
     }
-    Ok(slint::Image::from_rgb8(buffer))
+    Ok(slint::Image::from_rgba8(buffer))
 }
 
 fn fixture_sleep_cover() -> slint::Image {
@@ -647,23 +655,57 @@ fn apply_fixture(
     fixture: Option<&str>,
     qr: &slint::Image,
     sleep_cover: &slint::Image,
-    sleep_visible: bool,
+    overlay_visible: bool,
 ) {
+    if fixture.is_some_and(|name| name.starts_with("login-")) && !overlay_visible {
+        return;
+    }
     match fixture {
-        Some("login-qr") => {
+        Some("login-qr" | "login-loading" | "login-expired") => {
+            let loading = fixture == Some("login-loading");
+            let expired = fixture == Some("login-expired");
             let login = ui.global::<LoginModel>();
             login.set_step("qr".into());
-            login.set_qr(qr.clone());
-            login.set_qr_label("二维码有效期 02:48".into());
-            login.set_busy(false);
-            login.set_status("".into());
+            login.set_qr(if loading {
+                slint::Image::default()
+            } else {
+                qr.clone()
+            });
+            login.set_qr_label(if expired {
+                i18n::text("login_expired").into()
+            } else {
+                i18n::format("qr_expiry", &[("time", "02:48".into())]).into()
+            });
+            login.set_busy(loading);
+            login.set_status(if loading {
+                i18n::text("login_connecting").into()
+            } else if expired {
+                i18n::text("login_expired").into()
+            } else {
+                "".into()
+            });
         }
-        Some("login-code") => {
+        Some("login-code" | "login-code-empty") => {
+            let code = if fixture == Some("login-code-empty") {
+                ""
+            } else {
+                "482"
+            };
             let login = ui.global::<LoginModel>();
             login.set_step("code".into());
-            login.set_code("482".into());
-            login.set_code_length(3);
-            login.set_digits(model(vec!["4".into(), "8".into(), "2".into(), "".into()]));
+            login.set_code(code.into());
+            login.set_code_length(code.len() as i32);
+            login.set_digits(model(
+                (0..4)
+                    .map(|index| {
+                        code.chars()
+                            .nth(index)
+                            .map(|digit| digit.to_string())
+                            .unwrap_or_default()
+                            .into()
+                    })
+                    .collect(),
+            ));
             login.set_can_submit(false);
             login.set_busy(false);
             login.set_status("".into());
@@ -706,7 +748,7 @@ fn apply_fixture(
             let sleep = ui.global::<SleepScreenModel>();
             let has_cover = fixture == Some("sleep-cover");
             let neutral = fixture == Some("sleep-neutral");
-            sleep.set_active(sleep_visible);
+            sleep.set_active(overlay_visible);
             sleep.set_has_cover(has_cover);
             sleep.set_cover(if has_cover {
                 sleep_cover.clone()
@@ -733,9 +775,15 @@ fn capture_fixture_checkpoint(
     profile: DeviceProfile,
     platform: &Platform,
     fixture: Option<&str>,
+    fixture_visible: bool,
     checkpoint: &str,
 ) -> Result<()> {
-    if !matches!(checkpoint, "before" | "sleep") {
+    if checkpoint.is_empty()
+        || checkpoint.len() > 48
+        || !checkpoint
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
         bail!("Unsupported fixture checkpoint {checkpoint}");
     }
     let stem = capture
@@ -743,10 +791,13 @@ fn capture_fixture_checkpoint(
         .context("The fixture capture must have a filename")?
         .to_string_lossy();
     let path = capture.with_file_name(format!("{stem}.{checkpoint}.png"));
+    if path.exists() {
+        bail!("A fixture checkpoint must not replace an earlier capture");
+    }
     capture_window(ui, &path, profile)?;
     fs::write(
         path.with_extension("state.json"),
-        serde_json::to_vec_pretty(&model_state(ui, fixture, platform))?,
+        serde_json::to_vec_pretty(&model_state(ui, fixture, fixture_visible, platform))?,
     )?;
     Ok(())
 }
@@ -861,7 +912,12 @@ fn capture_window(ui: &AppWindow, path: &Path, profile: DeviceProfile) -> Result
     Ok(())
 }
 
-fn model_state(ui: &AppWindow, fixture: Option<&str>, platform: &Platform) -> Value {
+fn model_state(
+    ui: &AppWindow,
+    fixture: Option<&str>,
+    fixture_visible: bool,
+    platform: &Platform,
+) -> Value {
     let shell = ui.global::<ShellModel>();
     let library = ui.global::<LibraryModel>();
     let detail = ui.global::<DetailModel>();
@@ -870,10 +926,12 @@ fn model_state(ui: &AppWindow, fixture: Option<&str>, platform: &Platform) -> Va
     let article = ui.global::<ArticleModel>();
     let auxiliary = ui.global::<AuxiliaryModel>();
     let login = ui.global::<LoginModel>();
+    let login_qr_size = login.get_qr().size();
     let sleep = ui.global::<SleepScreenModel>();
     let sleep_cover_size = sleep.get_cover().size();
     json!({
         "fixture": fixture,
+        "fixture_visible": fixture_visible,
         "boundary": "Offline public demo fixture; no account or physical Kindle verification",
         "image_processing": {"hardware_y4_available": platform.hardware_y4_available(),
             "boundary": "Desktop availability is observed; no hardware submission is simulated"},
@@ -905,7 +963,10 @@ fn model_state(ui: &AppWindow, fixture: Option<&str>, platform: &Platform) -> Va
                 "text": chip.text.to_string(), "x": chip.x, "width": chip.width, "row": chip.row})).collect::<Vec<_>>(),
             "candidates": search.get_candidates().iter().map(|value| value.to_string()).collect::<Vec<_>>()},
         "login": {"step": login.get_step().to_string(), "code_length": login.get_code_length(),
-            "digits": login.get_digits().iter().map(|value| value.to_string()).collect::<Vec<_>>()},
+            "digits": login.get_digits().iter().map(|value| value.to_string()).collect::<Vec<_>>(),
+            "busy": login.get_busy(), "status": login.get_status().to_string(),
+            "qr_label": login.get_qr_label().to_string(), "qr_size": [login_qr_size.width, login_qr_size.height],
+            "can_submit": login.get_can_submit()},
         "reader": {"menu": reader.get_menu(), "tool": reader.get_tool().to_string(), "subtool": reader.get_subtool().to_string(),
             "show_heading": reader.get_show_heading(), "margin": reader.get_margin(),
             "font_size": reader.get_font_size(), "font_choice": reader.get_font_choice().to_string(),
