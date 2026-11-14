@@ -73,8 +73,31 @@ impl DeviceProfile {
         if self.is_scribe() { 10 } else { 7 }
     }
 
-    pub const fn detail_chapter_page_size(self) -> usize {
-        if self.is_scribe() { 12 } else { 7 }
+    /// Fill the current logical detail viewport with bounded short-row pages.
+    /// Long rows keep their full text and scroll within the same page. Temporary
+    /// status and selection chrome do not change page boundaries.
+    pub fn detail_page_size(self, viewport: (u32, u32), tab: &str) -> usize {
+        if viewport.0 == 0 {
+            return 1;
+        }
+        let (controls, row_height, maximum) = match tab {
+            "reviews" => (if self.is_scribe() { 64 } else { 52 }, 88, 16),
+            // The selected annotation reader admits at most sixteen records.
+            "notes" => (48, 96, 16),
+            _ => (48, 52, 64),
+        };
+        // Status bar, full-width header, tab strip, and the fixed page bar.
+        let chrome = 28
+            + 52
+            + 48
+            + 48
+            + controls
+            + if self.is_scribe() {
+                24 // The two-column detail body's top inset.
+            } else {
+                218 // The stacked book summary and its actions.
+            };
+        (viewport.1.saturating_sub(chrome) / row_height).clamp(1, maximum) as usize
     }
 
     pub const fn reader_chapter_page_size(self) -> usize {
@@ -112,5 +135,37 @@ mod tests {
     fn unknown_profiles_are_not_silently_assumed_compatible() {
         assert!(DeviceProfile::parse("colorsoft").is_none());
         assert!(DeviceProfile::parse("unknown").is_none());
+    }
+
+    #[test]
+    fn detail_pages_fill_the_short_row_space_on_every_profile() {
+        for (profile, expected) in [
+            (DeviceProfile::Paperwhite5, [7, 4, 3]),
+            (DeviceProfile::Paperwhite6, [7, 4, 4]),
+            (DeviceProfile::Scribe, [19, 11, 10]),
+            (DeviceProfile::Scribe2025, [20, 12, 11]),
+        ] {
+            let actual = ["toc", "reviews", "notes"]
+                .map(|tab| profile.detail_page_size(profile.logical_size(), tab));
+            assert_eq!(actual, expected, "{}", profile.id());
+        }
+        assert_eq!(
+            DeviceProfile::Scribe.detail_page_size((930, 1240), "toc"),
+            19
+        );
+    }
+
+    #[test]
+    fn detail_capacity_uses_runtime_height_and_has_explicit_read_limits() {
+        let profile = DeviceProfile::Paperwhite6;
+        assert_eq!(profile.detail_page_size((636, 848), "toc"), 7);
+        assert_eq!(profile.detail_page_size((636, 1100), "toc"), 12);
+        for tab in ["toc", "reviews", "notes"] {
+            assert_eq!(profile.detail_page_size((0, u32::MAX), tab), 1);
+            assert_eq!(profile.detail_page_size((636, 0), tab), 1);
+        }
+        assert_eq!(profile.detail_page_size((636, u32::MAX), "toc"), 64);
+        assert_eq!(profile.detail_page_size((636, u32::MAX), "reviews"), 16);
+        assert_eq!(profile.detail_page_size((636, u32::MAX), "notes"), 16);
     }
 }

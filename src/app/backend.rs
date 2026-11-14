@@ -1884,6 +1884,7 @@ impl App {
     }
 
     fn login_failure(&mut self, error: &source::SourceError) {
+        let needs_skill = matches!(error, source::SourceError::Unsupported("skill_not_enabled"));
         let key = match error {
             source::SourceError::Unsupported("skill_not_enabled") => "login_skill_required",
             source::SourceError::LoginExpired => "login_expired",
@@ -1896,13 +1897,28 @@ impl App {
         ) {
             self.online = false;
         }
+        if needs_skill {
+            self.login_challenge = None;
+            self.login_code.clear();
+            self.login_key.clear();
+        }
         if let Some(ui) = self.ui.upgrade() {
             let login = ui.global::<LoginModel>();
             login.set_busy(false);
             login.set_status(tr(key).into());
-        }
-        if matches!(error, source::SourceError::Unsupported("skill_not_enabled")) {
-            self.login_challenge = None;
+            if needs_skill {
+                // The QR page owns the setup hint, including after an OTP failure.
+                login.set_step("qr".into());
+                login.set_skills_open(false);
+                login.set_skills_qr(slint::Image::default());
+                login.set_qr(slint::Image::default());
+                login.set_qr_label("".into());
+                login.set_code("".into());
+                login.set_code_length(0);
+                login.set_digits(model(vec!["".into(); 4]));
+                login.set_api_key("".into());
+                login.set_can_submit(false);
+            }
         }
     }
 

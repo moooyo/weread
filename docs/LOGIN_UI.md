@@ -2,12 +2,12 @@
 
 Accepted: 2026-11-15 (Asia/Shanghai).
 
-Status: the approved V3 layout and larger QR code are implemented in source.
-The current host Login and QR scopes passed, covering 51 unique parent cases
-after case-ID deduplication. The two software-rendered profiles passed 85
-interface checks. The ARM build/package retry and final documentation-only
-repack passed. No firmware-guest or physical Kindle execution has been
-performed for this Login implementation.
+Status: the approved Skills guide and the existing larger-QR layout are
+implemented. The final guidance snapshot passed 89 unique selected host cases,
+77 actual software-interface checks, and the separate Detail capacity captures.
+The earlier QR-only redesign and its physical startup retain their own evidence
+below. Neither this guide nor its software screenshots establish real scanning,
+authenticated device use, or a new model/firmware compatibility claim.
 
 ## Accepted interface
 
@@ -43,7 +43,105 @@ Existing ordinary-start Library selection when a session or local books are
 available remains unchanged. Removing the Login footer does not remove local
 import or reading behavior from Library.
 
-## Frozen verification snapshot
+## Skills setup guidance
+
+Accepted: 2026-11-15 (Asia/Shanghai), using the final V3 guidance proposal.
+The accepted guidance is implemented and passed its final host and software
+verification. All execution for this scope used `test-env`.
+
+The QR page includes a first-use Skills prerequisite, the official page address,
+and a quiet help action beneath Refresh. The guide opens as a full page with a
+separate public QR for `https://weread.qq.com/r/weread-skills`. Its four rows
+share a numbered column and text origin; the widest text determines the width
+of the complete centered group. The fourth row explains that the Kindle does
+not require manual API Key entry. Back is at the upper left. The existing X
+remains at the upper right and requests ordinary application exit in every
+Login state; it never acts as Back. There is no bottom Back button.
+
+The official page's public setup section and JavaScript describe generating
+a personal API Key after signing into the same account. The application does not
+generate or enable an upstream key. The public guide QR uses the same admitted
+RGBA encoder and transparent quiet zone as Login. Source fields `skills-open`
+and `skills-qr` are transient UI state, not persistence or credential fields.
+The guide replicates the admitted alpha mask at eight source pixels per module,
+with a maximum 512-pixel raster edge. This caps the replicated raster at one MiB and reduces
+fixed-point texture-sampling drift while keeping the 360/288 logical display
+sizes, four-module quiet zone, and pixelated rendering. The general QR encoder
+and its byte-admission contract remain unchanged.
+
+Opening help retires the current challenge and fences queued Login results.
+Back obtains a fresh challenge through the existing Login flow. A missing
+Skills key after the four-digit step returns to the QR page with its setup
+hint and clears temporary code state. Close retains its existing session/data
+preservation and exit behavior. Authentication protocols, database layout,
+preferences, and upstream key generation are unchanged.
+
+The original guidance PNGs and interactive proposals remain design records;
+they are not application, firmware, or physical-device screenshots.
+
+### Final guidance verification
+
+The task-owned root is `/root/weread-skills-implementation-20261115-r1`.
+The runtime manifest is
+`e34dbeb1be35032604500eef17344a55f035e955db3a5e8a9c6c46d00c4eec0f`,
+with 620 files on baseline main `12c1315`. Fifteen source/test paths differ;
+documentation closeout edits are outside that frozen runtime snapshot.
+
+The Login filter passed 46 parent cases. The QR and eight Detail filters passed
+their exact 44-case union through the same libtest executable and private source
+namespace; case IDs were verified before and after execution. The complete
+scope contains 90 executions and 89 unique cases, with one Login/QR overlap,
+zero failures, and zero ignored cases. Thirteen changed Rust files passed the
+read-only format check. These selected scopes are not a full application suite.
+
+The actual App/Slint fixture is `weread-fixture-2944aee7cc88`, SHA-256
+`2944aee7cc883a98acf0c2ab6da8637307635aae27e8873dfca488e79678df67`.
+It renders Scribe 930 x 1240 and Paperwhite 632 x 840 windows at scale 1.
+The final report `software-skills-final-dense/report.json` passed 77/77 checks
+and retains 24 unchanged PNGs with metadata and model sidecars. A preceding
+PW-only 24-check preflight is marked as partial and is not added to that total.
+
+The initial Login QR uses an explicitly named, non-authenticating display
+overlay. Guide opening, its public QR, left Back, cleared state, and fresh
+offline Login use the real controller and pointer path. The overlay is hidden
+before the second guide/back cycle. Four rendered instruction rows and their
+group centering were checked and visually reviewed; exact text is source-bound,
+not an OCR claim. Existing numeric-code, Backspace, four-digit maximum, and
+rescan pointer checks passed. Actual X exit and stale-result fencing belong to
+the separate host closing regression, rather than a fabricated UI exit result.
+
+The initial `75d17167` candidate passed 89 selected host cases and built an ARM
+package, but its interface report passed 75 checks and failed two PW guide-QR
+geometry checks. That source, package, report, and original PNGs remain
+historical. The renderer's eight-fractional-bit texture coordinates explain the
+observed four-pixel drift; the admitted guide mask's bounded pixel replication
+fixed it without changing display sizes or acceptance thresholds. Final guide
+ink-center error is 1 logical pixel on Scribe and 0.5 on PW, within the original
+three-pixel allowance. The general QR encoder remains unchanged.
+
+No firmware guest, physical Kindle, credential input, or upstream authentication
+submission was used for the guidance verification. The previous physical
+installation and acceptance boundaries below remain attached to their own ARM.
+
+The ARM application built successfully in 186.87 seconds, with SHA-256
+`4c4df58d13cde38df3b280d43ca004cdcf1039026638ea3bb60da6daa1ec6d61`.
+The unchanged native guard remains `689ef367eabe` and launcher `71316711`.
+Original development ZIP `bdf6f8cb27c092d27350972a91e6285ec86a74fe9cb0e862571f0259764fe2d6`
+passed CRC and contained the matching application and guard. The original
+compiler package and any documentation-only delivery repack retain separate
+receipts. The new application has not been installed or tested on a physical
+Kindle in this scope.
+
+Final reviewed delivery is `weread-kindle-skills-reviewed-dev.zip`, 68,276,537
+bytes, SHA-256
+`8446935f6d9dcd8481d312ec4d96e837c0bba25f7a0fe38e74b8caad12788d36`.
+Only the public packaged README changed from the successful original ZIP;
+the other 35 members, application, guard, and launcher are byte-identical.
+The member list, ordering, CRC, and source integrity checks passed. This is a
+documentation-only repack, not a new compiler output. Original packages and
+all initial failure receipts remain preserved.
+
+## Initial QR redesign verification snapshot
 
 All execution for this iteration runs on `test-env`. The task-owned root is
 `/root/weread-login-implementation-20261115-r1`.
@@ -155,13 +253,21 @@ not change the executable or require recompilation.
 
 ## Deployment and acceptance boundary
 
-This iteration has not accessed a physical Kindle, started a firmware guest,
-acquired or modified the shared device lease, or changed user data. The
-physical installation remains the preceding ARM `64e66a8a243c`, launcher
-`71316711`, and guard `689ef367eabe` on Scribe 2022 / firmware 5.19.5. The
-operator's acceptance of that installation belongs to
-[the introduction-preview deployment](PHYSICAL_TESTING.md#introduction-preview-deployment-and-operator-acceptance).
-It is not acceptance of this Login redesign.
+After the software and packaging checkpoint, the operator requested deployment
+to the identified Scribe 2022 / firmware 5.19.5. ARM `8da54b9b111d`, launcher
+`71316711`, and guard `689ef367eabe` were installed and started through the
+ordinary entry. All 36 public members matched the reviewed package; six
+protected data/configuration files were unchanged across public replacement.
+There was no reset, conversion, or forced logout. The
+[physical deployment record](PHYSICAL_TESTING.md#qr-login-deployment-and-manual-trial-closeout)
+separates startup and restoration evidence from authenticated acceptance.
+
+At the authorized handoff, the application had already exited, so no stop
+signal was sent. Native Home, statusbar, and the window manager were healthy;
+application processes and the launcher lock were absent. All device transports
+ended before the matching owner/token lease release at 2026-11-15 02:41:40
++08:00. No later physical access belongs to this task window. The preceding
+introduction-preview acceptance is not reassigned to the Login redesign.
 
 Physical layout, touch behavior, real scanning/verification, and another
 model/firmware combination remain separate acceptance conditions. The current

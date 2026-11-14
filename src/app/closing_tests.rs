@@ -518,6 +518,41 @@ fn run_login_close_scenario(profile: DeviceProfile) -> Result<()> {
         }
     }
 
+    let guide_request = {
+        let mut state = application.borrow_mut();
+        state.dispatch("login", "skills-help", "")?;
+        assert!(ui.global::<LoginModel>().get_skills_open());
+        state.login_request
+    };
+    let center = login_close_target(&ui, &adapter, profile);
+    click_login_close(&ui, center)?;
+    attempts += 1;
+    assert_eq!(loop_state.quit_attempts.load(Ordering::SeqCst), attempts);
+    assert!(!loop_state.terminated.load(Ordering::SeqCst));
+    {
+        let mut state = application.borrow_mut();
+        assert!(!state.closing.get());
+        assert_eq!(state.route, Route::Login);
+        assert_ne!(state.login_request, guide_request);
+        let login = ui.global::<LoginModel>();
+        assert!(!login.get_skills_open());
+        assert_eq!(login.get_skills_qr().size().width, 0);
+        assert_eq!(login.get_status().as_str(), tr("operation_failed"));
+        let account_epoch = state.jobs.account_epoch();
+        for result in [
+            JobResult::LoginBegin(Ok(login_close_challenge())),
+            JobResult::LoginPoll(Ok(QrLoginState::NeedCode)),
+        ] {
+            assert!(!state.handle_job(JobEvent::new(guide_request, account_epoch, result))?);
+        }
+        assert_eq!(state.jobs.session(), Some(session.clone()));
+        assert_eq!(session_file.load()?, Some(session.clone()));
+        assert_eq!(
+            std::fs::read(directory.path().join("account.json"))?,
+            saved_account
+        );
+    }
+
     let database = rusqlite::Connection::open(directory.path().join("library.sqlite"))?;
     database.execute_batch(
         "CREATE TRIGGER reject_login_close_save BEFORE UPDATE OF value ON settings
@@ -536,6 +571,10 @@ fn run_login_close_scenario(profile: DeviceProfile) -> Result<()> {
     );
     database.execute_batch("DROP TRIGGER reject_login_close_save;")?;
 
+    application
+        .borrow_mut()
+        .dispatch("login", "skills-help", "")?;
+    assert!(ui.global::<LoginModel>().get_skills_open());
     loop_state.reject_quit.store(false, Ordering::SeqCst);
     ui.global::<LoginModel>().set_busy(true);
     let center = login_close_target(&ui, &adapter, profile);

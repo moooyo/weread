@@ -321,7 +321,7 @@ fn run_selected_pending_and_hidden_reader() -> Result<()> {
             .set_writing_thought(true);
         state.navigate(Route::Detail(BOOK.into()), true)?;
         state.selecting_chapters = true;
-        let size = state.profile.detail_chapter_page_size();
+        let size = state.detail_page_size("toc");
         for page in 0..(ROWS as usize).div_ceil(size) {
             state.detail_page = page;
             state.detail_action("select-page", "")?;

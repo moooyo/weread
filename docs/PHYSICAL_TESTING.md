@@ -1,20 +1,58 @@
 # Physical Kindle testing
 
-Development is continuing. The latest Scribe deployment below has scoped
-operator functional acceptance. It does not establish a general supported
-model/firmware matrix or acceptance of untested hardware features. Historical
-artifact identifiers and dates remain attached to their own results.
+Development is continuing. The latest QR Login candidate has normal-startup
+and restoration evidence; authenticated Login acceptance remains separate.
+The preceding introduction-preview deployment has scoped operator functional
+acceptance. Neither establishes a general supported model/firmware matrix or
+acceptance of untested hardware features. Historical artifact identifiers and
+dates remain attached to their own results.
 
 ## Identified physical environment
 
 - Device: first-generation Kindle Scribe released in 2022.
 - Firmware: 5.19.5.
 - Application mode: artifact-specific offline demonstrations and normal-mode
-  trials; the latest normal installation starts from operator-authorized fresh
-  current-layout data.
+  trials; the latest normal update preserves the existing current-layout data.
 - Scope: supervised device iterations and private daily-trial observations, separate from the Scribe 2022 firmware 5.20.1 VM experiments.
 
 No device address, credential, serial number, private note text, or account content is part of this record. Offline demonstration results do not establish live-account authentication, content entitlements, or upstream writes.
+
+## QR Login deployment and manual-trial closeout
+
+On 2026-11-15 (Asia/Shanghai), the operator requested installation of the
+approved Login redesign for manual testing on the identified Scribe 2022 /
+firmware 5.19.5. The deployed source is main `12c1315`. ARM `8da54b9b111d`,
+guard `689ef367eabe`, and launcher `71316711` matched reviewed package
+`a0cb9bd254e3`. All 36 public files matched. Six protected data/configuration
+files retained their hashes across public replacement; existing application
+data and device settings were preserved without reset, conversion, or logout.
+Private rollback archives remain on `test-env` and are not repository files.
+
+The ordinary document entry launched with `--kindle --device scribe` and the
+regular data directory, without demo/offline actions or an exit deadline.
+The application reached its open state and was left for the operator. Owned
+deployment staging was removed before launch. No automated functional test,
+credential entry, or real QR submission was performed during deployment.
+The operator subsequently reported excessive blank space below Detail rows
+and requested Login prerequisite guidance; these are new UI requests, not
+an authenticated Login acceptance statement.
+
+The operator authorized a cross-project device handoff. At closeout the
+application had already exited; no TERM or other stop signal was sent.
+WeRead app, guard, launcher, and startup lock were absent. Statusbar and the
+window manager were running, and the modern native Home application/view was
+confirmed. An earlier overly strict legacy Home identifier check is retained
+as a diagnostic checkpoint, not a device restoration failure. Every device
+transport ended before the owner/token-checked lease release at
+2026-11-15 02:41:40.813100 +08:00. Independent host checks found the lease
+directory absent. This task did not reacquire the device after handoff.
+
+Deployment readiness and handoff summaries remain under the task-owned
+`test-env:/root/weread-login-physical-20261115-r1/evidence/` directory.
+These observations establish installation, normal startup, data preservation,
+and native restoration for this candidate. They do not establish successful
+real scanning, four-digit verification, complete authenticated use, or a new
+model/firmware compatibility claim.
 
 ## Introduction-preview deployment and operator acceptance
 

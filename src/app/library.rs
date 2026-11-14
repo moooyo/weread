@@ -6,6 +6,10 @@ use sha2::{Digest, Sha256};
 #[path = "book_intro_preview_tests.rs"]
 mod introduction_preview_tests;
 
+#[cfg(test)]
+#[path = "detail_pagination_tests.rs"]
+mod detail_pagination_tests;
+
 pub(super) struct BookTileMetadata<'a> {
     id: &'a str,
     title: &'a str,
@@ -226,26 +230,6 @@ pub(super) fn chapter_content_label_for_status(
         format!("{} · {}", tr("current_chapter"), tr(state))
     } else {
         tr(state)
-    }
-}
-
-fn detail_page_size(profile: DeviceProfile, tab: &str) -> usize {
-    match tab {
-        "notes" => {
-            if profile.is_scribe() {
-                4
-            } else {
-                2
-            }
-        }
-        "reviews" => {
-            if profile.is_scribe() {
-                5
-            } else {
-                3
-            }
-        }
-        _ => profile.detail_chapter_page_size(),
     }
 }
 
@@ -1010,12 +994,16 @@ impl App {
             .position(|chapter| chapter.index == position.chapter_index))
     }
 
+    pub(super) fn detail_page_size(&self, tab: &str) -> usize {
+        self.profile
+            .detail_page_size(self.platform.logical_viewport_size(), tab)
+    }
+
     pub(super) fn load_detail(&mut self, id: &str) -> Result<()> {
         let source = self.store.book_source(id)?;
         let changed = self.detail_id != id;
         let current_page = if changed {
-            self.detail_current_chapter_ordinal(id)?.unwrap_or(0)
-                / self.profile.detail_chapter_page_size().max(1)
+            self.detail_current_chapter_ordinal(id)?.unwrap_or(0) / self.detail_page_size("toc")
         } else {
             self.detail_page
         };
@@ -1284,7 +1272,7 @@ impl App {
             .position(&book.id)?
             .map(|p| p.chapter_index)
             .unwrap_or(0);
-        let size = detail_page_size(self.profile, &self.detail_tab);
+        let size = self.detail_page_size(&self.detail_tab);
         let count = if self.detail_tab == "reviews" {
             page_count(self.reviews.len(), size)
         } else if self.detail_tab == "notes" {
@@ -1301,7 +1289,7 @@ impl App {
         state.set_chapters(model(
             chapters
                 .iter()
-                .skip(self.detail_page * size)
+                .skip(self.detail_page.saturating_mul(size))
                 .take(size)
                 .map(|chapter| {
                     let content_status =
@@ -1323,17 +1311,21 @@ impl App {
                 })
                 .collect(),
         ));
-        let per_page = detail_page_size(self.profile, &self.detail_tab);
+        let per_page = size;
         let rows = if self.detail_tab == "notes" {
-            let page = self.note_headers_page(&book.id, self.detail_page * per_page, per_page)?;
+            let page = self.note_headers_page(
+                &book.id,
+                self.detail_page.saturating_mul(per_page),
+                per_page,
+            )?;
             detail_note_rows(
                 self.note_display_records(&book.id, &page.headers)?,
                 &chapters,
             )
-        } else {
+        } else if self.detail_tab == "reviews" {
             self.reviews
                 .iter()
-                .skip(self.detail_page * per_page)
+                .skip(self.detail_page.saturating_mul(per_page))
                 .take(per_page)
                 .map(|r| DetailReview {
                     id: r.id.clone().into(),
@@ -1355,6 +1347,8 @@ impl App {
                     ..Default::default()
                 })
                 .collect()
+        } else {
+            Vec::new()
         };
         state.set_reviews(model(rows));
         state.set_review_order(if self.review_latest { "latest" } else { "hot" }.into());
@@ -1421,7 +1415,7 @@ impl App {
                 self.detail_page = detail_tab_page(
                     value,
                     position,
-                    self.profile.detail_chapter_page_size(),
+                    self.detail_page_size("toc"),
                     &mut self.selecting_chapters,
                     &mut self.selected_chapters,
                 );
@@ -1462,12 +1456,12 @@ impl App {
                 if self.detail_tab != "toc" || !self.selecting_chapters {
                     return Ok(());
                 }
-                let size = self.profile.detail_chapter_page_size();
+                let size = self.detail_page_size("toc");
                 for c in self
                     .store
                     .chapter_metadata(&id)?
                     .iter()
-                    .skip(self.detail_page * size)
+                    .skip(self.detail_page.saturating_mul(size))
                     .take(size)
                 {
                     if !c.cached {
@@ -3103,21 +3097,33 @@ mod tests {
     }
 
     #[test]
-    fn detail_paging_keeps_rich_notes_separate_from_review_and_catalog_capacity() {
-        for profile in [DeviceProfile::Paperwhite6, DeviceProfile::Scribe] {
-            let notes = detail_page_size(profile, "notes");
-            let reviews = detail_page_size(profile, "reviews");
-            assert!(notes < reviews);
-            assert_eq!(
-                detail_page_size(profile, "toc"),
-                profile.detail_chapter_page_size()
-            );
+    fn detail_paging_keeps_rich_notes_and_reviews_within_their_read_limits() {
+        for profile in [
+            DeviceProfile::Paperwhite5,
+            DeviceProfile::Paperwhite6,
+            DeviceProfile::Scribe,
+            DeviceProfile::Scribe2025,
+        ] {
+            let viewport = profile.logical_size();
+            let notes = profile.detail_page_size(viewport, "notes");
+            let reviews = profile.detail_page_size(viewport, "reviews");
+            let chapters = profile.detail_page_size(viewport, "toc");
+            assert!(notes <= reviews && reviews < chapters);
+            assert!(notes <= crate::store::AnnotationLimits::records().rows);
+            assert!(14 * notes <= crate::store::AnnotationLimits::records().cells);
             let count = page_count(notes * 2 + 1, notes);
             let first = move_page(0, 1, count);
             let second = move_page(first, 1, count);
             assert_eq!((first, second), (1, 2));
             assert_eq!(move_page(second, 1, count), second);
         }
+        assert_eq!(
+            page_count(
+                1863,
+                DeviceProfile::Scribe.detail_page_size((930, 1240), "toc")
+            ),
+            99
+        );
     }
 
     #[test]

@@ -1,6 +1,38 @@
 use super::*;
 use crate::domain::BookMetadata;
 use crate::input::{InputIntent, InputPurpose};
+use anyhow::Context;
+
+pub(super) const SKILLS_SETUP_URL: &str = "https://weread.qq.com/r/weread-skills";
+pub(super) const SKILLS_QR_MODULE_SCALE: u32 = 8;
+const MAX_SKILLS_QR_RASTER_EDGE: u32 = 512;
+
+fn skills_setup_qr() -> Result<slint::Image> {
+    let image = library::qr_image(SKILLS_SETUP_URL)?;
+    let source = image
+        .to_rgba8()
+        .context("The public setup QR must retain its RGBA mask")?;
+    let width = source
+        .width()
+        .checked_mul(SKILLS_QR_MODULE_SCALE)
+        .filter(|edge| *edge <= MAX_SKILLS_QR_RASTER_EDGE)
+        .context("The public setup QR exceeds its raster allowance")?;
+    let height = source
+        .height()
+        .checked_mul(SKILLS_QR_MODULE_SCALE)
+        .filter(|edge| *edge <= MAX_SKILLS_QR_RASTER_EDGE)
+        .context("The public setup QR exceeds its raster allowance")?;
+    let mut raster = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(width, height);
+    let original = source.as_slice();
+    // More source texels keep the renderer's fixed-point sampling centered.
+    // Replication preserves the admitted modules and transparent quiet zone.
+    for (index, pixel) in raster.make_mut_slice().iter_mut().enumerate() {
+        let x = index % width as usize / SKILLS_QR_MODULE_SCALE as usize;
+        let y = index / width as usize / SKILLS_QR_MODULE_SCALE as usize;
+        *pixel = original[y * source.width() as usize + x];
+    }
+    Ok(slint::Image::from_rgba8(raster))
+}
 
 #[derive(Clone, Copy)]
 pub(super) struct JumpEditLimits {
@@ -120,6 +152,43 @@ impl App {
 
     pub(super) fn login_action(&mut self, action: &str, value: &str) -> Result<()> {
         match action {
+            "skills-help" if self.route == Route::Login => {
+                // Admit the public guide before retiring the current login scope.
+                let qr = skills_setup_qr()?;
+                self.jobs.cancel_login();
+                self.login_request = self.request();
+                self.login_polling = false;
+                self.login_challenge = None;
+                self.login_code.clear();
+                self.login_key.clear();
+                if let Some(ui) = self.ui.upgrade() {
+                    let login = ui.global::<LoginModel>();
+                    login.set_skills_qr(qr);
+                    login.set_skills_open(true);
+                    login.set_step("qr".into());
+                    login.set_qr(slint::Image::default());
+                    login.set_qr_label("".into());
+                    login.set_code("".into());
+                    login.set_code_length(0);
+                    login.set_digits(model(vec!["".into(); 4]));
+                    login.set_api_key("".into());
+                    login.set_can_submit(false);
+                    login.set_busy(false);
+                    login.set_status("".into());
+                }
+            }
+            "skills-back"
+                if self.route == Route::Login
+                    && self
+                        .ui
+                        .upgrade()
+                        .is_some_and(|ui| ui.global::<LoginModel>().get_skills_open()) =>
+            {
+                if !self.force_offline && !self.demo {
+                    self.online = true;
+                }
+                self.begin_login();
+            }
             "close" => {
                 self.jobs.cancel_login();
                 // Fence results already queued before the login flow was cancelled.
@@ -132,6 +201,8 @@ impl App {
                     if let Some(ui) = self.ui.upgrade() {
                         let login = ui.global::<LoginModel>();
                         login.set_busy(false);
+                        login.set_skills_open(false);
+                        login.set_skills_qr(slint::Image::default());
                         login.set_qr(slint::Image::default());
                         login.set_qr_label("".into());
                         login.set_status(tr("operation_failed").into());
@@ -309,6 +380,8 @@ impl App {
         if let Some(ui) = self.ui.upgrade() {
             let login = ui.global::<LoginModel>();
             login.set_step("qr".into());
+            login.set_skills_open(false);
+            login.set_skills_qr(slint::Image::default());
             login.set_qr(slint::Image::default());
             login.set_code("".into());
             login.set_code_length(0);
@@ -1018,3 +1091,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "login_skills_tests.rs"]
+mod login_skills_tests;

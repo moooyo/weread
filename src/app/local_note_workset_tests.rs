@@ -472,9 +472,16 @@ fn local_statistics_streams_counts_and_preserves_chrono_minimum_numeric_range() 
 
 fn combined_selected_views() -> Result<()> {
     let fixture = Fixture::new_for_profile(BODY, Vec::new(), false, DeviceProfile::Scribe)?;
+    let detail_size = fixture.app().detail_page_size("notes");
+    let record_limits = AnnotationLimits::records();
+    assert!(detail_size > 0 && detail_size <= record_limits.rows);
+    let detail_cells = detail_size * 14;
+    assert!(detail_cells <= record_limits.cells);
+    let note_count = detail_size * 2 + record_limits.rows;
+    let detail_pages = page_count(note_count, detail_size);
     {
         let mut state = fixture.app();
-        populate(&state, 32)?;
+        populate(&state, note_count)?;
         state.prefs.mine = true;
         state.reader.notes_panel = true;
         state.reflow_reader()?;
@@ -512,7 +519,7 @@ fn combined_selected_views() -> Result<()> {
         );
         assert_eq!(state.store.annotation_read_stats().note_copies, toc);
         assert_eq!(retained_editor(&state), kept);
-        assert_eq!(state.store.annotation_count(BOOK)?, 32);
+        assert_eq!(state.store.annotation_count(BOOK)?, note_count as u64);
         fixture.ui().global::<ReaderModel>().set_toc_open(false);
     }
     reader_event(&fixture, "reader.detail", "");
@@ -522,11 +529,21 @@ fn combined_selected_views() -> Result<()> {
         .global::<DetailModel>()
         .invoke_event("tab".into(), "notes".into());
     let first = fixture.ui().global::<DetailModel>().get_reviews();
+    let first_ids = first
+        .iter()
+        .map(|entry| entry.id.to_string())
+        .collect::<Vec<_>>();
     {
         let state = fixture.app();
-        assert_eq!(first.row_count(), 4);
-        assert_eq!(state.store.annotation_read_stats().note_copies, 4);
-        assert_eq!(state.store.annotation_read_stats().quote_copies, 4);
+        let detail = fixture.ui().global::<DetailModel>();
+        assert_eq!(detail.get_page(), 1);
+        assert_eq!(detail.get_page_count(), detail_pages as i32);
+        assert_eq!(first.row_count(), detail_size);
+        assert_eq!(state.store.annotation_read_stats().note_copies, detail_size);
+        assert_eq!(
+            state.store.annotation_read_stats().quote_copies,
+            detail_size
+        );
         state.store.reset_annotation_read_stats();
     }
     fixture
@@ -534,13 +551,53 @@ fn combined_selected_views() -> Result<()> {
         .global::<DetailModel>()
         .invoke_event("page".into(), "1".into());
     {
-        let state = fixture.app();
-        let next = fixture.ui().global::<DetailModel>().get_reviews();
-        assert_eq!(next.row_count(), 4);
-        assert_ne!(first.row_data(0).unwrap().id, next.row_data(0).unwrap().id);
-        assert_eq!(state.store.annotation_read_stats().note_copies, 4);
-        assert_eq!(state.store.annotation_read_stats().quote_copies, 4);
-        assert_eq!(state.store.annotation_count(BOOK)?, 32);
+        let mut state = fixture.app();
+        let detail = fixture.ui().global::<DetailModel>();
+        let next = detail.get_reviews();
+        assert_eq!(detail.get_page(), 2);
+        assert_eq!(detail.get_page_count(), detail_pages as i32);
+        assert_eq!(next.row_count(), detail_size);
+        assert!(
+            next.iter()
+                .all(|entry| !first_ids.contains(&entry.id.to_string()))
+        );
+        assert_eq!(state.store.annotation_read_stats().note_copies, detail_size);
+        assert_eq!(
+            state.store.annotation_read_stats().quote_copies,
+            detail_size
+        );
+        assert_eq!(state.store.annotation_count(BOOK)?, note_count as u64);
+
+        let kept = retained_editor(&state);
+        let mut row_limits = record_limits;
+        row_limits.rows = detail_size - 1;
+        let mut cell_limits = record_limits;
+        cell_limits.cells = detail_cells - 1;
+        for (limits, resource, limit, requested) in [
+            (row_limits, "selected rows", detail_size - 1, detail_size),
+            (
+                cell_limits,
+                "selected SQL cells",
+                detail_cells - 1,
+                detail_cells,
+            ),
+        ] {
+            state.store.reset_annotation_read_stats();
+            let error = super::reading::with_note_read_test_limits(
+                AnnotationLimits::headers(),
+                limits,
+                || state.render_detail(),
+            )
+            .unwrap_err();
+            let denial = error.downcast_ref::<AnnotationResourceLimit>().unwrap();
+            assert_eq!(denial.resource, resource);
+            assert_eq!(denial.limit, limit);
+            assert_eq!(denial.requested, requested);
+            assert_eq!(state.store.annotation_read_stats().quote_copies, 0);
+            assert_eq!(state.store.annotation_read_stats().note_copies, 0);
+            assert_eq!(retained_editor(&state), kept);
+            assert_eq!(state.store.annotation_count(BOOK)?, note_count as u64);
+        }
     }
     fixture.finish()
 }

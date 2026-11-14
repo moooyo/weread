@@ -194,7 +194,7 @@ fn full_detail_case() -> Result<()> {
         let mut state = fixture.app();
         let session = account(Some("snapshot-account-a"), "a");
         let owner = configure(&mut state, &session)?;
-        let count = state.profile.detail_chapter_page_size() + 3;
+        let count = state.detail_page_size("toc") + 3;
         seed_catalog(&mut state, count, &owner, ContentStatus::Full, true)?;
         let reads = state.store.materialized_chapter_bytes();
         for tab in ["toc", "notes", "toc"] {
@@ -243,7 +243,7 @@ fn unknown_detail_case() -> Result<()> {
         let mut state = fixture.app();
         let session = account(None, "no-vid");
         configure(&mut state, &session)?;
-        let count = state.profile.detail_chapter_page_size() + 3;
+        let count = state.detail_page_size("toc") + 3;
         seed_catalog(&mut state, count, "", ContentStatus::Unknown, false)?;
         let reads = state.store.materialized_chapter_bytes();
         for _ in 0..3 {
@@ -341,7 +341,7 @@ fn planning_case() -> Result<()> {
         let mut state = fixture.app();
         let session = account(None, "planner");
         let owner = configure(&mut state, &session)?;
-        let count = state.profile.detail_chapter_page_size() + 3;
+        let count = state.detail_page_size("toc") + 3;
         seed_catalog(&mut state, count, &owner, ContentStatus::Full, true)?;
         let chapters = (0..count as u32).collect::<Vec<_>>();
         let reads = state.store.materialized_chapter_bytes();

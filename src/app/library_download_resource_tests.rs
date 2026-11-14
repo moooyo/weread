@@ -83,7 +83,7 @@ fn detail_and_dialog_case() -> Result<()> {
         );
         state.detail_tab = "toc".into();
         state.selecting_chapters = true;
-        state.detail_page = UNFETCHED as usize / state.profile.detail_chapter_page_size();
+        state.detail_page = UNFETCHED as usize / state.detail_page_size("toc");
         state.detail_action("select-page", "")?;
         assert_eq!(state.selected_chapters, BTreeSet::from([UNFETCHED]));
         state.detail_action("chapter", &format!("corpus-{UNFETCHED}"))?;

@@ -31,6 +31,8 @@ export global LoginModel {
     in-out property <string> api-key;
     in-out property <bool> busy: false;
     in-out property <bool> can-submit: false;
+    in-out property <bool> skills-open: false;
+    in-out property <image> skills-qr;
     callback event(string, string);
 }
 
@@ -306,6 +308,112 @@ export component TouchKeyboard inherits Rectangle {
     }
 }
 
+component LoginSkillsStep inherits Rectangle {
+    in property <int> number;
+    in property <string> text;
+    in property <length> number-width;
+    out property <length> preferred-text-width: step-copy.preferred-width;
+    height: max(Theme.scribe ? 32px : 29px, step-copy.preferred-height);
+    Text {
+        x: 0px; y: 0px; width: root.number-width; height: root.height;
+        text: "" + root.number + "."; font-family: Theme.ui-font;
+        font-size: Theme.scribe ? 20px : 18px; color: Theme.ink;
+        vertical-alignment: top;
+    }
+    step-copy := Text {
+        x: root.number-width + 8px; y: 0px;
+        width: max(0px, root.width - self.x); height: self.preferred-height;
+        text: root.text; font-family: Theme.ui-font;
+        font-size: Theme.scribe ? 20px : 18px; color: Theme.ink;
+        wrap: word-wrap; vertical-alignment: top;
+    }
+}
+
+component LoginSkillsGuide inherits Rectangle {
+    background: Theme.paper;
+    clip: true;
+    private property <length> safe-top: Theme.scribe ? 80px : 64px;
+    private property <length> bottom-margin: Theme.scribe ? 32px : 20px;
+    private property <length> column-width: max(0px, min(Theme.scribe ? 600px : 520px, root.width - Theme.page-margin * 2));
+    private property <length> number-width: Theme.scribe ? 28px : 26px;
+    private property <length> steps-width: min(root.column-width, max(max(step-one.preferred-text-width, step-two.preferred-text-width), max(step-three.preferred-text-width, step-four.preferred-text-width)) + root.number-width + 8px);
+    private property <length> steps-height: step-one.height + step-two.height + step-three.height + step-four.height + 42px;
+    private property <length> steps-offset: Theme.scribe ? 220px : 168px;
+    private property <length> qr-size: max(0px, min(Theme.scribe ? 360px : 288px, min(root.column-width, root.height - root.safe-top - root.bottom-margin - root.steps-offset - root.steps-height)));
+    private property <length> content-height: root.qr-size + root.steps-offset + root.steps-height;
+    private property <length> content-top: clamp((Theme.scribe ? 190px : 94px) - 28px, root.safe-top, max(root.safe-top, root.height - root.bottom-margin - root.content-height));
+    Text {
+        x: (root.width - root.column-width) / 2; y: root.content-top;
+        width: root.column-width; height: Theme.scribe ? 48px : 40px;
+        text: Strings.login-skills-title; font-family: Theme.serif-font;
+        font-size: Theme.scribe ? 32px : 26px; font-weight: 700;
+        horizontal-alignment: center; vertical-alignment: center;
+    }
+    Text {
+        x: (root.width - root.column-width) / 2;
+        y: root.content-top + (Theme.scribe ? 66px : 56px);
+        width: root.column-width; height: Theme.scribe ? 32px : 30px;
+        text: Strings.login-skills-scan; font-family: Theme.ui-font;
+        font-size: Theme.scribe ? 20px : 18px; color: Theme.secondary;
+        horizontal-alignment: center; vertical-alignment: center;
+        wrap: word-wrap; overflow: elide;
+    }
+    Rectangle {
+        x: (root.width - root.qr-size) / 2;
+        y: root.content-top + (Theme.scribe ? 120px : 100px);
+        width: root.qr-size; height: root.qr-size; background: Theme.paper;
+        if LoginModel.skills-qr.width > 0 && LoginModel.skills-qr.height > 0: Image {
+            x: 0px; y: 0px; width: parent.width; height: parent.height;
+            source: LoginModel.skills-qr; image-fit: contain;
+            colorize: Theme.ink; image-rendering: pixelated;
+            accessible-label: Strings.login-skills-scan;
+        }
+        if LoginModel.skills-qr.width <= 0 || LoginModel.skills-qr.height <= 0: Text {
+            x: 12px; y: (parent.height - self.height) / 2;
+            width: max(0px, parent.width - 24px); height: min(96px, parent.height);
+            text: Strings.login-skills-qr-unavailable; font-family: Theme.ui-font;
+            font-size: Theme.scribe ? 20px : 18px; color: Theme.secondary;
+            horizontal-alignment: center; vertical-alignment: center;
+            wrap: word-wrap; overflow: elide;
+        }
+    }
+    Text {
+        x: (root.width - root.column-width) / 2;
+        y: root.content-top + root.qr-size + (Theme.scribe ? 148px : 120px);
+        width: root.column-width; height: Theme.scribe ? 28px : 26px;
+        text: Strings.login-skills-url; font-family: Theme.ui-font;
+        font-size: Theme.scribe ? 18px : 16px; color: Theme.secondary;
+        horizontal-alignment: center; vertical-alignment: center;
+    }
+    // Measure the widest copy once, then center the complete aligned group.
+    Rectangle {
+        x: (root.width - root.steps-width) / 2;
+        y: root.content-top + root.qr-size + root.steps-offset;
+        width: root.steps-width; height: root.steps-height;
+        step-one := LoginSkillsStep {
+            x: 0px; y: 0px; width: parent.width;
+            number: 1; number-width: root.number-width; text: Strings.login-first-step;
+        }
+        step-two := LoginSkillsStep {
+            x: 0px; y: step-one.y + step-one.height + 14px; width: parent.width;
+            number: 2; number-width: root.number-width; text: Strings.login-second-step;
+        }
+        step-three := LoginSkillsStep {
+            x: 0px; y: step-two.y + step-two.height + 14px; width: parent.width;
+            number: 3; number-width: root.number-width; text: Strings.login-third-step;
+        }
+        step-four := LoginSkillsStep {
+            x: 0px; y: step-three.y + step-three.height + 14px; width: parent.width;
+            number: 4; number-width: root.number-width; text: Strings.login-fourth-step;
+        }
+    }
+    ActionButton {
+        x: Theme.page-margin; y: Theme.scribe ? 16px : 8px;
+        width: 96px; height: 48px; quiet: true; text: Strings.back;
+        clicked => { LoginModel.event("skills-back", ""); }
+    }
+}
+
 export component LoginScreen inherits Rectangle {
     background: Theme.paper;
     clip: true;
@@ -314,11 +422,11 @@ export component LoginScreen inherits Rectangle {
     private property <length> available-height: max(0px, root.height - root.safe-top - root.bottom-margin);
     private property <length> column-width: max(0px, min(Theme.scribe ? 600px : 520px, root.width - Theme.page-margin * 2));
     private property <length> title-height: Theme.scribe ? 48px : 40px;
-    private property <length> qr-chrome-height: Theme.scribe ? 240px : 232px;
+    private property <length> qr-chrome-height: Theme.scribe ? 412px : 364px;
     private property <length> qr-size: max(0px, min(Theme.scribe ? 480px : 360px, min(root.column-width, root.available-height - root.qr-chrome-height)));
     private property <length> qr-group-height: root.qr-size + root.qr-chrome-height;
-    private property <length> qr-top: clamp(root.safe-top + (root.available-height - root.qr-group-height) / 2 - (Theme.scribe ? 56px : 32px), root.safe-top, max(root.safe-top, root.height - root.bottom-margin - root.qr-group-height));
-    private property <length> qr-offset: Theme.scribe ? 122px : 104px;
+    private property <length> qr-top: clamp((Theme.scribe ? 190px : 94px) - 28px, root.safe-top, max(root.safe-top, root.height - root.bottom-margin - root.qr-group-height));
+    private property <length> qr-offset: Theme.scribe ? 120px : 100px;
     private property <bool> qr-expired: LoginModel.status == Strings.login-expired || LoginModel.qr-label == Strings.login-expired;
     private property <bool> qr-ready: LoginModel.qr.width > 0 && LoginModel.qr.height > 0 && !LoginModel.busy && !root.qr-expired && (LoginModel.status == "" || LoginModel.status == Strings.login-scan);
     private property <string> qr-message: root.qr-expired ? Strings.login-expired : LoginModel.busy ? Strings.login-connecting : LoginModel.status != "" && LoginModel.status != Strings.login-scan ? LoginModel.status : Strings.login-connecting;
@@ -330,7 +438,7 @@ export component LoginScreen inherits Rectangle {
     private property <length> code-group-height: root.title-height + root.code-title-gap + root.code-body-height + 40px;
     private property <length> code-top: clamp(root.safe-top + (root.available-height - root.code-group-height) / 2 - (root.roomy-code ? 16px : 8px), root.safe-top, max(root.safe-top, root.height - root.bottom-margin - root.code-group-height));
     // Non-code states cannot reveal an alternative login method.
-    if LoginModel.step != "code": Rectangle {
+    if !LoginModel.skills-open && LoginModel.step != "code": Rectangle {
         x: (root.width - root.column-width) / 2; y: root.qr-top;
         width: root.column-width; height: root.qr-group-height;
         Text {
@@ -355,30 +463,68 @@ export component LoginScreen inherits Rectangle {
                 colorize: Theme.ink; image-rendering: pixelated;
                 accessible-label: Strings.login-scan;
             }
-            if !root.qr-ready: Text {
+            if !root.qr-ready: Rectangle {
                 x: 12px; y: (parent.height - self.height) / 2;
                 width: max(0px, parent.width - 24px); height: min(96px, parent.height);
-                text: root.qr-message; font-family: Theme.ui-font;
-                font-size: Theme.scribe ? 20px : 18px; color: Theme.secondary;
-                horizontal-alignment: center; vertical-alignment: center;
-                wrap: word-wrap; overflow: elide;
+                Text {
+                    x: 0px; y: 0px; width: parent.width;
+                    height: LoginModel.status == Strings.login-skill-required ? min(40px, parent.height) : parent.height;
+                    text: root.qr-message; font-family: Theme.ui-font;
+                    font-size: Theme.scribe ? 20px : 18px;
+                    color: LoginModel.status == Strings.login-skill-required ? Theme.ink : Theme.secondary;
+                    font-weight: LoginModel.status == Strings.login-skill-required ? 500 : 400;
+                    horizontal-alignment: center; vertical-alignment: center;
+                    wrap: word-wrap; overflow: elide;
+                }
+                if LoginModel.status == Strings.login-skill-required: Text {
+                    x: 0px; y: 56px; width: parent.width; height: max(0px, parent.height - self.y);
+                    text: Strings.login-skills-required-hint; font-family: Theme.ui-font;
+                    font-size: 16px; color: Theme.secondary;
+                    horizontal-alignment: center; vertical-alignment: center;
+                    wrap: word-wrap; overflow: elide;
+                }
             }
         }
         Text {
-            x: 0px; y: root.qr-size + (Theme.scribe ? 150px : 128px);
+            x: 0px; y: root.qr-size + (Theme.scribe ? 140px : 112px);
             width: parent.width; height: 28px;
             text: root.qr-ready && LoginModel.qr-label != Strings.login-scan ? LoginModel.qr-label : "";
             font-family: Theme.ui-font; font-size: 16px; color: Theme.secondary;
             horizontal-alignment: center; vertical-alignment: center; overflow: elide;
         }
         ActionButton {
-            x: (parent.width - self.width) / 2; y: root.qr-size + (Theme.scribe ? 192px : 184px);
+            x: (parent.width - self.width) / 2; y: root.qr-size + (Theme.scribe ? 182px : 154px);
             width: min(parent.width, Theme.scribe ? 256px : 200px); height: 48px;
             text: Strings.login-refresh; quiet: true; enabled: !LoginModel.busy;
             clicked => { LoginModel.event("refresh", ""); }
         }
+        Rectangle {
+            x: 0px; y: root.qr-size + (Theme.scribe ? 270px : 230px);
+            width: parent.width; height: 1px; background: Theme.line;
+        }
+        Text {
+            x: 0px; y: root.qr-size + (Theme.scribe ? 290px : 250px);
+            width: parent.width; height: Theme.scribe ? 32px : 28px;
+            text: Strings.login-skills-hint; font-family: Theme.ui-font;
+            font-size: Theme.scribe ? 20px : 18px; font-weight: 500;
+            horizontal-alignment: center; vertical-alignment: center;
+            wrap: word-wrap; overflow: elide;
+        }
+        Text {
+            x: 0px; y: root.qr-size + (Theme.scribe ? 330px : 284px);
+            width: parent.width; height: Theme.scribe ? 28px : 26px;
+            text: Strings.login-skills-url; font-family: Theme.ui-font;
+            font-size: Theme.scribe ? 18px : 16px; color: Theme.secondary;
+            horizontal-alignment: center; vertical-alignment: center;
+        }
+        ActionButton {
+            x: (parent.width - self.width) / 2; y: root.qr-size + (Theme.scribe ? 364px : 316px);
+            width: min(parent.width, 256px); height: 48px;
+            text: Strings.login-skills-help; quiet: true;
+            clicked => { LoginModel.event("skills-help", ""); }
+        }
     }
-        if LoginModel.step == "code": Rectangle {
+        if !LoginModel.skills-open && LoginModel.step == "code": Rectangle {
             x: 0px; y: root.code-top; width: root.width; height: root.code-group-height;
             Text {
                 x: 0px; y: 0px; width: parent.width; height: root.title-height;
@@ -512,6 +658,9 @@ export component LoginScreen inherits Rectangle {
                 horizontal-alignment: center; vertical-alignment: center; overflow: elide;
             }
         }
+    if LoginModel.skills-open: LoginSkillsGuide {
+        x: 0px; y: 0px; width: root.width; height: root.height;
+    }
     IconButton {
         x: root.width - Theme.page-margin - self.width;
         y: Theme.scribe ? 16px : 8px;

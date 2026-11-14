@@ -927,6 +927,7 @@ fn model_state(
     let auxiliary = ui.global::<AuxiliaryModel>();
     let login = ui.global::<LoginModel>();
     let login_qr_size = login.get_qr().size();
+    let skills_qr_size = login.get_skills_qr().size();
     let sleep = ui.global::<SleepScreenModel>();
     let sleep_cover_size = sleep.get_cover().size();
     json!({
@@ -966,6 +967,7 @@ fn model_state(
             "digits": login.get_digits().iter().map(|value| value.to_string()).collect::<Vec<_>>(),
             "busy": login.get_busy(), "status": login.get_status().to_string(),
             "qr_label": login.get_qr_label().to_string(), "qr_size": [login_qr_size.width, login_qr_size.height],
+            "skills_open": login.get_skills_open(), "skills_qr_size": [skills_qr_size.width, skills_qr_size.height],
             "can_submit": login.get_can_submit()},
         "reader": {"menu": reader.get_menu(), "tool": reader.get_tool().to_string(), "subtool": reader.get_subtool().to_string(),
             "show_heading": reader.get_show_heading(), "margin": reader.get_margin(),

@@ -344,6 +344,16 @@ The native startup path presents the project name and loading dots before bundle
 
 An ordinary start opens Library when a configured session, local books, or demo data exists; otherwise first use opens Login. A new launch after explicit exit must not implicitly reopen the previous book. Only a managed recovery requests Reader restoration. The physical experience-test wrapper uses Library on a fresh start and preserves the supervisor's sleep-resume intent.
 
+The accepted Skills setup guide is an application presentation use case. It
+uses a public URI and the existing admitted QR alpha encoder; bounded source
+pixel replication keeps large pixelated rendering accurate. Its visibility and
+image are transient Login UI state. Opening help fences the current challenge,
+Back starts a fresh challenge, and the existing X requests ordinary exit. Key
+generation remains an explicit user action on the official WeRead page. No
+source protocol, persistence layout, server, or platform ownership dependency
+is added by this guide. [Login UI](LOGIN_UI.md#skills-setup-guidance) records
+the design and its separately scoped verification.
+
 The Reader opens with its notes sidebar hidden and updates continuous drag selection on an 80 ms cadence. Its TOC download icon and status text share a vertically centered row. Reader brightness and independently saved application night mode remain in scope. Startup feedback uses software compensation for actual native kernel inversion before renderer ownership begins. The renderer then applies the desired appearance exactly once, with software fallback on unapproved framebuffers. These are source behaviors with separate remote and physical gates; see [the Reader record](READER.md) and [Native theme continuity](NATIVE_THEME.md).
 
 Sleep recovery belongs to the project-owned supervisor and application lifecycle. The default resident path requires saved local work and a matching private input/display acknowledgement before application threads are stopped for the native screen saver; native dismissal resumes the same process and retained frame. The saved-anchor restart-and-restore path is a bounded cold fallback: its checkpoint must be committed and the old application must exit successfully before a new generation can request that anchor. Explicit application exit and USB takeover take precedence over recovery. Physical `2fd3/799d` observations establish only their recorded resident paths; newer resource candidates, physical USB, full-device reboot, and other model/firmware combinations retain separate verification gates.

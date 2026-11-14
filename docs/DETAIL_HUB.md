@@ -69,6 +69,40 @@ The AidokuForKindle chapter-hub proposal is a design reference for the shared
 Detail entry and layout. Its design-only status is preserved; it is not a
 runtime dependency or verification performed by WeRead.
 
+## Viewport capacity follow-up
+
+Accepted: 2026-11-15 (Asia/Shanghai), after the operator reported excess blank
+space below the fixed twelve-row Scribe catalog page.
+
+The application derives each bounded page from the platform's actual logical
+viewport and ordinary Detail controls. Short catalog, review, and note rows use
+52, 88, and 96 logical pixels respectively. The standard 930 x 1240 Scribe
+profile supplies 19 catalog, 11 review, or 10 note rows; Paperwhite 6 supplies
+7, 4, or 4. These are layout capacities, not new hardware compatibility claims.
+A 1,863-entry catalog has 99 pages at the standard Scribe capacity. The taller
+Scribe 2025 design profile is covered independently by its geometry tests.
+
+Catalog pages are capped at 64 entries; rich lists are capped at sixteen. The
+existing note reader still enforces sixteen records, 256 SQL cells, and its
+byte budget. Current-chapter restoration uses catalog ordinals, and page counts,
+slicing, selection, and numeric jumps use the same capacity. Temporary status
+and selection controls do not repartition a page; long rows remain reachable
+through the existing vertical Flickable. Inactive review models retain no
+unneeded review text.
+
+The final software evidence is recorded separately from the historical native
+captures below. No new firmware guest or physical-device execution is inferred
+from these host layout changes.
+
+The 35 selected capacity/navigation/resource cases passed. On the integrated
+Skills snapshot, those IDs are included in the 89-case selected host union
+recorded by [Login UI](LOGIN_UI.md#final-guidance-verification). Separate public
+37-entry software catalogs retain three original bodies and add only unknown,
+uncached metadata. Scribe renders 19 rows and a two-page catalog, with its final
+row at y=1188 and the fixed footer at y=1192. PW renders seven rows and six
+pages, with its footer visible at y=792. These observations use actual Slint
+software windows and do not establish firmware or finger-touch behavior.
+
 ## Frozen source and focused host evidence
 
 The task-owned remote root is

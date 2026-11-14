@@ -205,7 +205,7 @@ fn prior_tabs_and_current_chapter(fixture: &Fixture) -> Result<()> {
 
 fn sparse_catalog(fixture: &Fixture) -> Result<Vec<(String, u32)>> {
     let mut state = fixture.app();
-    let size = state.profile.detail_chapter_page_size();
+    let size = state.detail_page_size("toc");
     let count = size * 2 + 1;
     let mut catalog = vec![(CHAPTER.into(), 0), (SECOND_CHAPTER.into(), 1)];
     let additions = (2..count)
@@ -249,7 +249,7 @@ fn sparse_catalog(fixture: &Fixture) -> Result<Vec<(String, u32)>> {
 fn assert_sparse_detail_page(fixture: &Fixture, catalog: &[(String, u32)]) {
     assert_catalog_entry(fixture);
     let state = fixture.app();
-    let size = state.profile.detail_chapter_page_size();
+    let size = state.detail_page_size("toc");
     assert_eq!(
         state.detail_page, 1,
         "Catalog pages use ordinal, not sparse source index"
@@ -279,7 +279,7 @@ fn assert_sparse_detail_page(fixture: &Fixture, catalog: &[(String, u32)]) {
 fn sparse_detail_navigation(fixture: &Fixture) -> Result<()> {
     let catalog = sparse_catalog(fixture)?;
     let expected = prepare_nonfirst_page(fixture)?;
-    let size = fixture.app().profile.detail_chapter_page_size();
+    let size = fixture.app().detail_page_size("toc");
     {
         let mut state = fixture.app();
         let mut other = Book::new(OTHER_BOOK, "Another detail cache owner");
