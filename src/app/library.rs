@@ -247,7 +247,7 @@ fn detail_page_size(profile: DeviceProfile, tab: &str) -> usize {
 
 fn detail_tab_page(
     tab: &str,
-    position: Option<u32>,
+    position: Option<usize>,
     chapter_page_size: usize,
     selecting: &mut bool,
     selected: &mut BTreeSet<u32>,
@@ -255,7 +255,7 @@ fn detail_tab_page(
     *selecting = false;
     selected.clear();
     if tab == "toc" {
-        position.unwrap_or(0) as usize / chapter_page_size.max(1)
+        position.unwrap_or(0) / chapter_page_size.max(1)
     } else {
         0
     }
@@ -993,9 +993,27 @@ impl App {
         Ok(())
     }
 
+    fn detail_current_chapter_ordinal(&self, id: &str) -> Result<Option<usize>> {
+        let Some(position) = self.store.position(id)? else {
+            return Ok(None);
+        };
+        // Source chapter indices can be sparse; the catalog defines page order.
+        Ok(self
+            .store
+            .chapter_metadata(id)?
+            .iter()
+            .position(|chapter| chapter.index == position.chapter_index))
+    }
+
     pub(super) fn load_detail(&mut self, id: &str) -> Result<()> {
         let source = self.store.book_source(id)?;
         let changed = self.detail_id != id;
+        let current_page = if changed {
+            self.detail_current_chapter_ordinal(id)?.unwrap_or(0)
+                / self.profile.detail_chapter_page_size().max(1)
+        } else {
+            self.detail_page
+        };
         self.detail_id = id.into();
         if changed {
             self.review_context = None;
@@ -1004,11 +1022,7 @@ impl App {
             self.selected_chapters.clear();
             self.reviews.clear();
             self.review_latest = false;
-            self.detail_page = self
-                .store
-                .position(id)?
-                .map(|p| p.chapter_index as usize / self.profile.detail_chapter_page_size())
-                .unwrap_or(0);
+            self.detail_page = current_page;
         }
         self.detail_status.clear();
         if source.as_deref() == Some("weread") && !self.force_offline && self.jobs.configured() {
@@ -1292,7 +1306,30 @@ impl App {
     pub(super) fn detail_action(&mut self, action: &str, value: &str) -> Result<()> {
         let id = self.detail_id.clone();
         match action {
-            "back" => self.back()?,
+            "back" => {
+                let reader_menu = if matches!(
+                    self.history.last(),
+                    Some(Route::Reader(book, _)) if book == &id
+                ) {
+                    self.ui.upgrade().map(|ui| {
+                        let reader = ui.global::<ReaderModel>();
+                        (reader.get_menu(), reader.get_tool(), reader.get_subtool())
+                    })
+                } else {
+                    None
+                };
+                self.back()?;
+                if matches!(&self.route, Route::Reader(book, _) if book == &id) {
+                    if let (Some((menu, tool, subtool)), Some(ui)) =
+                        (reader_menu, self.ui.upgrade())
+                    {
+                        let reader = ui.global::<ReaderModel>();
+                        reader.set_menu(menu);
+                        reader.set_tool(tool);
+                        reader.set_subtool(subtool);
+                    }
+                }
+            }
             "more" => {
                 self.confirm_action("more", "more", "", "close");
                 if let Some(ui) = self.ui.upgrade() {
@@ -1315,13 +1352,16 @@ impl App {
                 if !matches!(value, "intro" | "toc" | "reviews" | "notes") {
                     return Ok(());
                 }
+                let position = if value == "toc" {
+                    self.detail_current_chapter_ordinal(&id)?
+                } else {
+                    None
+                };
                 self.review_context = None;
                 self.detail_tab = value.into();
                 self.detail_page = detail_tab_page(
                     value,
-                    self.store
-                        .position(&id)?
-                        .map(|position| position.chapter_index),
+                    position,
                     self.profile.detail_chapter_page_size(),
                     &mut self.selecting_chapters,
                     &mut self.selected_chapters,
@@ -1405,6 +1445,7 @@ impl App {
             }
             "jump"
                 if self.detail_tab == "reviews"
+                    || self.detail_tab == "notes"
                     || self.detail_tab == "toc" && !self.selecting_chapters =>
             {
                 self.open_jump("detail", self.detail_page + 1)

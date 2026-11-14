@@ -305,7 +305,8 @@ class XDisplay:
 
 
 class GuardFixture:
-    def __init__(self, test, frozen=True, metadata=None, startup=True):
+    def __init__(self, test, frozen=True, metadata=None, startup=True,
+            environment=None, profile=None):
         self.test = test
         self.directory = test.root / f"guard-{len(test.fixtures)}"
         self.directory.mkdir(mode=0o700)
@@ -332,17 +333,23 @@ class GuardFixture:
         self.read_fd, self.write_fd = os.pipe()
         self.stderr_path = self.directory / "helper.stderr"
         self.stderr_file = self.stderr_path.open("wb")
-        environment = test.environment.copy()
-        environment.update(
+        process_environment = test.environment.copy()
+        process_environment.update(
             WEREAD_TEST_FRAMEBUFFER=str(self.framebuffer),
             WEREAD_TEST_FRAMEBUFFER_METADATA=self.metadata,
             WEREAD_TEST_FRAMEBUFFER_METADATA_FILE=str(self.metadata_file),
         )
+        for key, value in (environment or {}).items():
+            if value is None:
+                process_environment.pop(key, None)
+            else:
+                process_environment[key] = value
         self.process = subprocess.Popen([
             str(test.helper), "--context", str(self.context), "--token", TOKEN,
             "--owner", str(self.owner), "--owner-birth", str(self.owner_birth),
-            "--profile", test.profile, "--command-fd", str(self.read_fd),
-        ], env=environment, pass_fds=(self.read_fd,), stdout=subprocess.DEVNULL,
+            "--profile", test.profile if profile is None else profile,
+            "--command-fd", str(self.read_fd),
+        ], env=process_environment, pass_fds=(self.read_fd,), stdout=subprocess.DEVNULL,
             stderr=self.stderr_file)
         os.close(self.read_fd)
         self.read_fd = None
@@ -442,6 +449,7 @@ class _FrameGuardFixture(unittest.TestCase):
     height = HEIGHT
     stride = STRIDE
     profile = "pw6"
+    experimental_display = None
     visual_class = 4
     image_layout = (24, 32, 0, 0xFF0000, 0xFF00, 0xFF)
     xvfb_options = ()
@@ -489,6 +497,11 @@ class _FrameGuardFixture(unittest.TestCase):
             os.close(read_fd)
         cls.environment = os.environ.copy()
         cls.environment["DISPLAY"] = f":{display_number}"
+        cls.environment["WEREAD_APPROVED_PROFILE"] = cls.profile
+        cls.environment["WEREAD_APPROVED_FIRMWARE"] = "5.20.1"
+        cls.environment.pop("WEREAD_EXPERIMENTAL_DISPLAY", None)
+        if cls.experimental_display is not None:
+            cls.environment["WEREAD_EXPERIMENTAL_DISPLAY"] = cls.experimental_display
         cls.display = XDisplay(cls.environment["DISPLAY"], cls.width, cls.height, cls.image_layout)
         cls.addClassCleanup(cls.display.close)
         cls.first_frame = reading_frame(23, cls.width, cls.height)
@@ -534,6 +547,16 @@ class _FrameGuardFixture(unittest.TestCase):
             f"actual={hashlib.sha256(actual).hexdigest()}, "
             f"expected={hashlib.sha256(expected).hexdigest()}.")
 
+    def assert_startup_rejected(self, *, environment=None, profile=None,
+            metadata=None, error):
+        fixture = GuardFixture(self, startup=False, environment=environment,
+            profile=profile, metadata=metadata)
+        self.assertEqual(fixture.process.wait(timeout=6), 1)
+        self.assertFalse(fixture.ready_path.exists(),
+            "A rejected display specification must not publish readiness.")
+        self.assertEqual(self.display.guard_windows(), [])
+        self.assertIn(error, fixture.stderr_path.read_text())
+
     def save_artifact(self, name):
         if not self.artifacts:
             return
@@ -550,6 +573,25 @@ class _FrameGuardFixture(unittest.TestCase):
 
 
 class FrameGuardTests(_FrameGuardFixture):
+
+    def test_startup_requires_the_matching_approved_profile(self):
+        for profile in (None, "", "scribe"):
+            with self.subTest(approved_profile=profile):
+                self.assert_startup_rejected(
+                    environment={"WEREAD_APPROVED_PROFILE": profile},
+                    error="approved profile and firmware are required")
+
+    def test_startup_requires_an_approved_firmware(self):
+        for firmware in (None, "", " \t\n"):
+            with self.subTest(approved_firmware=firmware):
+                self.assert_startup_rejected(
+                    environment={"WEREAD_APPROVED_FIRMWARE": firmware},
+                    error="approved profile and firmware are required")
+
+    def test_startup_rejects_an_unknown_approved_profile(self):
+        self.assert_startup_rejected(profile="unknown",
+            environment={"WEREAD_APPROVED_PROFILE": "unknown"},
+            error="unsupported approved profile")
 
     def test_bootstrap_is_blank_and_capture_ignores_stride_padding(self):
         fixture = GuardFixture(self)
@@ -771,6 +813,66 @@ class FrameGuardTests(_FrameGuardFixture):
             stderr.close()
 
 
+class PaperwhiteEmulatorTests(_FrameGuardFixture):
+    width = 1272
+    height = 1696
+    stride = 1280
+    experimental_display = "pw6-5201-emulator"
+
+    def test_named_emulator_captures_its_exact_visible_pixels(self):
+        fixture = GuardFixture(self)
+        self.assert_frame(x_gray_bytes(bytes([255]) * (self.width * self.height)))
+        fixture.write_frame(self.first_frame, padding=0xE7)
+        fixture.request(1)
+        fixture.wait_ready(1)
+        self.assert_frame(self.first_pixels)
+        self.assertEqual(self.display.guard_windows(), [fixture.window])
+        self.save_artifact("pw6-named-emulator-retained-reading-frame")
+
+    def test_named_emulator_rejects_unknown_display_identifiers(self):
+        for identifier in ("", "1272x1696", "pw6-5201-emulator-extra", "scribe"):
+            with self.subTest(experimental_display=identifier):
+                self.assert_startup_rejected(
+                    environment={"WEREAD_EXPERIMENTAL_DISPLAY": identifier},
+                    error="unsupported experimental display specification")
+
+    def test_named_emulator_requires_its_exact_firmware(self):
+        for firmware in ("5.19.5", "5.20.2", "5.20.1\n", "latest"):
+            with self.subTest(approved_firmware=firmware):
+                self.assert_startup_rejected(
+                    environment={"WEREAD_APPROVED_FIRMWARE": firmware},
+                    error="unsupported experimental display specification")
+
+    def test_named_emulator_requires_the_pw6_profile(self):
+        self.assert_startup_rejected(profile="scribe",
+            environment={"WEREAD_APPROVED_PROFILE": "scribe"},
+            error="unsupported experimental display specification")
+
+    def test_named_emulator_rejects_a_mismatched_approved_profile(self):
+        self.assert_startup_rejected(
+            environment={"WEREAD_APPROVED_PROFILE": "scribe"},
+            error="approved profile and firmware are required")
+
+    def test_named_emulator_rejects_wrong_visible_geometry(self):
+        for metadata in ("1264:1680:1280:1", "1271:1696:1280:1", "1272:1695:1280:1"):
+            with self.subTest(framebuffer_metadata=metadata):
+                self.assert_startup_rejected(metadata=metadata,
+                    error="framebuffer snapshot was not stable")
+
+    def test_emulated_geometry_requires_the_named_display(self):
+        self.assert_startup_rejected(
+            environment={"WEREAD_EXPERIMENTAL_DISPLAY": None},
+            error="framebuffer snapshot was not stable")
+
+    def test_named_emulator_rechecks_geometry_after_startup(self):
+        fixture = GuardFixture(self)
+        fixture.request(1)
+        fixture.wait_ready(1)
+        fixture.set_metadata("1264:1680:1280:1")
+        fixture.request(2)
+        fixture.expect_rejected(1, 1)
+
+
 class ScribeStaticGrayTests(_FrameGuardFixture):
     width = 1860
     height = 2480
@@ -908,6 +1010,12 @@ def main():
             "not_verified": ["Kindle layer and focus policy", "EPDC inversion and waveforms",
                 "physical orientation", "firmware or device compatibility"],
             "root_background_override": "explicitly demonstrated coverage limit",
+            "named_emulator_fixture": {
+                "experimental_display": "pw6-5201-emulator",
+                "approved_profile": "pw6", "approved_firmware": "5.20.1",
+                "width": 1272, "height": 1696, "framebuffer_stride": 1280,
+                "scope": "Synthetic geometry contract and pixel retention only",
+            },
             "static_gray_fixture": {
                 "profile": "scribe", "width": 1860, "height": 2480,
                 "framebuffer_stride": 1872, "ximage_bytes_per_line": 1860,

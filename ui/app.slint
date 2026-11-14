@@ -51,19 +51,67 @@ component NavigationItem inherits Rectangle {
     accessible-role: tab;
     accessible-label: root.text;
     accessible-item-selected: root.active;
+    Rectangle {
+        x: 6px; y: 6px; width: parent.width - 12px; height: parent.height - 12px;
+        border-radius: 0px;
+        background: root.active || touch.pressed ? Theme.ink : Theme.paper;
+    }
     VerticalLayout {
         alignment: center; spacing: 3px;
         Rectangle {
             height: 30px;
-            Rectangle {
-                x: (parent.width - 56px) / 2; width: 56px; height: 30px; border-radius: 15px;
-                background: root.active || touch.pressed ? Theme.ink : Theme.paper;
-                Icon { kind: root.icon; x: 16px; y: 3px; inverted: root.active || touch.pressed; }
-            }
+            Icon { kind: root.icon; x: (parent.width - 24px) / 2; y: 3px; inverted: root.active || touch.pressed; }
         }
-        Text { text: root.text; color: root.active ? Theme.ink : Theme.secondary; font-family: Theme.ui-font; font-size: 14px; font-weight: root.active ? 700 : 400; horizontal-alignment: center; }
+        Text { text: root.text; color: root.active || touch.pressed ? Theme.paper : Theme.secondary; font-family: Theme.ui-font; font-size: 14px; font-weight: root.active ? 700 : 400; horizontal-alignment: center; }
     }
     touch := TouchArea { clicked => { root.clicked(); } }
+}
+
+component MoreMenuItem inherits Rectangle {
+    in property <string> text;
+    callback clicked();
+    height: max(Theme.scribe ? 60px : 56px, caption.preferred-height + 24px);
+    vertical-stretch: 0;
+    background: touch.pressed ? Theme.ink : Theme.paper;
+    accessible-role: button;
+    accessible-label: root.text;
+    caption := Text {
+        x: 20px;
+        width: parent.width - 40px;
+        height: parent.height;
+        text: root.text;
+        color: touch.pressed ? Theme.paper : Theme.ink;
+        font-family: Theme.ui-font;
+        font-size: 18px;
+        horizontal-alignment: left;
+        vertical-alignment: center;
+        wrap: word-wrap;
+    }
+    touch := TouchArea {
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down { Theme.refresh("press"); }
+            else if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel { Theme.refresh("release"); }
+        }
+        clicked => { root.clicked(); }
+    }
+}
+
+component MoreMenu inherits Rectangle {
+    height: more-content.preferred-height;
+    background: Theme.paper;
+    border-width: 2px;
+    border-color: Theme.ink;
+    border-radius: 0px;
+    TouchArea { }
+    more-content := VerticalLayout {
+        padding-top: 10px; padding-bottom: 10px;
+        padding-left: 2px; padding-right: 2px;
+        spacing: 0px;
+        MoreMenuItem { text: Strings.refresh-book; clicked => { ShellModel.event("more-refresh", ""); } }
+        MoreMenuItem { text: Strings.import-book; clicked => { ShellModel.event("more-import", ""); } }
+        MoreMenuItem { text: Strings.clear-book-cache; clicked => { ShellModel.event("more-clear", ""); } }
+        MoreMenuItem { text: Strings.remove; clicked => { ShellModel.event("more-remove", ""); } }
+    }
 }
 
 export component AppWindow inherits Window {
@@ -129,18 +177,29 @@ export component AppWindow inherits Window {
     }
     if ShellModel.toast != "": Rectangle {
         x: Theme.page-margin; y: root.reading ? 20px : 32px; width: parent.width - Theme.page-margin * 2; height: 52px;
-        border-width: 2px; border-color: Theme.ink; border-radius: 6px; background: Theme.paper;
+        border-width: 2px; border-color: Theme.ink; border-radius: 0px; background: Theme.paper;
         Text { x: 16px; width: parent.width - 32px; text: ShellModel.toast; font-family: Theme.ui-font; font-size: 16px; vertical-alignment: center; overflow: elide; }
     }
-    if ShellModel.dialog-kind != "": Rectangle {
+    if ShellModel.dialog-kind == "more": Rectangle {
+        x: 0px; y: 0px; width: parent.width; height: parent.height;
+        background: transparent;
+        TouchArea { clicked => { ShellModel.event("dialog-outside", ""); } }
+        MoreMenu {
+            x: max(8px, parent.width - self.width - 8px);
+            // The status bar and detail header occupy the first 80 logical pixels.
+            y: max(8px, min(88px, parent.height - self.height - 8px));
+            width: min(parent.width - 16px, Theme.scribe ? 344px : 264px);
+        }
+    }
+    if ShellModel.dialog-kind != "" && ShellModel.dialog-kind != "more": Rectangle {
         background: transparent;
         TouchArea { clicked => { ShellModel.event("dialog-outside", ""); } }
         Rectangle {
             x: (parent.width - self.width) / 2;
-            y: ShellModel.dialog-kind == "more" ? parent.height - self.height : (parent.height - self.height) / 2;
-            width: ShellModel.dialog-kind == "more" ? parent.width : min(parent.width - Theme.page-margin * 2, Theme.scribe ? 580px : parent.width);
+            y: (parent.height - self.height) / 2;
+            width: min(parent.width - Theme.page-margin * 2, Theme.scribe ? 580px : parent.width);
             height: min(parent.height - 80px, dialog-content.preferred-height + 48px);
-            background: Theme.paper; border-width: ShellModel.dialog-kind == "more" ? 0px : 2px; border-color: Theme.ink; border-radius: ShellModel.dialog-kind == "more" ? 0px : 10px;
+            background: Theme.paper; border-width: 2px; border-color: Theme.ink; border-radius: 0px;
             TouchArea { }
             dialog-content := VerticalLayout {
                 padding: 24px; spacing: 20px;
@@ -161,15 +220,8 @@ export component AppWindow inherits Window {
                     ProgressTrack { value: ShellModel.dialog-progress; height: 12px; }
                 }
                 if ShellModel.dialog-kind == "jump": Rectangle {
-                    height: 48px; border-width: 2px; border-color: Theme.ink; border-radius: 6px;
+                    height: 48px; border-width: 2px; border-color: Theme.ink; border-radius: 0px;
                     TextInput { x: 12px; width: parent.width - 24px; text <=> ShellModel.dialog-input; input-type: number; font-family: Theme.ui-font; font-size: 20px; vertical-alignment: center; edited => { ShellModel.event("dialog-input", self.text); } accepted => { ShellModel.event("dialog-primary", ""); } }
-                }
-                if ShellModel.dialog-kind == "more": VerticalLayout {
-                    spacing: 8px;
-                    ActionButton { text: Strings.refresh-book; quiet: true; height: 56px; clicked => { ShellModel.event("more-refresh", ""); } }
-                    ActionButton { text: Strings.import-book; quiet: true; height: 56px; clicked => { ShellModel.event("more-import", ""); } }
-                    ActionButton { text: Strings.clear-book-cache; quiet: true; height: 56px; clicked => { ShellModel.event("more-clear", ""); } }
-                    ActionButton { text: Strings.remove; quiet: true; height: 56px; clicked => { ShellModel.event("more-remove", ""); } }
                 }
                 HorizontalLayout {
                     spacing: 12px;
@@ -178,7 +230,6 @@ export component AppWindow inherits Window {
                     if ShellModel.dialog-primary != "": ActionButton { text: ShellModel.dialog-primary; primary: true; clicked => { ShellModel.event("dialog-primary", ""); } }
                 }
             }
-            if ShellModel.dialog-kind == "more": Rectangle { x: 0px; y: 0px; width: parent.width; height: 2px; background: Theme.ink; }
         }
     }
     if SleepScreenModel.active: SleepScreen {

@@ -1,5 +1,5 @@
 {
-  "$schema-note": "WeRead for Kindle design tokens v0.2. Units are dp unless noted; 1 dp = 2 px on every supported Kindle (all 300 ppi). Values mirror the prototype (prototype/*.dc.html), which wins if anything disagrees.",
+  "$schema-note": "WeRead for Kindle design tokens v0.2. Units are dp unless noted; 1 dp = 2 px on every supported Kindle (all 300 ppi). Values mirror the prototype (prototype/*.dc.html), except that rectangular-control corner radii follow the accepted 2026-11-14 amendment.",
   "version": "0.2.0",
   "unit": {
     "dp_to_px": 2,
@@ -363,10 +363,10 @@
     "activeTab": 3
   },
   "radius": {
-    "control": 6,
-    "dialog": 10,
-    "cover": 2,
-    "pill": 999
+    "control": 0,
+    "dialog": 0,
+    "cover": 0,
+    "pill": 0
   },
   "layout": {
     "pw": {

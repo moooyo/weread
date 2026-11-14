@@ -794,9 +794,25 @@ int main(int argc, char **argv) {
         decimal(argv[12], INT_MAX, &commands) || commands < 3) {
         return report("invalid launch arguments") ? 1 : 0;
     }
+    const char *approved_profile = getenv("WEREAD_APPROVED_PROFILE");
+    const char *approved_firmware = getenv("WEREAD_APPROVED_FIRMWARE");
+    const char *experimental_display = getenv("WEREAD_EXPERIMENTAL_DISPLAY");
+    if (!approved_profile || strcmp(approved_profile, argv[10]) ||
+        !approved_firmware || !approved_firmware[strspn(approved_firmware, " \t\r\n")]) {
+        return report("approved profile and firmware are required") ? 1 : 0;
+    }
     if (!strcmp(argv[10], "scribe")) { guard.width = 1860; guard.height = 2480; }
     else if (!strcmp(argv[10], "pw6")) { guard.width = 1264; guard.height = 1680; }
     else { return report("unsupported approved profile") ? 1 : 0; }
+    if (experimental_display) {
+        if (strcmp(experimental_display, "pw6-5201-emulator") ||
+            strcmp(approved_profile, "pw6") || strcmp(approved_firmware, "5.20.1")) {
+            return report("unsupported experimental display specification") ? 1 : 0;
+        }
+        /* This named firmware emulator does not establish physical support. */
+        guard.width = 1272;
+        guard.height = 1696;
+    }
     if ((uint64_t)guard.width * guard.height > MAX_PIXELS) { return 1; }
     guard.owner = (pid_t)owner;
     guard.commands = (int)commands;

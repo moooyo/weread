@@ -43,6 +43,14 @@ impl App {
 #[path = "reading_work_tests.rs"]
 mod work_tests;
 
+#[cfg(test)]
+#[path = "reading_contents_tests.rs"]
+mod contents_tests;
+
+#[cfg(test)]
+#[path = "reader_detail_navigation_tests.rs"]
+mod detail_navigation_tests;
+
 const READER_HOLD_DELAY: Duration = Duration::from_millis(501);
 const READER_PREVIEW_DELAY: Duration = Duration::from_millis(80);
 const READER_HOLD_MOVEMENT: f32 = 12.0;
@@ -2773,10 +2781,25 @@ impl App {
         let action = action.strip_prefix("reader.").unwrap_or(action);
         self.reader.last_active = Instant::now();
         match action {
-            "back" => self.back()?,
+            "back" => {
+                let toc_open = self
+                    .ui
+                    .upgrade()
+                    .is_some_and(|ui| ui.global::<ReaderModel>().get_toc_open());
+                if toc_open {
+                    self.set_reader_flag("toc", false);
+                } else {
+                    self.back()?;
+                }
+            }
             "detail" => {
                 let id = self.reader.book_id.clone();
+                self.invalidate_reader_press();
+                self.set_reader_flag("toc", false);
                 self.open_detail(&id)?;
+                if value == "toc" {
+                    self.detail_action("tab", "toc")?;
+                }
             }
             "press" => {
                 if let Some((x, y)) = pointer(value) {
@@ -2894,14 +2917,20 @@ impl App {
                 self.set_reader_flag("menu", false);
             }
             "toc" => {
-                self.reader.toc_tab = if matches!(value, "toc" | "marks" | "notes") {
+                let tab = if matches!(value, "toc" | "marks" | "notes") {
                     value
                 } else {
                     "toc"
-                }
-                .into();
-                self.reader.toc_page =
-                    self.reader.chapter_index as usize / self.profile.reader_chapter_page_size();
+                };
+                let page = if tab == "toc" {
+                    self.reader_current_toc_page()?
+                } else {
+                    0
+                };
+                // A delayed Reader hold must not select text behind the contents page.
+                self.invalidate_reader_press();
+                self.reader.toc_tab = tab.into();
+                self.reader.toc_page = page;
                 self.set_reader_flag("toc", true);
             }
             "toc-close" => self.set_reader_flag("toc", false),
@@ -2931,9 +2960,9 @@ impl App {
                 );
             }
             "toc-locate" => {
+                let page = self.reader_current_toc_page()?;
                 self.reader.toc_tab = "toc".into();
-                self.reader.toc_page =
-                    self.reader.chapter_index as usize / self.profile.reader_chapter_page_size();
+                self.reader.toc_page = page;
             }
             "open-chapter" => {
                 if let Some(chapter) = self
@@ -2942,10 +2971,12 @@ impl App {
                     .into_iter()
                     .find(|chapter| chapter.id == value)
                 {
-                    let id = self.reader.book_id.clone();
                     self.set_reader_flag("toc", false);
-                    self.load_reader(&id, chapter.index, Some(0))?;
-                    self.confirm_reader_position()?;
+                    if chapter.index != self.reader.chapter_index {
+                        let id = self.reader.book_id.clone();
+                        self.load_reader(&id, chapter.index, Some(0))?;
+                        self.confirm_reader_position()?;
+                    }
                 }
             }
             "open-entry" => self.open_reader_entry(value)?,
@@ -4134,6 +4165,17 @@ impl App {
             .delete_setting(&format!("progress.request:{}", self.reader.book_id))?;
         self.reader.position_confirmed = true;
         Ok(())
+    }
+
+    fn reader_current_toc_page(&self) -> Result<usize> {
+        // TOC pages follow catalog order rather than possibly sparse source indices.
+        let ordinal = self
+            .store
+            .chapter_metadata(&self.reader.book_id)?
+            .iter()
+            .position(|chapter| chapter.index == self.reader.chapter_index)
+            .unwrap_or(0);
+        Ok(ordinal / self.profile.reader_chapter_page_size())
     }
 
     fn reader_entry_page_size(&self) -> usize {

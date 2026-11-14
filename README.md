@@ -4,6 +4,8 @@ An independent Rust and Slint reading application for jailbroken Kindle devices.
 
 Implementation started on 2026-11-03 (Asia/Shanghai), following the supplied WeRead for Kindle design handoff v0.2. The application shares its UI and application core between a desktop backend and an isolated Kindle backend. See [implementation status](docs/IMPLEMENTATION_STATUS.md) for completed features, verification evidence, and remaining acceptance gates.
 
+The latest [Reader detail hub](docs/DETAIL_HUB.md) reuses the same book's Detail view for the Reader directory and restores its reading anchor/menu context. Scribe uses a fixed 280-logical-pixel information pane and four right-side tabs; Paperwhite remains stacked. ARM `f2c0f429540b`, two host regressions, 57 paired main PNG checks, and nine focused gallery checks passed. Scribe's separate 18-PNG catalog/notes report passed 14 pixel and 14 data checks, and cleanup passed. PW6's additional 37-entry fixture remains Blocked/Unverified after two font CRC startup failures, with zero accepted long-catalog images and an undetermined cause. Earlier `4bc` results remain historical; physical qualification is not claimed.
+
 Development and acceptance are still in progress. ARM candidate `2b39140b` and launcher `0226f613` ran on the physical first-generation Scribe / firmware 5.19.5 as well as in the firmware VM. The user confirmed startup feedback, the default body view, continuous finger selection and saving a highlight, and dark text/menu appearance. The user subsequently removed the pull-down Quick panel and in-app Wi-Fi feature. Their UI/controller and C helper work are historical experiments, with no current product delivery or acceptance gate assigned to them.
 
 ## Use the development build
@@ -35,6 +37,12 @@ xvfb-run -a -s '-screen 0 2200x3000x24' ./target/debug/weread \
 ```
 
 The actual Cargo target directory may be set through `CARGO_TARGET_DIR`. Device profiles are `pw5`, `pw6`, `scribe`, and `scribe2025`. Profiles select design geometry; they do not declare verified hardware support.
+
+The 2026-11-14 [native UI capture review](docs/UI_CAPTURE_REVIEW.md) records 28 unchanged firmware-emulator PNGs across Scribe 2022 and Paperwhite 6 on firmware 5.20.1. That candidate painted its Scribe contents frame after opaque content; the native guard recognizes the existing exact PW6 experimental viewport. Remote pixel, interaction, helper, and build checks passed. Physical installation and acceptance of that candidate remain open.
+
+The [rectangular UI implementation](docs/RECTANGULAR_UI.md) applies the accepted straight input frames and square-thumb switches to the remaining rectangular application surfaces and full icon/label tabs. Redundant Library summary/offline text is removed while actionable feedback remains. ARM `60d643dacf6e` passed 26 native pixel/interaction checks, and its 34 firmware-emulator PNGs remain the review baseline for that artifact. Physical installation and acceptance remain open.
+
+The later [font slider, full contents page, and anchored More menu](docs/SLIDER_CONTENTS_MENU.md) complete this authorized software and firmware-emulator iteration. Font-size dragging commits on release; full-page contents wraps titles and retains reading/menu context; More is beside its trigger. Two host Rust scenarios, 25 software slider checks, 32 paired main scanout checks, both native drag/restoration runs, and 45 gallery JavaScript/DOM/metadata checks passed. The separate 37-entry fixture passed 20 pixel and five data checks with 42 accepted PNGs; only its three original chapters have cached bodies. Both capture packages preserve originals, and cleanup passed. A first PW6 tmpfs startup encountered a font checksum error; the unchanged retry worked, with the cause unconfirmed. This update has not been installed on a physical Kindle.
 
 Pre-release persistence uses one current layout with no upgrade path. Existing versioned development databases require a fresh `--data-dir`; retain an earlier directory separately only if needed. An explicitly authorized reset may discard it. The application rejects them without upgrading or deleting their records. See [the storage contract](docs/PERSISTENCE.md#current-development-layout). Device rollout evidence is recorded separately in [Physical testing](docs/PHYSICAL_TESTING.md).
 

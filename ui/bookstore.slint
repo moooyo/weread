@@ -100,7 +100,7 @@ component CoverArt inherits Rectangle {
     property <color> foreground: root.dark ? Theme.paper : Theme.ink;
     property <int> title-rows: max(1, floor((self.height - 60px) / 26px));
     background: root.book.tone == 0 ? Theme.ink : root.book.tone == 1 ? Theme.secondary : root.book.tone == 2 ? Theme.fill : Theme.paper;
-    border-radius: 2px;
+    border-radius: 0px;
     border-width: root.book.tone == 3 ? 2px : 0px;
     border-color: Theme.ink;
     clip: true;
@@ -174,31 +174,55 @@ component CatalogChapterRow inherits Rectangle {
     in property <DetailChapter> chapter;
     in property <bool> selecting;
     callback tapped();
-    callback swiped(int);
+    callback current-position(length);
     property <bool> disabled: root.selecting && root.chapter.cached;
     property <bool> inverted: (root.chapter.current && !root.selecting) || (touch.pressed && !root.disabled);
-    height: 52px;
+    property <length> layout-top: root.y;
+    property <length> title-left: root.selecting ? 84px : 48px;
+    property <length> title-right: root.chapter.cached ? 146px : 120px;
+    height: max(52px, max(chapter-title.preferred-height, chapter-state.preferred-height) + 24px);
     background: root.inverted ? Theme.ink : Theme.paper;
     accessible-role: button;
     accessible-label: root.chapter.title + " · " + root.chapter.state;
     accessible-enabled: !root.disabled;
-    HorizontalLayout {
-        padding-left: 8px; padding-right: 8px; spacing: 12px;
-        if root.selecting: Rectangle {
-            width: 24px; height: 24px; border-width: root.chapter.cached ? 0px : 2px; border-radius: 3px; border-color: Theme.ink;
-            background: root.chapter.selected ? Theme.ink : Theme.paper;
-            if root.chapter.cached: DashedOutline { stroke-color: Theme.line; stroke: 2px; radius: 3px; }
-            if root.chapter.selected: Icon { kind: "check"; width: 20px; height: 20px; x: 2px; y: 2px; inverted: true; }
-        }
-        Text { text: root.chapter.index + 1; font-family: Theme.ui-font; font-size: 15px; color: root.inverted ? Theme.paper : Theme.secondary; width: 28px; vertical-alignment: center; }
-        Text { text: root.chapter.title; font-family: Theme.ui-font; font-size: 18px; font-weight: root.chapter.current ? 700 : 400; color: root.inverted ? Theme.paper : root.disabled ? Theme.muted : Theme.ink; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
-        if root.chapter.cached: Rectangle { width: 14px; Icon { y: (parent.height - 14px) / 2; width: 14px; height: 14px; kind: "download"; inverted: root.inverted; } }
-        Text { text: root.chapter.state; font-family: Theme.ui-font; font-size: 14px; color: root.inverted ? Theme.paper : root.disabled ? Theme.muted : Theme.secondary; vertical-alignment: center; }
+    init => { if root.chapter.current { root.current-position(root.layout-top); } }
+    changed layout-top => { if root.chapter.current { root.current-position(root.layout-top); } }
+    changed chapter => { if root.chapter.current { root.current-position(root.layout-top); } }
+    if root.selecting: Rectangle {
+        x: 8px; y: (parent.height - 24px) / 2;
+        width: 24px; height: 24px; border-width: root.chapter.cached ? 0px : 2px; border-radius: 0px; border-color: Theme.ink;
+        background: root.chapter.selected ? Theme.ink : Theme.paper;
+        if root.chapter.cached: DashedOutline { stroke-color: Theme.line; stroke: 2px; radius: 0px; }
+        if root.chapter.selected: Icon { kind: "check"; width: 20px; height: 20px; x: 2px; y: 2px; inverted: true; }
     }
-    Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
-    touch := SwipeTouchArea {
-        tapped => { if !root.disabled { root.tapped(); } }
-        swiped(delta) => { root.swiped(delta); }
+    Text {
+        x: root.selecting ? 44px : 8px; y: 0px; width: 28px; height: root.height;
+        text: root.chapter.index + 1; font-family: Theme.ui-font; font-size: 15px;
+        color: root.inverted ? Theme.paper : Theme.secondary; vertical-alignment: center;
+    }
+    chapter-title := Text {
+        x: root.title-left; y: 12px;
+        width: max(1px, root.width - root.title-left - root.title-right);
+        height: self.preferred-height;
+        text: root.chapter.title; font-family: Theme.ui-font; font-size: 18px;
+        font-weight: root.chapter.current ? 700 : 400;
+        color: root.inverted ? Theme.paper : root.disabled ? Theme.muted : Theme.ink;
+        wrap: word-wrap;
+    }
+    if root.chapter.cached: Icon {
+        x: root.width - 134px; y: (root.height - 14px) / 2;
+        width: 14px; height: 14px; kind: "download"; inverted: root.inverted;
+    }
+    chapter-state := Text {
+        x: root.width - 108px; y: 12px; width: 100px; height: self.preferred-height;
+        text: root.chapter.state; font-family: Theme.ui-font; font-size: 14px;
+        color: root.inverted ? Theme.paper : root.disabled ? Theme.muted : Theme.secondary;
+        wrap: word-wrap;
+    }
+    Rectangle { x: 0px; y: parent.height - 1px; width: parent.width; height: 1px; background: Theme.line; }
+    touch := TouchArea {
+        x: 0px; y: 0px; width: root.width; height: root.height;
+        clicked => { if !root.disabled { root.tapped(); } }
     }
 }
 
@@ -217,7 +241,7 @@ export component LibraryScreen inherits Rectangle {
             height: 52px;
             Rectangle {
                 x: Theme.page-margin; y: 4px; width: parent.width - Theme.page-margin * 2; height: 44px;
-                border-width: 2px; border-color: Theme.ink; border-radius: 22px;
+                border-width: 2px; border-color: Theme.ink; border-radius: 0px;
                 HorizontalLayout {
                     padding-left: 14px; padding-right: 14px; spacing: 12px;
                     Rectangle { width: 24px; Icon { y: (parent.height - 24px) / 2; kind: "search"; } }
@@ -233,7 +257,7 @@ export component LibraryScreen inherits Rectangle {
             HorizontalLayout {
                 padding-left: Theme.page-margin; padding-right: 8px; spacing: 8px;
                 Text { text: Strings.library; font-family: Theme.serif-font; font-size: 28px; font-weight: 700; vertical-alignment: center; }
-                Text { text: LibraryModel.summary; color: Theme.secondary; font-family: Theme.ui-font; font-size: 14px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                Rectangle { horizontal-stretch: 1; }
                 IconButton { icon: "sync"; text: Theme.scribe ? Strings.sync : ""; label: Strings.sync; enabled: !LibraryModel.busy; clicked => { LibraryModel.event("sync", ""); } }
                 IconButton { icon: LibraryModel.view-mode == "cover" ? "list" : "grid"; text: Theme.scribe ? (LibraryModel.view-mode == "cover" ? Strings.list-view : Strings.cover-view) : ""; label: LibraryModel.view-mode == "cover" ? Strings.list-view : Strings.cover-view; clicked => { LibraryModel.event("view", ""); } }
                 IconButton { icon: "select"; text: LibraryModel.selecting ? Strings.done : Strings.select; selected: LibraryModel.selecting; clicked => { LibraryModel.event("select", ""); } }
@@ -252,10 +276,6 @@ export component LibraryScreen inherits Rectangle {
                 if Theme.scribe: SortTab { text: Strings.has-notes; selected: LibraryModel.sort == "notes"; clicked => { LibraryModel.event("sort", "notes"); } }
             }
             Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
-        }
-        if LibraryModel.offline: Rectangle {
-            height: 36px; background: Theme.fill;
-            Text { x: Theme.page-margin; text: Strings.offline-banner; color: Theme.secondary; font-family: Theme.ui-font; font-size: 14px; vertical-alignment: center; }
         }
         if LibraryModel.status != "": Rectangle {
             height: LibraryModel.download-notice ? 48px : 32px;
@@ -337,69 +357,91 @@ export component LibraryScreen inherits Rectangle {
     }
 }
 
-export component DetailScreen inherits Rectangle {
+component DetailContent inherits Rectangle {
     background: Theme.paper;
+    property <length> content-padding: Theme.scribe ? 0px : Theme.page-margin;
+    property <length> status-height: DetailModel.status != "" ? 32px : 0px;
+    property <length> controls-height: DetailModel.tab == "toc" || DetailModel.tab == "notes" ? 48px : DetailModel.tab == "reviews" ? (Theme.scribe ? 64px : 52px) : 0px;
+    property <bool> show-pager: (DetailModel.tab == "toc" && !DetailModel.selecting) || DetailModel.tab == "reviews" || DetailModel.tab == "notes";
+    property <length> footer-height: DetailModel.selecting && DetailModel.tab == "toc" ? 64px : root.show-pager ? 48px : 0px;
+    property <length> body-height: max(0px, root.height - 48px - root.status-height - root.controls-height - root.footer-height);
+    property <bool> follow-current: true;
+    property <length> current-top;
+    property <string> content-key: DetailModel.book.id + ":" + DetailModel.tab;
+    property <int> observed-page: DetailModel.page;
+    property <bool> observed-selecting: DetailModel.selecting;
+    function reveal-current() {
+        if root.follow-current && DetailModel.tab == "toc" {
+            content-scroll.viewport-y = clamp(-root.current-top, min(0px, content-scroll.height - content-scroll.viewport-height), 0px);
+        }
+    }
+    changed content-key => {
+        root.follow-current = DetailModel.tab == "toc";
+        content-scroll.viewport-y = 0px;
+        root.reveal-current();
+    }
+    changed observed-page => { content-scroll.viewport-y = 0px; root.reveal-current(); }
+    changed observed-selecting => { content-scroll.viewport-y = 0px; root.reveal-current(); }
     VerticalLayout {
+        x: 0px; y: 0px; width: root.width; height: root.height;
         spacing: 0px;
-        PageHeader { title: Strings.book-detail; more: true; back => { DetailModel.event("back", ""); } menu => { DetailModel.event("more", ""); } }
-        Rectangle {
-            height: Theme.scribe ? 292px : 154px;
-            HorizontalLayout {
-                padding-left: Theme.page-margin; padding-right: Theme.page-margin;
-                padding-top: Theme.scribe ? 28px : 4px; padding-bottom: Theme.scribe ? 28px : 16px;
-                spacing: Theme.scribe ? 28px : 18px;
-                CoverArt { book: DetailModel.book; compact: true; detailed: true; width: Theme.scribe ? 168px : 96px; height: Theme.scribe ? 236px : 134px; }
-                VerticalLayout {
-                    spacing: Theme.scribe ? 14px : 0px;
-                    VerticalLayout {
-                        spacing: 6px;
-                        Text { height: Theme.scribe ? 43px : 33px; text: DetailModel.book.title; font-family: Theme.serif-font; font-size: Theme.scribe ? 34px : 26px; font-weight: 700; overflow: elide; }
-                        Text { height: Theme.scribe ? 27px : 24px; text: DetailModel.author; font-family: Theme.ui-font; font-size: Theme.scribe ? 18px : 16px; color: Theme.secondary; overflow: elide; }
-                        Text { height: Theme.scribe ? 24px : 22px; text: DetailModel.rating; font-family: Theme.ui-font; font-size: Theme.scribe ? 16px : 15px; color: Theme.secondary; overflow: elide; }
-                    }
-                    Rectangle { vertical-stretch: 1; }
-                    VerticalLayout {
-                        spacing: Theme.scribe ? 8px : 6px;
-                        Text { height: Theme.scribe ? 26px : 23px; text: DetailModel.summary; font-family: Theme.ui-font; font-size: Theme.scribe ? 17px : 15px; overflow: elide; }
-                        ProgressTrack { value: DetailModel.book.progress; }
-                    }
-                    if Theme.scribe: HorizontalLayout {
-                        height: 48px; spacing: 12px;
-                        ActionButton { text: Strings.continue-reading; primary: true; enabled: DetailModel.can-read; clicked => { DetailModel.event("read", ""); } }
-                        ActionButton { text: DetailModel.access-needs-refresh ? Strings.refresh-content-access : Strings.download-all; enabled: DetailModel.can-download; clicked => { DetailModel.event(DetailModel.access-needs-refresh ? "refresh-access" : "download", ""); } }
-                    }
-                }
-            }
-            if Theme.scribe: Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
-        }
-        if !Theme.scribe: Rectangle {
-            height: 64px;
-            HorizontalLayout {
-                padding-left: Theme.page-margin; padding-right: Theme.page-margin; padding-bottom: 16px; spacing: 12px;
-                ActionButton { text: Strings.continue-reading; primary: true; enabled: DetailModel.can-read; horizontal-stretch: 1.4; clicked => { DetailModel.event("read", ""); } }
-                ActionButton { text: DetailModel.access-needs-refresh ? Strings.refresh-content-access : Strings.download-all; enabled: DetailModel.can-download; horizontal-stretch: 1; clicked => { DetailModel.event(DetailModel.access-needs-refresh ? "refresh-access" : "download", ""); } }
-            }
-        }
         Rectangle {
             height: 48px;
             HorizontalLayout {
+                x: 0px; y: 0px; width: parent.width; height: parent.height;
                 spacing: 0px;
                 SortTab { text: Strings.introduction; selected: DetailModel.tab == "intro"; horizontal-stretch: 1; clicked => { DetailModel.event("tab", "intro"); } }
-                SortTab { text: DetailModel.catalog-label; selected: DetailModel.tab == "toc"; horizontal-stretch: 1; clicked => { DetailModel.event("tab", "toc"); } }
+                SortTab { text: DetailModel.catalog-label; selected: DetailModel.tab == "toc"; horizontal-stretch: 1; clicked => { root.follow-current = true; DetailModel.event("tab", "toc"); root.reveal-current(); } }
                 SortTab { text: DetailModel.reviews-label; selected: DetailModel.tab == "reviews"; horizontal-stretch: 1; clicked => { DetailModel.event("tab", "reviews"); } }
                 if Theme.scribe: SortTab { text: DetailModel.notes-label; selected: DetailModel.tab == "notes"; horizontal-stretch: 1; clicked => { DetailModel.event("tab", "notes"); } }
             }
-            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
+            Rectangle { x: 0px; y: parent.height - 1px; width: parent.width; height: 1px; background: Theme.line; }
         }
-        if DetailModel.status != "": Rectangle { height: 32px; Text { x: Theme.page-margin; text: DetailModel.status; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; vertical-alignment: center; } }
-        Rectangle {
-            vertical-stretch: 1; clip: true;
-            SwipeTouchArea {
-                enabled: DetailModel.tab == "toc" || DetailModel.tab == "reviews" || DetailModel.tab == "notes";
-                swiped(delta) => { DetailModel.event("page", delta); }
+        if DetailModel.status != "": Rectangle {
+            height: root.status-height;
+            Text { x: root.content-padding; y: 0px; width: parent.width - root.content-padding * 2; height: parent.height; text: DetailModel.status; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; vertical-alignment: center; overflow: elide; }
+        }
+        if DetailModel.tab == "toc": Rectangle {
+            height: root.controls-height;
+            HorizontalLayout {
+                x: 0px; y: 0px; width: parent.width; height: parent.height;
+                padding-left: root.content-padding; padding-right: root.content-padding; spacing: 8px;
+                Text { text: DetailModel.selecting ? Strings.select-chapters-hint : DetailModel.chapter-summary; font-family: Theme.ui-font; font-size: 15px; color: Theme.secondary; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                if DetailModel.selecting: ActionButton { text: Strings.select-page; quiet: true; clicked => { DetailModel.event("select-page", ""); } }
+                FilterChip { text: DetailModel.selecting ? Strings.done : Strings.select; selected: DetailModel.selecting; clicked => { DetailModel.event("select", ""); } }
             }
+        }
+        if DetailModel.tab == "reviews": Rectangle {
+            height: root.controls-height;
+            HorizontalLayout {
+                x: 0px; y: 0px; width: parent.width; height: parent.height;
+                padding-left: root.content-padding; padding-right: root.content-padding; spacing: 12px;
+                FilterChip { text: Strings.recommended-reviews; selected: DetailModel.review-order == "hot"; clicked => { DetailModel.event("review-order", "hot"); } }
+                FilterChip { text: Strings.latest-reviews; selected: DetailModel.review-order == "latest"; clicked => { DetailModel.event("review-order", "latest"); } }
+                Rectangle { horizontal-stretch: 1; }
+            }
+        }
+        if DetailModel.tab == "notes": Rectangle {
+            height: root.controls-height;
+            Text { x: root.content-padding; y: 0px; width: parent.width - root.content-padding * 2; height: parent.height; text: DetailModel.notes-summary; font-family: Theme.ui-font; font-size: 16px; color: Theme.secondary; vertical-alignment: center; overflow: elide; }
+        }
+        content-scroll := Flickable {
+            width: root.width;
+            height: root.body-height;
+            viewport-width: self.width;
+            viewport-height: max(self.height, details-content.preferred-height);
+            interactive: true;
+            flicked => { root.follow-current = false; }
+            changed height => { root.reveal-current(); }
+            changed viewport-height => { root.reveal-current(); }
+            // Lists scroll vertically; the fixed page bar owns page navigation.
+            // Only the application's bounded page is present in this viewport.
+            details-content := VerticalLayout {
+            x: 0px; y: 0px; width: parent.width; height: self.preferred-height;
+            spacing: 0px; alignment: start;
             if DetailModel.tab == "intro": VerticalLayout {
-                padding-left: Theme.page-margin; padding-right: Theme.page-margin; padding-top: Theme.scribe ? 24px : 16px;
+                width: parent.width;
+                padding-left: root.content-padding; padding-right: root.content-padding; padding-top: Theme.scribe ? 24px : 16px;
                 spacing: Theme.scribe ? 22px : 16px; alignment: start;
                 GridLayout {
                     spacing: Theme.scribe ? 10px : 8px;
@@ -444,89 +486,208 @@ export component DetailScreen inherits Rectangle {
                 Text { text: DetailModel.update-label; font-family: Theme.ui-font; font-size: Theme.scribe ? 15px : 14px; color: Theme.secondary; }
             }
             if DetailModel.tab == "toc": VerticalLayout {
+                width: parent.width;
+                padding-left: root.content-padding; padding-right: root.content-padding;
                 spacing: 0px; alignment: start;
-                Rectangle {
-                    height: 48px;
-                    HorizontalLayout {
-                        padding-left: Theme.page-margin; padding-right: Theme.page-margin; spacing: 8px;
-                        Text { text: DetailModel.selecting ? Strings.select-chapters-hint : DetailModel.chapter-summary; font-family: Theme.ui-font; font-size: 15px; color: Theme.secondary; vertical-alignment: center; horizontal-stretch: 1; }
-                        if DetailModel.selecting: ActionButton { text: Strings.select-page; quiet: true; clicked => { DetailModel.event("select-page", ""); } }
-                        FilterChip { text: DetailModel.selecting ? Strings.done : Strings.select; selected: DetailModel.selecting; clicked => { DetailModel.event("select", ""); } }
-                    }
-                }
                 for chapter in DetailModel.chapters: CatalogChapterRow {
-                    x: Theme.page-margin; width: parent.width - Theme.page-margin * 2; height: 52px;
+                    width: parent.width - root.content-padding * 2;
                     chapter: chapter; selecting: DetailModel.selecting;
                     tapped => { DetailModel.event("chapter", chapter.id); }
-                    swiped(delta) => { DetailModel.event("page", delta); }
+                    current-position(offset) => { root.current-top = offset; root.reveal-current(); }
                 }
             }
             if DetailModel.tab == "reviews": VerticalLayout {
-                padding-left: Theme.page-margin; padding-right: Theme.page-margin; spacing: 0px; alignment: start;
-                HorizontalLayout {
-                    height: Theme.scribe ? 64px : 52px; spacing: 12px;
-                    FilterChip { text: Strings.recommended-reviews; selected: DetailModel.review-order == "hot"; clicked => { DetailModel.event("review-order", "hot"); } }
-                    FilterChip { text: Strings.latest-reviews; selected: DetailModel.review-order == "latest"; clicked => { DetailModel.event("review-order", "latest"); } }
-                    Rectangle { horizontal-stretch: 1; }
-                }
+                width: parent.width;
+                padding-left: root.content-padding; padding-right: root.content-padding; spacing: 0px; alignment: start;
                 if DetailModel.reviews.length == 0: Text { text: Strings.no-reviews; font-family: Theme.ui-font; font-size: 16px; color: Theme.secondary; wrap: word-wrap; }
                 for review in DetailModel.reviews: Rectangle {
-                    height: Theme.scribe ? 144px : 112px;
-                    VerticalLayout {
+                    width: parent.width - root.content-padding * 2;
+                    height: max(52px, review-content.preferred-height);
+                    review-content := VerticalLayout {
+                        x: 0px; y: 0px; width: parent.width; height: self.preferred-height;
                         padding-top: Theme.scribe ? 18px : 14px; padding-bottom: 12px; spacing: 8px;
                         HorizontalLayout {
                             spacing: 8px;
-                            Text { text: review.author; font-family: Theme.ui-font; font-size: Theme.scribe ? 15px : 14px; font-weight: 700; overflow: elide; }
-                            Text { text: review.meta; font-family: Theme.ui-font; font-size: Theme.scribe ? 15px : 14px; color: Theme.secondary; overflow: elide; horizontal-stretch: 1; }
+                            Text { text: review.author; font-family: Theme.ui-font; font-size: Theme.scribe ? 15px : 14px; font-weight: 700; wrap: word-wrap; max-width: parent.width * 0.45; }
+                            Text { text: review.meta; font-family: Theme.ui-font; font-size: Theme.scribe ? 15px : 14px; color: Theme.secondary; wrap: word-wrap; min-width: 0px; horizontal-stretch: 1; }
                         }
-                        Text { text: review.body; font-family: Theme.ui-font; font-size: Theme.scribe ? 18px : 16px; wrap: word-wrap; overflow: elide; vertical-stretch: 1; }
+                        Text { height: self.preferred-height; text: review.body; font-family: Theme.ui-font; font-size: Theme.scribe ? 18px : 16px; wrap: word-wrap; }
                     }
-                    Rectangle { y: 0px; height: 1px; background: Theme.line; }
-                    SwipeTouchArea {
-                        tapped => { DetailModel.event("note", review.id); }
-                        swiped(delta) => { DetailModel.event("page", delta); }
+                    Rectangle { x: 0px; y: 0px; width: parent.width; height: 1px; background: Theme.line; }
+                    TouchArea {
+                        x: 0px; y: 0px; width: parent.width; height: parent.height;
+                        clicked => { DetailModel.event("note", review.id); }
                     }
                 }
             }
             if DetailModel.tab == "notes": VerticalLayout {
-                padding-left: Theme.page-margin; padding-right: Theme.page-margin; spacing: 0px; alignment: start;
-                Text { height: 48px; text: DetailModel.notes-summary; font-family: Theme.ui-font; font-size: 16px; color: Theme.secondary; vertical-alignment: center; }
+                width: parent.width;
+                padding-left: root.content-padding; padding-right: root.content-padding; spacing: 0px; alignment: start;
                 if DetailModel.reviews.length == 0: Text { text: Strings.no-notes; font-family: Theme.ui-font; font-size: 16px; color: Theme.secondary; wrap: word-wrap; }
                 for note in DetailModel.reviews: Rectangle {
-                    height: note.thought == "" ? 128px : 168px;
-                    VerticalLayout {
+                    width: parent.width - root.content-padding * 2;
+                    height: max(52px, note-content.preferred-height);
+                    note-content := VerticalLayout {
+                        x: 0px; y: 0px; width: parent.width; height: self.preferred-height;
                         padding-top: 18px; padding-bottom: 18px; spacing: 8px; alignment: start;
                         HorizontalLayout {
                             spacing: 12px;
-                            Text { text: note.chapter; font-family: Theme.ui-font; font-size: 15px; color: Theme.secondary; overflow: elide; horizontal-stretch: 1; }
+                            Text { text: note.chapter; font-family: Theme.ui-font; font-size: 15px; color: Theme.secondary; wrap: word-wrap; min-width: 0px; horizontal-stretch: 1; }
                             Text { text: note.date; font-family: Theme.ui-font; font-size: 15px; color: Theme.secondary; }
                         }
-                        Rectangle {
-                            height: min(60px, max(30px, quote-text.preferred-height)); clip: true;
-                            quote-text := StyledText { width: parent.width; height: parent.height; text: @markdown("<u>\{note.quote}</u>"); default-font-family: Theme.serif-font; default-font-size: 20px; default-color: Theme.ink; vertical-alignment: top; }
-                        }
+                        StyledText { height: self.preferred-height; text: @markdown("<u>\{note.quote}</u>"); default-font-family: Theme.serif-font; default-font-size: 20px; default-color: Theme.ink; vertical-alignment: top; }
                         if note.thought != "": HorizontalLayout {
                             spacing: 8px;
                             Rectangle { width: 20px; Icon { y: 3px; width: 20px; height: 20px; kind: "notes"; } }
-                            Text { text: note.thought; font-family: Theme.ui-font; font-size: 17px; wrap: word-wrap; overflow: elide; max-height: 28px; horizontal-stretch: 1; }
+                            Text { height: self.preferred-height; text: note.thought; font-family: Theme.ui-font; font-size: 17px; wrap: word-wrap; horizontal-stretch: 1; }
                         }
                     }
-                    Rectangle { y: 0px; height: 1px; background: Theme.line; }
-                    SwipeTouchArea {
-                        tapped => { DetailModel.event("note", note.id); }
-                        swiped(delta) => { DetailModel.event("page", delta); }
+                    Rectangle { x: 0px; y: 0px; width: parent.width; height: 1px; background: Theme.line; }
+                    TouchArea {
+                        x: 0px; y: 0px; width: parent.width; height: parent.height;
+                        clicked => { DetailModel.event("note", note.id); }
                     }
                 }
             }
+            }
         }
-        if (DetailModel.tab == "toc" && !DetailModel.selecting) || DetailModel.tab == "reviews": PageBar { page: DetailModel.page; count: DetailModel.page-count; turn(delta) => { DetailModel.event("page", delta); } jump => { DetailModel.event("jump", ""); } }
+        if root.show-pager: PageBar { width: root.width; height: root.footer-height; page: DetailModel.page; count: DetailModel.page-count; turn(delta) => { root.follow-current = false; content-scroll.viewport-y = 0px; DetailModel.event("page", delta); } jump => { root.follow-current = false; DetailModel.event("jump", ""); } }
         if DetailModel.selecting && DetailModel.tab == "toc": Rectangle {
-            height: 64px;
-            Rectangle { y: 0px; height: 2px; background: Theme.ink; }
-            HorizontalLayout { padding-top: 8px; padding-bottom: 8px; padding-left: Theme.page-margin; padding-right: Theme.page-margin; spacing: 12px;
+            height: root.footer-height;
+            Rectangle { x: 0px; y: 0px; width: parent.width; height: 2px; background: Theme.ink; }
+            HorizontalLayout { x: 0px; y: 0px; width: parent.width; height: parent.height; padding-top: 8px; padding-bottom: 8px; padding-left: root.content-padding; padding-right: root.content-padding; spacing: 12px;
                 Text { text: DetailModel.selection-summary; font-family: Theme.ui-font; font-size: 18px; vertical-alignment: center; horizontal-stretch: 1; }
                 ActionButton { text: Strings.download-selected; primary: true; enabled: DetailModel.selected-count > 0 && DetailModel.can-download; clicked => { DetailModel.event("download-selected", ""); } }
             }
         }
+    }
+}
+
+component DetailSideSummary inherits Rectangle {
+    background: Theme.paper;
+    clip: true;
+    // Core bindings deliberately exclude metadata that is loaded for Introduction.
+    cover := CoverArt {
+        x: (root.width - 214px) / 2; y: 0px;
+        width: 214px; height: 300px;
+        book: DetailModel.book; compact: true; detailed: true;
+    }
+    title-frame := Rectangle {
+        x: 0px; y: cover.y + cover.height + 22px; width: root.width;
+        height: min(144px, max(44px, side-title.preferred-height));
+        clip: true;
+        side-title := Text {
+            x: 0px; y: 0px; width: parent.width; height: parent.height;
+            text: DetailModel.book.title; font-family: Theme.serif-font; font-size: 34px;
+            font-weight: 700; wrap: word-wrap; overflow: elide; vertical-alignment: top;
+        }
+    }
+    author-frame := Rectangle {
+        x: 0px; y: title-frame.y + title-frame.height + 12px; width: root.width;
+        height: min(54px, max(27px, side-author.preferred-height)); clip: true;
+        side-author := Text {
+            x: 0px; y: 0px; width: parent.width; height: parent.height;
+            text: DetailModel.author; font-family: Theme.ui-font; font-size: 18px;
+            color: Theme.secondary; wrap: word-wrap; overflow: elide; vertical-alignment: top;
+        }
+    }
+    rating := Text {
+        x: 0px; y: author-frame.y + author-frame.height + 8px;
+        width: root.width; height: 24px;
+        text: DetailModel.rating; font-family: Theme.ui-font; font-size: 16px;
+        color: Theme.secondary; vertical-alignment: center;
+    }
+    summary-frame := Rectangle {
+        x: 0px; y: rating.y + rating.height + 24px; width: root.width;
+        height: min(64px, max(26px, side-summary.preferred-height)); clip: true;
+        side-summary := Text {
+            x: 0px; y: 0px; width: parent.width; height: parent.height;
+            text: DetailModel.summary; font-family: Theme.ui-font; font-size: 17px;
+            wrap: word-wrap; overflow: elide; vertical-alignment: top;
+        }
+    }
+    progress := ProgressTrack {
+        x: 0px; y: summary-frame.y + summary-frame.height + 12px;
+        width: root.width; height: 8px; value: DetailModel.book.progress;
+    }
+    read-action := ActionButton {
+        x: 0px; y: progress.y + progress.height + 24px;
+        width: root.width; height: 48px;
+        text: Strings.continue-reading; primary: true; enabled: DetailModel.can-read;
+        clicked => { DetailModel.event("read", ""); }
+    }
+    ActionButton {
+        x: 0px; y: read-action.y + read-action.height + 12px;
+        width: root.width; height: 48px; text-size: 16px;
+        text: DetailModel.access-needs-refresh ? Strings.refresh-content-access : Strings.download-all;
+        enabled: DetailModel.can-download;
+        clicked => { DetailModel.event(DetailModel.access-needs-refresh ? "refresh-access" : "download", ""); }
+    }
+}
+
+component DetailStackedSummary inherits Rectangle {
+    height: 218px;
+    Rectangle {
+        x: 0px; y: 0px; width: root.width; height: 154px;
+        HorizontalLayout {
+            x: 0px; y: 0px; width: parent.width; height: parent.height;
+            padding-left: Theme.page-margin; padding-right: Theme.page-margin;
+            padding-top: 4px; padding-bottom: 16px; spacing: 18px;
+            CoverArt { book: DetailModel.book; compact: true; detailed: true; width: 96px; height: 134px; }
+            VerticalLayout {
+                spacing: 0px;
+                VerticalLayout {
+                    spacing: 6px;
+                    Text { height: 33px; text: DetailModel.book.title; font-family: Theme.serif-font; font-size: 26px; font-weight: 700; overflow: elide; }
+                    Text { height: 24px; text: DetailModel.author; font-family: Theme.ui-font; font-size: 16px; color: Theme.secondary; overflow: elide; }
+                    Text { height: 22px; text: DetailModel.rating; font-family: Theme.ui-font; font-size: 15px; color: Theme.secondary; overflow: elide; }
+                }
+                Rectangle { vertical-stretch: 1; }
+                VerticalLayout {
+                    spacing: 6px;
+                    Text { height: 23px; text: DetailModel.summary; font-family: Theme.ui-font; font-size: 15px; overflow: elide; }
+                    ProgressTrack { value: DetailModel.book.progress; }
+                }
+            }
+        }
+    }
+    Rectangle {
+        x: 0px; y: 154px; width: root.width; height: 64px;
+        HorizontalLayout {
+            x: 0px; y: 0px; width: parent.width; height: parent.height;
+            padding-left: Theme.page-margin; padding-right: Theme.page-margin; padding-bottom: 16px; spacing: 12px;
+            ActionButton { text: Strings.continue-reading; primary: true; enabled: DetailModel.can-read; horizontal-stretch: 1.4; clicked => { DetailModel.event("read", ""); } }
+            ActionButton { text: DetailModel.access-needs-refresh ? Strings.refresh-content-access : Strings.download-all; enabled: DetailModel.can-download; horizontal-stretch: 1; clicked => { DetailModel.event(DetailModel.access-needs-refresh ? "refresh-access" : "download", ""); } }
+        }
+    }
+}
+
+export component DetailScreen inherits Rectangle {
+    background: Theme.paper;
+    clip: true;
+    PageHeader {
+        x: 0px; y: 0px; width: root.width; height: 52px;
+        title: Strings.book-detail; more: true;
+        back => { DetailModel.event("back", ""); }
+        menu => { DetailModel.event("more", ""); }
+    }
+    if Theme.scribe: Rectangle {
+        x: 0px; y: 52px; width: root.width; height: max(0px, root.height - 52px);
+        left-pane := Rectangle {
+            x: Theme.page-margin; y: 24px; width: 280px; height: max(0px, parent.height - self.y);
+            clip: true;
+            DetailSideSummary { x: 0px; y: 0px; width: parent.width - 24px; height: parent.height; }
+            Rectangle { x: parent.width - 1px; y: 0px; width: 1px; height: parent.height; background: Theme.line; }
+        }
+        DetailContent {
+            x: left-pane.x + left-pane.width + 24px; y: 24px;
+            width: max(0px, parent.width - self.x - Theme.page-margin);
+            height: max(0px, parent.height - self.y);
+        }
+    }
+    if !Theme.scribe: Rectangle {
+        x: 0px; y: 52px; width: root.width; height: max(0px, root.height - 52px);
+        DetailStackedSummary { x: 0px; y: 0px; width: parent.width; }
+        DetailContent { x: 0px; y: 218px; width: parent.width; height: max(0px, parent.height - 218px); }
     }
 }

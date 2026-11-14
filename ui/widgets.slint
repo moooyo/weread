@@ -54,7 +54,7 @@ component DashedRule inherits Rectangle {
 export component DashedOutline inherits Rectangle {
     in property <color> stroke-color: Theme.line;
     in property <length> stroke: 2px;
-    in property <length> radius: 6px;
+    in property <length> radius: 0px;
     background: transparent;
     clip: true;
     DashedRule { x: root.radius / 2; y: 0px; width: root.width - root.radius; height: root.stroke; line-color: root.stroke-color; stroke: root.stroke; }
@@ -100,7 +100,7 @@ export component ActionButton inherits Rectangle {
     preferred-width: max(48px, label.preferred-width + 28px);
     min-width: 48px;
     height: 48px;
-    border-radius: 6px;
+    border-radius: 0px;
     border-width: root.quiet || !root.enabled ? 0px : 2px;
     border-color: root.enabled ? Theme.ink : Theme.line;
     background: root.enabled && (root.primary || root.selected || touch.pressed) ? Theme.ink : Theme.paper;
@@ -137,7 +137,7 @@ export component IconButton inherits Rectangle {
     preferred-width: root.text == "" ? 48px : caption.preferred-width + 56px;
     max-width: root.text == "" ? 48px : max(48px, caption.preferred-width + 56px);
     height: 48px;
-    border-radius: 6px;
+    border-radius: 0px;
     background: root.enabled && (touch.pressed || root.selected) ? Theme.ink : Theme.paper;
     accessible-role: button;
     accessible-label: root.label;
@@ -227,9 +227,9 @@ export component ToggleRow inherits Rectangle {
         Rectangle {
             width: 48px;
             Rectangle {
-                x: 0px; y: (parent.height - 28px) / 2; width: 48px; height: 28px; border-width: root.enabled ? 2px : 0px; border-radius: 14px; border-color: Theme.ink; background: root.enabled && root.checked ? Theme.ink : Theme.paper;
-                if !root.enabled: DashedOutline { x: 0px; y: 0px; width: parent.width; height: parent.height; radius: 14px; }
-                Rectangle { x: root.checked ? 24px : 4px; y: 4px; width: 20px; height: 20px; border-radius: 10px; border-width: root.enabled ? 0px : 2px; border-color: Theme.line; background: !root.enabled ? Theme.paper : root.checked ? Theme.paper : Theme.ink; }
+                x: 0px; y: (parent.height - 28px) / 2; width: 48px; height: 28px; border-width: root.enabled ? 2px : 0px; border-radius: 0px; border-color: Theme.ink; background: root.enabled && root.checked ? Theme.ink : Theme.paper;
+                if !root.enabled: DashedOutline { x: 0px; y: 0px; width: parent.width; height: parent.height; radius: 0px; }
+                Rectangle { x: root.checked ? 24px : 4px; y: 4px; width: 20px; height: 20px; border-radius: 0px; border-width: root.enabled ? 0px : 2px; border-color: Theme.line; background: !root.enabled ? Theme.paper : root.checked ? Theme.paper : Theme.ink; }
             }
         }
     }
@@ -247,7 +247,7 @@ export component Choice inherits Rectangle {
     preferred-width: label.preferred-width + 24px;
     border-width: root.enabled ? 2px : 0px;
     border-color: Theme.ink;
-    border-radius: 6px;
+    border-radius: 0px;
     background: root.enabled && (root.selected || touch.pressed) ? Theme.ink : Theme.paper;
     if !root.enabled: DashedOutline { x: 0px; y: 0px; width: parent.width; height: parent.height; }
     accessible-role: button;
@@ -273,9 +273,9 @@ export component FilterChip inherits Rectangle {
     accessible-enabled: root.enabled;
     Rectangle {
         x: 0px; y: 6px; width: parent.width; height: 36px;
-        border-width: root.enabled ? 1px : 0px; border-color: Theme.ink; border-radius: 18px;
+        border-width: root.enabled ? 1px : 0px; border-color: Theme.ink; border-radius: 0px;
         background: root.enabled && (root.selected || touch.pressed) ? Theme.ink : Theme.paper;
-        if !root.enabled: DashedOutline { x: 0px; y: 0px; width: parent.width; height: parent.height; radius: 18px; }
+        if !root.enabled: DashedOutline { x: 0px; y: 0px; width: parent.width; height: parent.height; radius: 0px; }
         caption := Text { x: 0px; y: 0px; width: parent.width; height: parent.height; text: root.text; font-family: Theme.ui-font; font-size: root.text-size; font-weight: root.selected ? 700 : 400; color: !root.enabled ? Theme.muted : root.selected || touch.pressed ? Theme.paper : Theme.ink; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
     }
     touch := TouchArea { enabled: root.enabled; pointer-event(event) => { if event.kind == PointerEventKind.down { Theme.refresh("press"); } else if event.kind == PointerEventKind.up { Theme.refresh("release"); } } clicked => { root.clicked(); } }
@@ -287,11 +287,11 @@ export component SegmentedControl inherits Rectangle {
     in property <[SegmentedOption]> options;
     in property <string> value;
     in property <bool> enabled: true;
-    in property <length> radius: 6px;
+    in property <length> radius: 0px;
     callback chosen(string);
     height: 48px;
     min-width: root.options.length * 48px;
-    border-radius: root.radius;
+    border-radius: 0px;
     background: Theme.paper;
     clip: true;
     HorizontalLayout {
@@ -300,14 +300,13 @@ export component SegmentedControl inherits Rectangle {
             min-width: 48px; horizontal-stretch: 1;
             property <color> fill: root.enabled && (root.value == option.id || touch.pressed) ? Theme.ink : Theme.paper;
             background: transparent;
-            Rectangle { x: 0px; y: 0px; width: parent.width; height: parent.height; border-radius: index == 0 || index == root.options.length - 1 ? root.radius : 0px; background: parent.fill; }
-            if root.options.length > 1 && (index == 0 || index == root.options.length - 1): Rectangle { x: index == 0 ? parent.width / 2 : 0px; y: 0px; width: parent.width / 2; height: parent.height; background: parent.fill; }
+            Rectangle { x: 0px; y: 0px; width: parent.width; height: parent.height; border-radius: 0px; background: parent.fill; }
             Text { text: option.label; font-family: Theme.ui-font; font-size: 16px; font-weight: root.value == option.id ? 700 : 400; color: !root.enabled ? Theme.muted : root.value == option.id || touch.pressed ? Theme.paper : Theme.ink; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
             if index > 0: Rectangle { x: 0px; y: 0px; width: 1px; height: parent.height; background: root.enabled ? Theme.ink : Theme.line; }
             touch := TouchArea { enabled: root.enabled; clicked => { root.chosen(option.id); } }
         }
     }
-    if root.enabled: Rectangle { x: 0px; y: 0px; width: parent.width; height: parent.height; background: transparent; border-width: 2px; border-color: Theme.ink; border-radius: root.radius; }
+    if root.enabled: Rectangle { x: 0px; y: 0px; width: parent.width; height: parent.height; background: transparent; border-width: 2px; border-color: Theme.ink; border-radius: 0px; }
     if !root.enabled: DashedOutline { x: 0px; y: 0px; width: parent.width; height: parent.height; }
 }
 
@@ -319,34 +318,93 @@ export component ScaleControl inherits Rectangle {
     in property <string> small-label: "A";
     in property <string> large-label: "A";
     in property <bool> segments;
+    private property <bool> drag-active;
+    private property <int> preview-index;
     callback chosen(int);
     callback step(int);
     height: 56px;
+    changed value => { root.drag-active = false; }
+    changed values => { root.drag-active = false; }
+    changed enabled => { root.drag-active = false; }
+    changed segments => { root.drag-active = false; }
     HorizontalLayout {
         spacing: 8px;
         ActionButton { text: root.small-label; text-size: 16px; enabled: root.enabled; quiet: true; clicked => { root.step(-1); } }
         track := Rectangle {
             horizontal-stretch: 1; min-width: 96px; height: 48px;
             accessible-role: slider; accessible-label: root.label; accessible-enabled: root.enabled;
-            if !root.segments: Rectangle { x: 0px; y: 0px; width: parent.width; height: 48px; border-width: 1px; border-color: root.enabled ? Theme.ink : Theme.line; border-radius: 24px; background: Theme.paper; }
-            for option[index] in root.values: Rectangle {
-                x: root.segments ? (index - 1) * parent.width / max(1, root.values.length - 1) + 1px : 24px + index * (parent.width - 48px) / max(1, root.values.length - 1) - (Theme.scribe ? 3.5px : 3px);
-                y: root.segments ? 14px : (Theme.scribe ? 20.5px : 21px);
-                width: root.segments ? max(1px, parent.width / max(1, root.values.length - 1) - 3px) : Theme.scribe ? 7px : 6px;
-                height: root.segments ? 20px : Theme.scribe ? 7px : 6px;
-                border-radius: root.segments ? 1px : 5px;
-                background: root.segments ? root.enabled && option <= root.value ? Theme.ink : Theme.paper : root.enabled && option < root.value ? Theme.ink : Theme.line;
-                border-width: root.segments ? 1px : 0px; border-color: root.enabled ? Theme.ink : Theme.line;
-                visible: !root.segments || index > 0;
+            if root.segments: Rectangle {
+                width: parent.width; height: parent.height;
+                for option[index] in root.values: Rectangle {
+                    x: (index - 1) * parent.width / max(1, root.values.length - 1) + 1px;
+                    y: 14px;
+                    width: max(1px, parent.width / max(1, root.values.length - 1) - 3px);
+                    height: 20px; border-radius: 0px;
+                    background: root.enabled && option <= root.value ? Theme.ink : Theme.paper;
+                    border-width: 1px; border-color: root.enabled ? Theme.ink : Theme.line;
+                    visible: index > 0;
+                }
+                TouchArea {
+                    enabled: root.enabled && root.values.length > 0;
+                    clicked => { root.chosen(root.values[clamp(round(self.mouse-x / max(1px, self.width) * (root.values.length - 1)), 0, root.values.length - 1)]); }
+                }
             }
-            for option[index] in root.values: Rectangle {
-                x: 24px + index * (parent.width - 48px) / max(1, root.values.length - 1) - (Theme.scribe ? 23px : 20px);
-                y: Theme.scribe ? 1px : 4px; width: Theme.scribe ? 46px : 40px; height: Theme.scribe ? 46px : 40px; border-radius: Theme.scribe ? 23px : 20px;
-                visible: !root.segments && option == root.value;
-                background: root.enabled ? Theme.ink : Theme.fill;
-                Text { text: "" + root.value; color: root.enabled ? Theme.paper : Theme.muted; font-family: Theme.ui-font; font-size: 18px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+            if !root.segments: Rectangle {
+                width: parent.width; height: parent.height;
+                Rectangle {
+                    x: 24px; y: 22px; width: parent.width - 48px; height: 4px;
+                    border-radius: 0px; background: Theme.line;
+                }
+                for option[index] in root.values: Rectangle {
+                    width: parent.width; height: parent.height;
+                    // Midpoint intervals also keep externally supplied values on the nearest listed position.
+                    property <bool> current-position:
+                        (index == 0 || root.value > (root.values[max(0, index - 1)] + option) / 2)
+                        && (index == root.values.length - 1 || root.value <= (option + root.values[min(root.values.length - 1, index + 1)]) / 2);
+                    property <length> offset: index * (self.width - 48px) / max(1, root.values.length - 1);
+                    visible: root.drag-active ? index == root.preview-index : self.current-position;
+                    Rectangle {
+                        x: 24px; y: 22px; width: parent.offset; height: 4px;
+                        border-radius: 0px; background: root.enabled ? Theme.ink : Theme.fill;
+                    }
+                    Rectangle {
+                        x: 24px + parent.offset - (Theme.scribe ? 23px : 20px);
+                        y: Theme.scribe ? 1px : 4px;
+                        width: Theme.scribe ? 46px : 40px; height: Theme.scribe ? 46px : 40px;
+                        border-radius: Theme.scribe ? 23px : 20px;
+                        background: root.enabled ? Theme.ink : Theme.fill;
+                        Text {
+                            text: "" + (root.drag-active ? option : root.value);
+                            color: root.enabled ? Theme.paper : Theme.muted;
+                            font-family: Theme.ui-font; font-size: 18px; font-weight: 700;
+                            horizontal-alignment: center; vertical-alignment: center;
+                        }
+                    }
+                }
+                TouchArea {
+                    width: parent.width; height: parent.height;
+                    enabled: root.enabled && root.values.length > 0;
+                    property <int> pointer-index: clamp(round((self.mouse-x - 24px) / max(1px, self.width - 48px) * (root.values.length - 1)), 0, max(0, root.values.length - 1));
+                    pointer-event(event) => {
+                        // Cancel uses button Other, and Up is delivered after pressed becomes false.
+                        if event.kind == PointerEventKind.cancel {
+                            root.drag-active = false;
+                        } else if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                            root.preview-index = self.pointer-index;
+                            root.drag-active = true;
+                        } else if event.kind == PointerEventKind.move && self.pressed && root.drag-active {
+                            root.preview-index = self.pointer-index;
+                        } else if event.kind == PointerEventKind.up && event.button == PointerEventButton.left && root.drag-active {
+                            root.preview-index = self.pointer-index;
+                            root.drag-active = false;
+                            // Clearing the gesture before the callback prevents re-entry or a second commit.
+                            if root.enabled && !root.segments && root.values.length > 0 {
+                                root.chosen(root.values[root.preview-index]);
+                            }
+                        }
+                    }
+                }
             }
-            TouchArea { enabled: root.enabled && root.values.length > 0; clicked => { root.chosen(root.values[clamp(round((root.segments ? self.mouse-x / max(1px, self.width) : (self.mouse-x - 24px) / max(1px, self.width - 48px)) * (root.values.length - 1)), 0, root.values.length - 1)]); } }
         }
         ActionButton { text: root.large-label; text-size: root.large-label == "A" ? 28px : 18px; enabled: root.enabled; quiet: true; clicked => { root.step(1); } }
     }

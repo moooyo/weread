@@ -1,6 +1,6 @@
 import { Theme } from "theme.slint";
 import { Strings } from "strings.slint";
-import { ActionButton, IconButton, Icon, PageBar, Choice, ToggleRow, ProgressTrack, ScaleControl, SegmentedControl, SegmentedOption, DashedOutline, SwipeTouchArea } from "widgets.slint";
+import { ActionButton, IconButton, Icon, PageBar, PageHeader, Choice, ToggleRow, ProgressTrack, ScaleControl, SegmentedControl, SegmentedOption, DashedOutline, SwipeTouchArea } from "widgets.slint";
 
 export struct ReaderMark {
     id: string,
@@ -230,7 +230,7 @@ component OptionRow inherits Rectangle {
         SegmentedControl {
             options: root.options;
             value: root.current;
-            radius: 24px;
+            radius: 0px;
             horizontal-stretch: 1;
             chosen(value) => { root.selected(value); }
         }
@@ -246,7 +246,7 @@ component OptionGroup inherits Rectangle {
     VerticalLayout {
         spacing: 8px;
         Text { text: root.label; height: 20px; font-family: Theme.ui-font; font-size: 15px; color: Theme.secondary; }
-        SegmentedControl { options: root.options; value: root.current; radius: 24px; chosen(value) => { root.selected(value); } }
+        SegmentedControl { options: root.options; value: root.current; radius: 0px; chosen(value) => { root.selected(value); } }
     }
 }
 
@@ -258,18 +258,26 @@ component ToolButton inherits Rectangle {
     callback clicked();
     min-width: 48px;
     height: Theme.scribe ? 76px : 64px;
+    property <bool> highlighted: root.enabled && (root.selected || touch.pressed);
     accessible-role: button;
     accessible-label: root.label;
     accessible-enabled: root.enabled;
+    // Highlight the icon and label together while keeping the full touch target.
+    Rectangle {
+        x: 6px; y: 4px;
+        width: parent.width - 12px; height: parent.height - 8px;
+        border-radius: 0px;
+        background: root.highlighted ? Theme.ink : Theme.paper;
+    }
     Rectangle {
         x: (parent.width - self.width) / 2;
         y: 8px;
-        width: Theme.scribe ? 64px : 52px; height: Theme.scribe ? 34px : 30px; border-radius: Theme.scribe ? 17px : 15px;
-        background: root.selected || touch.pressed ? Theme.ink : Theme.paper;
-        if root.icon != "type": Icon { x: (parent.width - 24px) / 2; y: (parent.height - 24px) / 2; kind: root.icon; inverted: root.selected || touch.pressed; }
-        if root.icon == "type": Text { text: "Aa"; color: root.selected || touch.pressed ? Theme.paper : Theme.ink; font-family: Theme.serif-font; font-size: 22px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+        width: Theme.scribe ? 64px : 52px; height: Theme.scribe ? 34px : 30px;
+        background: transparent;
+        if root.icon != "type": Icon { x: (parent.width - 24px) / 2; y: (parent.height - 24px) / 2; kind: root.icon; inverted: root.highlighted; enabled: root.enabled; }
+        if root.icon == "type": Text { text: "Aa"; color: !root.enabled ? Theme.muted : root.highlighted ? Theme.paper : Theme.ink; font-family: Theme.serif-font; font-size: 22px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
     }
-    Text { x: 0px; y: Theme.scribe ? 44px : 38px; width: parent.width; height: parent.height - self.y; text: root.label; color: root.enabled ? Theme.ink : Theme.muted; font-family: Theme.ui-font; font-size: Theme.scribe ? 16px : 14px; font-weight: root.selected ? 700 : 400; horizontal-alignment: center; vertical-alignment: center; }
+    Text { x: 0px; y: Theme.scribe ? 44px : 38px; width: parent.width; height: parent.height - self.y; text: root.label; color: !root.enabled ? Theme.muted : root.highlighted ? Theme.paper : Theme.ink; font-family: Theme.ui-font; font-size: Theme.scribe ? 16px : 14px; font-weight: root.selected ? 700 : 400; horizontal-alignment: center; vertical-alignment: center; }
     touch := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
 }
 
@@ -339,7 +347,7 @@ component FontPicker inherits Rectangle {
                 background: font-touch.pressed ? Theme.ink : Theme.paper;
                 border-width: Theme.scribe ? ReaderModel.font-choice == option.id ? 2px : 1px : 0px;
                 border-color: ReaderModel.font-choice == option.id ? Theme.ink : Theme.line;
-                border-radius: Theme.scribe ? 8px : 0px;
+                border-radius: 0px;
                 accessible-role: button;
                 accessible-label: option.label;
                 accessible-enabled: option.available;
@@ -371,7 +379,7 @@ component FontSegments inherits Rectangle {
     in property <bool> article-mode;
     callback selected(string);
     height: 48px;
-    border-radius: 24px;
+    border-radius: 0px;
     border-width: 1px;
     border-color: Theme.ink;
     background: Theme.paper;
@@ -387,18 +395,10 @@ component FontSegments inherits Rectangle {
         accessible-role: button;
         accessible-label: option.label;
         accessible-enabled: option.available;
-        // Round the outside edges without rounding the internal segment boundaries.
+        // Keep each selected segment rectangular, including the outside edges.
         if option.available && (root.current == option.id || font-touch.pressed): Rectangle {
             x: 0px; y: 0px; width: parent.width; height: parent.height;
-            border-radius: parent.slot == 0 || parent.slot == min(3, root.fonts.length) - 1 ? parent.height / 2 : 0px;
-            background: Theme.ink;
-        }
-        if option.available && (root.current == option.id || font-touch.pressed) && (root.article-mode ? option.id == "hei" : index == 0) && min(3, root.fonts.length) > 1: Rectangle {
-            x: parent.width / 2; y: 0px; width: parent.width / 2; height: parent.height;
-            background: Theme.ink;
-        }
-        if option.available && (root.current == option.id || font-touch.pressed) && (root.article-mode ? option.id == "kai" : index == min(3, root.fonts.length) - 1) && min(3, root.fonts.length) > 1: Rectangle {
-            x: 0px; y: 0px; width: parent.width / 2; height: parent.height;
+            border-radius: 0px;
             background: Theme.ink;
         }
         Text { text: option.id == "song" ? Strings.song-font-short : option.id == "kai" ? Strings.kai-font-short : option.id == "hei" ? Strings.hei-font-short : option.label; font-family: option.family; font-size: 16px; font-weight: root.current == option.id ? 700 : 400; color: !option.available ? Theme.muted : root.current == option.id || font-touch.pressed ? Theme.paper : Theme.ink; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
@@ -413,7 +413,7 @@ component SubtoolLink inherits Rectangle {
     height: Theme.scribe ? 56px : 52px;
     border-width: 1px;
     border-color: Theme.ink;
-    border-radius: 8px;
+    border-radius: 0px;
     background: touch.pressed ? Theme.ink : Theme.paper;
     accessible-role: button;
     accessible-label: root.label + " " + root.value;
@@ -437,7 +437,7 @@ component TurnCard inherits Rectangle {
     height: 48px;
     border-width: root.selected ? 2px : 1px;
     border-color: root.selected ? Theme.ink : Theme.line;
-    border-radius: 8px;
+    border-radius: 0px;
     background: root.selected || touch.pressed ? Theme.ink : Theme.paper;
     accessible-role: button;
     accessible-label: root.label;
@@ -648,7 +648,7 @@ component ReaderMenu inherits Rectangle {
                     Text { text: Strings.tap-zones; height: 24px; font-family: Theme.ui-font; font-size: 16px; }
                     PageTurnChoices { }
                     Text { text: Strings.full-refresh; height: 32px; font-family: Theme.ui-font; font-size: 16px; vertical-alignment: center; }
-                    SegmentedControl { width: Theme.scribe ? 480px : parent.width; radius: 24px; value: ReaderModel.refresh-choice; options: [{id: "1", label: Strings.every-page}, {id: "6", label: Strings.six-pages}, {id: "12", label: Strings.twelve-pages}, {id: "0", label: Strings.never}]; chosen(value) => { ReaderModel.event("reader.refresh", value); } }
+                    SegmentedControl { width: Theme.scribe ? 480px : parent.width; radius: 0px; value: ReaderModel.refresh-choice; options: [{id: "1", label: Strings.every-page}, {id: "6", label: Strings.six-pages}, {id: "12", label: Strings.twelve-pages}, {id: "0", label: Strings.never}]; chosen(value) => { ReaderModel.event("reader.refresh", value); } }
                 }
             }
         }
@@ -657,7 +657,7 @@ component ReaderMenu inherits Rectangle {
             height: Theme.scribe ? 76px : 64px;
             Rectangle { x: 0px; y: 0px; width: parent.width; height: 1px; background: Theme.line; }
             HorizontalLayout {
-                ToolButton { label: Strings.catalog; icon: "list"; clicked => { ReaderModel.event("reader.toc", "toc"); } }
+                ToolButton { label: Strings.catalog; icon: "list"; clicked => { ReaderModel.event("reader.detail", "toc"); } }
                 ToolButton { label: Strings.progress; icon: "stats"; selected: ReaderModel.tool == "progress"; clicked => { ReaderModel.event("reader.tool", "progress"); } }
                 ToolButton { label: Strings.notes; icon: "notes"; selected: ReaderModel.tool == "notes"; clicked => { ReaderModel.event("reader.tool", "notes"); } }
                 if Theme.scribe: ToolButton { label: Strings.pen-highlight; icon: "notes"; selected: ReaderModel.pen-enabled; enabled: ReaderModel.pen-supported; clicked => { ReaderModel.event("reader.pen", "toggle"); } }
@@ -668,126 +668,174 @@ component ReaderMenu inherits Rectangle {
     }
 }
 
-component ReaderContents inherits Rectangle {
-    TouchArea { clicked => { ReaderModel.event("reader.toc-close", ""); } }
+component ReaderContentsChapter inherits Rectangle {
+    in property <ReaderChapter> entry;
+    callback activated();
+    callback paged(int);
+    callback current-position(length);
+    property <length> layout-top: root.y;
+    height: max(Theme.scribe ? 72px : 64px, chapter-title.preferred-height + 40px);
+    background: root.entry.current || row-touch.pressed ? Theme.ink : Theme.paper;
+    init => { if root.entry.current { root.current-position(root.layout-top); } }
+    changed layout-top => { if root.entry.current { root.current-position(root.layout-top); } }
+    changed entry => { if root.entry.current { root.current-position(root.layout-top); } }
+    chapter-title := Text {
+        x: Theme.page-margin; y: 10px;
+        width: parent.width - Theme.page-margin * 2;
+        height: self.preferred-height;
+        text: root.entry.title;
+        font-family: Theme.ui-font;
+        font-size: Theme.scribe ? 20px : 18px;
+        font-weight: root.entry.current ? 700 : 400;
+        color: root.entry.current || row-touch.pressed ? Theme.paper : Theme.ink;
+        wrap: word-wrap;
+    }
     Rectangle {
-        x: 0px; y: 0px;
-        width: Theme.scribe ? 540px : root.width;
-        height: root.height;
-        background: Theme.paper;
-        border-width: Theme.scribe ? 2px : 0px;
-        border-color: Theme.ink;
-        TouchArea { }
-        VerticalLayout {
-            spacing: 0px;
-            Rectangle {
-                height: 96px;
-                Rectangle {
-                    x: 0px; y: 0px; width: parent.width; height: 28px;
-                    Text { x: Theme.page-margin; y: 0px; height: parent.height; text: ReaderModel.clock; font-family: Theme.ui-font; font-size: 14px; vertical-alignment: center; }
-                }
-                HorizontalLayout {
-                    y: 28px; height: 68px;
-                    padding-left: Theme.page-margin; padding-right: 8px; spacing: 16px;
-                    Rectangle { width: 40px; height: 56px; background: Theme.ink; Text { text: ReaderModel.title; color: Theme.paper; font-family: Theme.serif-font; font-size: 14px; wrap: word-wrap; horizontal-alignment: center; vertical-alignment: center; } }
-                    VerticalLayout {
-                        alignment: center; spacing: 4px; horizontal-stretch: 1;
-                        Text { text: ReaderModel.title; font-family: Theme.serif-font; font-size: 24px; font-weight: 700; overflow: elide; }
-                        Text { text: ReaderModel.chapter-summary; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; overflow: elide; }
-                    }
-                    IconButton { icon: "close"; label: Strings.close; clicked => { ReaderModel.event("reader.toc-close", ""); } }
-                }
-            }
+        x: parent.width - Theme.page-margin - self.width;
+        y: chapter-title.y + chapter-title.height + 4px;
+        width: min(root.width - Theme.page-margin * 2, chapter-status.preferred-width + (root.entry.cached ? 28px : 0px));
+        height: 20px;
+        if root.entry.cached: Icon {
+            x: 0px; y: 0px; kind: "download"; width: 20px; height: 20px;
+            inverted: root.entry.current || row-touch.pressed;
+        }
+        chapter-status := Text {
+            x: root.entry.cached ? 28px : 0px; y: 0px;
+            width: parent.width - self.x; height: parent.height;
+            text: root.entry.meta;
+            font-family: Theme.ui-font; font-size: 14px;
+            color: root.entry.current || row-touch.pressed ? Theme.paper : Theme.secondary;
+            horizontal-alignment: right; vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+    Rectangle { x: 0px; y: parent.height - 1px; width: parent.width; height: 1px; background: Theme.line; }
+    row-touch := SwipeTouchArea { tapped => { root.activated(); } swiped(value) => { root.paged(value); } }
+}
+
+component ReaderContents inherits Rectangle {
+    background: Theme.paper;
+    property <length> header-height: 200px;
+    property <length> footer-height: Theme.scribe ? 64px : 56px;
+    property <bool> follow-current: true;
+    property <length> current-top;
+    property <string> page-key: ReaderModel.toc-tab + ":" + ReaderModel.chapter-page;
+    function reveal-current() {
+        if root.follow-current && ReaderModel.toc-tab == "toc" {
+            contents-scroll.viewport-y = clamp(-root.current-top, min(0px, contents-scroll.height - contents-scroll.viewport-height), 0px);
+        }
+    }
+    changed page-key => {
+        if root.follow-current { root.reveal-current(); }
+        else { contents-scroll.viewport-y = 0px; }
+    }
+    // Blank page regions consume input without dismissing the contents view.
+    TouchArea { }
+    VerticalLayout {
+        x: 0px; y: 0px; width: root.width; height: root.height;
+        spacing: 0px;
+        Rectangle {
+            height: 28px;
+            Text { x: Theme.page-margin; y: 0px; width: parent.width - Theme.page-margin * 2; height: parent.height; text: ReaderModel.clock; font-family: Theme.ui-font; font-size: 14px; vertical-alignment: center; }
+        }
+        PageHeader { title: Strings.catalog; back-text: Strings.return-reading; back => { ReaderModel.event("reader.toc-close", ""); } }
+        Rectangle {
+            height: 68px;
             HorizontalLayout {
-                height: 52px;
-                for tab in [{value: "toc", label: Strings.catalog + " " + ReaderModel.chapter-count}, {value: "marks", label: Strings.bookmarks + " " + ReaderModel.mark-count}, {value: "notes", label: Strings.my-notes + " " + ReaderModel.note-count}]: Rectangle {
-                    background: tab-touch.pressed ? Theme.ink : Theme.paper;
-                    Text { text: tab.label; font-family: Theme.ui-font; font-size: 18px; font-weight: ReaderModel.toc-tab == tab.value ? 700 : 400; color: tab-touch.pressed ? Theme.paper : ReaderModel.toc-tab == tab.value ? Theme.ink : Theme.secondary; horizontal-alignment: center; vertical-alignment: center; }
-                    if ReaderModel.toc-tab == tab.value: Rectangle { y: parent.height - 3px; height: 3px; background: Theme.ink; }
-                    tab-touch := TouchArea { clicked => { ReaderModel.event("reader.toc-tab", tab.value); } }
-                }
-            }
-            Rectangle {
-                vertical-stretch: 1;
-                clip: true;
+                padding-left: Theme.page-margin; padding-right: Theme.page-margin; spacing: 16px;
+                Rectangle { width: 40px; height: 56px; background: Theme.ink; Text { text: ReaderModel.title; color: Theme.paper; font-family: Theme.serif-font; font-size: 14px; wrap: word-wrap; horizontal-alignment: center; vertical-alignment: center; } }
                 VerticalLayout {
-                    spacing: 0px;
-                    if ReaderModel.toc-tab == "toc": VerticalLayout {
-                        spacing: 0px;
-                        for chapter in ReaderModel.chapters: Rectangle {
-                            height: 52px;
-                            background: chapter.current || row-touch.pressed ? Theme.ink : Theme.paper;
-                            HorizontalLayout {
-                                padding-left: Theme.page-margin; padding-right: Theme.page-margin; spacing: 12px;
-                                Text { text: chapter.title; font-family: Theme.ui-font; font-size: 18px; color: chapter.current || row-touch.pressed ? Theme.paper : Theme.ink; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
-                                Rectangle {
-                                    width: chapter-status.preferred-width + (chapter.cached ? 32px : 0px);
-                                    height: parent.height;
-                                    if chapter.cached: Icon {
-                                        x: 0px; y: (parent.height - self.height) / 2;
-                                        kind: "download"; width: 20px; height: 20px;
-                                        inverted: chapter.current || row-touch.pressed;
-                                    }
-                                    chapter-status := Text {
-                                        x: chapter.cached ? 32px : 0px; y: 0px;
-                                        width: parent.width - self.x; height: parent.height;
-                                        text: chapter.meta; font-family: Theme.ui-font; font-size: 14px;
-                                        color: chapter.current || row-touch.pressed ? Theme.paper : Theme.secondary;
-                                        vertical-alignment: center;
-                                    }
-                                }
-                            }
-                            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
-                            row-touch := SwipeTouchArea { tapped => { ReaderModel.event("reader.open-chapter", chapter.id); } swiped(value) => { ReaderModel.event("reader.toc-page", "" + value); } }
-                        }
-                    }
-                    if ReaderModel.toc-tab != "toc": VerticalLayout {
-                        spacing: 0px;
-                        for entry in ReaderModel.entries: Rectangle {
-                            height: entry.kind == "note" ? (Theme.scribe ? 136px : 128px) : 80px;
-                            background: entry-touch.pressed ? Theme.ink : Theme.paper;
-                            if entry.kind == "bookmark": HorizontalLayout {
-                                padding-left: Theme.page-margin; padding-right: Theme.page-margin; spacing: 16px;
-                                Icon { kind: "bookmark"; inverted: entry-touch.pressed; }
-                                VerticalLayout {
-                                    alignment: center; spacing: 4px;
-                                    Text { text: entry.title; font-family: Theme.ui-font; font-size: 18px; font-weight: 500; color: entry-touch.pressed ? Theme.paper : Theme.ink; overflow: elide; }
-                                    Text { text: (entry.id == "" ? entry.chapter : entry.page-label) + ((entry.id == "" || entry.page-label != "") && entry.date != "" ? " · " : "") + entry.date; font-family: Theme.ui-font; font-size: Theme.scribe ? 15px : 14px; color: entry-touch.pressed ? Theme.paper : Theme.secondary; overflow: elide; }
-                                }
-                            }
-                            if entry.kind == "note": VerticalLayout {
-                                padding-left: Theme.page-margin; padding-right: Theme.page-margin; padding-top: 12px; padding-bottom: 12px; spacing: 8px;
-                                HorizontalLayout {
-                                    height: 20px; spacing: 8px;
-                                    Text { text: entry.chapter; font-family: Theme.ui-font; font-size: Theme.scribe ? 15px : 14px; color: entry-touch.pressed ? Theme.paper : Theme.secondary; overflow: elide; horizontal-stretch: 1; }
-                                    Text { text: entry.date; font-family: Theme.ui-font; font-size: Theme.scribe ? 15px : 14px; color: entry-touch.pressed ? Theme.paper : Theme.secondary; }
-                                }
-                                Rectangle {
-                                    height: 30px;
-                                    note-quote := Text { x: 0px; y: 0px; width: parent.width; height: 26px; text: entry.title; font-family: Theme.serif-font; font-size: Theme.scribe ? 19px : 18px; color: entry-touch.pressed ? Theme.paper : Theme.ink; overflow: elide; }
-                                    Rectangle { x: 0px; y: 28px; width: min(parent.width, note-quote.preferred-width); height: 2px; background: entry-touch.pressed ? Theme.paper : Theme.ink; }
-                                }
-                                if entry.body != "": HorizontalLayout {
-                                    spacing: 8px;
-                                    Icon { kind: "notes"; width: 18px; height: 18px; inverted: entry-touch.pressed; }
-                                    Text { text: entry.body; font-family: Theme.ui-font; font-size: 16px; color: entry-touch.pressed ? Theme.paper : Theme.ink; overflow: elide; horizontal-stretch: 1; }
-                                }
-                                Rectangle { vertical-stretch: 1; }
-                            }
-                            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
-                            entry-touch := SwipeTouchArea { tapped => { if entry.id != "" { ReaderModel.event("reader.open-entry", entry.id); } } swiped(value) => { ReaderModel.event("reader.toc-page", "" + value); } }
-                        }
-                        if ReaderModel.entries.length == 0: Text { text: ReaderModel.toc-tab == "marks" ? Strings.no-bookmarks : Strings.no-notes; font-family: Theme.ui-font; font-size: 18px; color: Theme.secondary; wrap: word-wrap; horizontal-alignment: center; }
-                    }
-                    Rectangle { vertical-stretch: 1; }
+                    alignment: center; spacing: 4px; horizontal-stretch: 1;
+                    Text { text: ReaderModel.title; font-family: Theme.serif-font; font-size: 24px; font-weight: 700; overflow: elide; }
+                    Text { text: ReaderModel.chapter-summary; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; overflow: elide; }
                 }
             }
-            HorizontalLayout {
-                height: Theme.scribe ? 64px : 56px;
-                ActionButton { text: Strings.previous-page; quiet: true; enabled: ReaderModel.chapter-page > 1; clicked => { ReaderModel.event("reader.toc-page", "-1"); } }
-                ActionButton { text: Strings.locate-current + " " + ReaderModel.chapter-page + " / " + ReaderModel.chapter-pages; quiet: true; horizontal-stretch: 1; clicked => { ReaderModel.event("reader.toc-locate", ""); } }
-                ActionButton { text: Strings.next-page; quiet: true; enabled: ReaderModel.chapter-page < ReaderModel.chapter-pages; clicked => { ReaderModel.event("reader.toc-page", "1"); } }
+        }
+        HorizontalLayout {
+            height: 52px;
+            for tab in [{value: "toc", label: Strings.catalog + " " + ReaderModel.chapter-count}, {value: "marks", label: Strings.bookmarks + " " + ReaderModel.mark-count}, {value: "notes", label: Strings.my-notes + " " + ReaderModel.note-count}]: Rectangle {
+                background: tab-touch.pressed ? Theme.ink : Theme.paper;
+                Text { text: tab.label; font-family: Theme.ui-font; font-size: 18px; font-weight: ReaderModel.toc-tab == tab.value ? 700 : 400; color: tab-touch.pressed ? Theme.paper : ReaderModel.toc-tab == tab.value ? Theme.ink : Theme.secondary; horizontal-alignment: center; vertical-alignment: center; }
+                if ReaderModel.toc-tab == tab.value: Rectangle { x: 0px; y: parent.height - 3px; width: parent.width; height: 3px; background: Theme.ink; }
+                tab-touch := TouchArea { clicked => { root.follow-current = false; contents-scroll.viewport-y = 0px; ReaderModel.event("reader.toc-tab", tab.value); } }
             }
+        }
+        contents-scroll := Flickable {
+            width: root.width;
+            height: max(0px, root.height - root.header-height - root.footer-height);
+            viewport-width: self.width;
+            viewport-height: max(self.height, contents-content.preferred-height);
+            interactive: true;
+            flicked => { root.follow-current = false; }
+            changed height => { root.reveal-current(); }
+            changed viewport-height => { root.reveal-current(); }
+            // Keep only the bounded page supplied by the application in this viewport.
+            contents-content := VerticalLayout {
+                x: 0px; y: 0px;
+                width: parent.width;
+                height: self.preferred-height;
+                alignment: start;
+                spacing: 0px;
+                if ReaderModel.toc-tab == "toc": VerticalLayout {
+                    alignment: start;
+                    spacing: 0px;
+                    for chapter in ReaderModel.chapters: ReaderContentsChapter {
+                        entry: chapter;
+                        activated => { ReaderModel.event("reader.open-chapter", chapter.id); }
+                        paged(value) => { root.follow-current = false; contents-scroll.viewport-y = 0px; ReaderModel.event("reader.toc-page", "" + value); }
+                        current-position(offset) => { root.current-top = offset; root.reveal-current(); }
+                    }
+                }
+                if ReaderModel.toc-tab != "toc": VerticalLayout {
+                    alignment: start;
+                    spacing: 0px;
+                    for entry in ReaderModel.entries: Rectangle {
+                        height: entry.kind == "note" ? (Theme.scribe ? 136px : 128px) : 80px;
+                        background: entry-touch.pressed ? Theme.ink : Theme.paper;
+                        if entry.kind == "bookmark": HorizontalLayout {
+                            padding-left: Theme.page-margin; padding-right: Theme.page-margin; spacing: 16px;
+                            Icon { kind: "bookmark"; inverted: entry-touch.pressed; }
+                            VerticalLayout {
+                                alignment: center; spacing: 4px;
+                                Text { text: entry.title; font-family: Theme.ui-font; font-size: 18px; font-weight: 500; color: entry-touch.pressed ? Theme.paper : Theme.ink; overflow: elide; }
+                                Text { text: (entry.id == "" ? entry.chapter : entry.page-label) + ((entry.id == "" || entry.page-label != "") && entry.date != "" ? " · " : "") + entry.date; font-family: Theme.ui-font; font-size: Theme.scribe ? 15px : 14px; color: entry-touch.pressed ? Theme.paper : Theme.secondary; overflow: elide; }
+                            }
+                        }
+                        if entry.kind == "note": VerticalLayout {
+                            padding-left: Theme.page-margin; padding-right: Theme.page-margin; padding-top: 12px; padding-bottom: 12px; spacing: 8px;
+                            HorizontalLayout {
+                                height: 20px; spacing: 8px;
+                                Text { text: entry.chapter; font-family: Theme.ui-font; font-size: Theme.scribe ? 15px : 14px; color: entry-touch.pressed ? Theme.paper : Theme.secondary; overflow: elide; horizontal-stretch: 1; }
+                                Text { text: entry.date; font-family: Theme.ui-font; font-size: Theme.scribe ? 15px : 14px; color: entry-touch.pressed ? Theme.paper : Theme.secondary; }
+                            }
+                            Rectangle {
+                                height: 30px;
+                                note-quote := Text { x: 0px; y: 0px; width: parent.width; height: 26px; text: entry.title; font-family: Theme.serif-font; font-size: Theme.scribe ? 19px : 18px; color: entry-touch.pressed ? Theme.paper : Theme.ink; overflow: elide; }
+                                Rectangle { x: 0px; y: 28px; width: min(parent.width, note-quote.preferred-width); height: 2px; background: entry-touch.pressed ? Theme.paper : Theme.ink; }
+                            }
+                            if entry.body != "": HorizontalLayout {
+                                spacing: 8px;
+                                Icon { kind: "notes"; width: 18px; height: 18px; inverted: entry-touch.pressed; }
+                                Text { text: entry.body; font-family: Theme.ui-font; font-size: 16px; color: entry-touch.pressed ? Theme.paper : Theme.ink; overflow: elide; horizontal-stretch: 1; }
+                            }
+                            Rectangle { vertical-stretch: 1; }
+                        }
+                        Rectangle { x: 0px; y: parent.height - 1px; width: parent.width; height: 1px; background: Theme.line; }
+                        entry-touch := SwipeTouchArea { tapped => { if entry.id != "" { ReaderModel.event("reader.open-entry", entry.id); } } swiped(value) => { root.follow-current = false; contents-scroll.viewport-y = 0px; ReaderModel.event("reader.toc-page", "" + value); } }
+                    }
+                    if ReaderModel.entries.length == 0: Text { text: ReaderModel.toc-tab == "marks" ? Strings.no-bookmarks : Strings.no-notes; font-family: Theme.ui-font; font-size: 18px; color: Theme.secondary; wrap: word-wrap; horizontal-alignment: center; }
+                }
+            }
+        }
+        Rectangle {
+            height: root.footer-height;
+            background: Theme.paper;
+            HorizontalLayout {
+                ActionButton { text: Strings.previous-page; quiet: true; enabled: ReaderModel.chapter-page > 1; clicked => { root.follow-current = false; contents-scroll.viewport-y = 0px; ReaderModel.event("reader.toc-page", "-1"); } }
+                ActionButton { text: Strings.locate-current + " " + ReaderModel.chapter-page + " / " + ReaderModel.chapter-pages; quiet: true; horizontal-stretch: 1; clicked => { root.follow-current = true; ReaderModel.event("reader.toc-locate", ""); root.reveal-current(); } }
+                ActionButton { text: Strings.next-page; quiet: true; enabled: ReaderModel.chapter-page < ReaderModel.chapter-pages; clicked => { root.follow-current = false; contents-scroll.viewport-y = 0px; ReaderModel.event("reader.toc-page", "1"); } }
+            }
+            Rectangle { x: 0px; y: 0px; width: parent.width; height: 1px; background: Theme.ink; }
         }
     }
 }
@@ -803,10 +851,10 @@ component ThoughtPopup inherits Rectangle {
         width: root.side ? 300px : root.full-width ? root.width + 4px : Theme.scribe ? 540px : root.width - 126px;
         height: root.side ? root.height : root.height * ReaderModel.thought-height / 100;
         background: Theme.paper;
-        border-top-left-radius: root.side ? 0px : 10px;
-        border-top-right-radius: root.side ? 0px : 10px;
-        border-bottom-left-radius: root.side || root.bottom ? 0px : 10px;
-        border-bottom-right-radius: root.side || root.bottom ? 0px : 10px;
+        border-top-left-radius: 0px;
+        border-top-right-radius: 0px;
+        border-bottom-left-radius: 0px;
+        border-bottom-right-radius: 0px;
         TouchArea { }
         VerticalLayout {
             padding: root.side ? 0px : 2px;
@@ -862,9 +910,9 @@ component ThoughtPopup inherits Rectangle {
         if !root.side: Rectangle {
             x: 0px; y: 0px; width: parent.width; height: parent.height;
             border-width: 2px; border-color: Theme.ink;
-            border-top-left-radius: 10px; border-top-right-radius: 10px;
-            border-bottom-left-radius: root.bottom ? 0px : 10px;
-            border-bottom-right-radius: root.bottom ? 0px : 10px;
+            border-top-left-radius: 0px; border-top-right-radius: 0px;
+            border-bottom-left-radius: 0px;
+            border-bottom-right-radius: 0px;
         }
     }
 }
@@ -886,7 +934,7 @@ component SelectionPopup inherits Rectangle {
         background: Theme.paper;
         border-width: 2px;
         border-color: Theme.ink;
-        border-radius: 10px;
+        border-radius: 0px;
         TouchArea { }
         VerticalLayout {
             padding: 20px;
@@ -900,7 +948,7 @@ component SelectionPopup inherits Rectangle {
                 vertical-stretch: 1;
                 border-width: 2px;
                 border-color: Theme.ink;
-                border-radius: 6px;
+                border-radius: 0px;
                 TextInput {
                     x: 12px; y: 8px; width: parent.width - 24px; height: parent.height - 16px;
                     text <=> ReaderModel.thought-draft;
@@ -932,7 +980,7 @@ component SyncConflictPopup inherits Rectangle {
         background: Theme.paper;
         border-width: 2px;
         border-color: Theme.ink;
-        border-radius: 10px;
+        border-radius: 0px;
         VerticalLayout {
             padding: 24px;
             spacing: 14px;
@@ -940,7 +988,7 @@ component SyncConflictPopup inherits Rectangle {
             Text { text: Strings.sync-conflict-hint; font-family: Theme.ui-font; font-size: 16px; color: Theme.secondary; wrap: word-wrap; }
             Rectangle {
                 height: 88px;
-                border-width: 2px; border-color: Theme.ink; border-radius: 6px;
+                border-width: 2px; border-color: Theme.ink; border-radius: 0px;
                 VerticalLayout {
                     padding: 12px; spacing: 6px;
                     Text { text: Strings.cloud-progress; font-family: Theme.ui-font; font-size: 17px; font-weight: 700; }
@@ -949,7 +997,7 @@ component SyncConflictPopup inherits Rectangle {
             }
             Rectangle {
                 height: 88px;
-                border-width: 1px; border-color: Theme.line; border-radius: 6px;
+                border-width: 1px; border-color: Theme.line; border-radius: 0px;
                 VerticalLayout {
                     padding: 12px; spacing: 6px;
                     Text { text: Strings.local-progress; font-family: Theme.ui-font; font-size: 17px; font-weight: 700; }
@@ -1023,7 +1071,7 @@ component ArticleMenu inherits Rectangle {
                         Text { text: Strings.article-images; font-family: Theme.ui-font; font-size: Theme.scribe ? 18px : 17px; }
                         Text { text: ArticleModel.image-summary; font-family: Theme.ui-font; font-size: Theme.scribe ? 15px : 14px; color: Theme.secondary; overflow: elide; }
                     }
-                    ActionButton { text: Theme.scribe ? Strings.load-all-images : Strings.load-all-short; primary: true; border-radius: 24px; clicked => { ArticleModel.event("article.load-all-images", ""); } }
+                    ActionButton { text: Theme.scribe ? Strings.load-all-images : Strings.load-all-short; primary: true; border-radius: 0px; clicked => { ArticleModel.event("article.load-all-images", ""); } }
                 }
             }
             if ArticleModel.tool == "type": VerticalLayout {
@@ -1115,7 +1163,7 @@ component ArticleQr inherits Rectangle {
         background: Theme.paper;
         border-width: 2px;
         border-color: Theme.ink;
-        border-radius: 10px;
+        border-radius: 0px;
         TouchArea { }
         qr-content := VerticalLayout {
             padding: Theme.scribe ? 28px : 24px; spacing: Theme.scribe ? 16px : 14px;
@@ -1136,21 +1184,21 @@ component ArticleEnding inherits Rectangle {
         Text { text: Strings.article-complete; height: Theme.scribe ? 30px : 26px; font-family: Theme.serif-font; font-size: Theme.scribe ? 20px : 18px; letter-spacing: Theme.scribe ? 6px : 5.4px; horizontal-alignment: center; }
         if !Theme.scribe && ArticleModel.has-next: HorizontalLayout {
             height: 48px; alignment: center;
-            ActionButton { text: Strings.next-article + ": " + ArticleModel.next-title + " ›"; primary: true; border-radius: 24px; max-width: parent.width; clicked => { ArticleModel.event("article.next", ""); } }
+            ActionButton { text: Strings.next-article + ": " + ArticleModel.next-title + " ›"; primary: true; border-radius: 0px; max-width: parent.width; clicked => { ArticleModel.event("article.next", ""); } }
         }
         if !Theme.scribe: HorizontalLayout {
             height: 48px; alignment: center; spacing: 10px;
-            ActionButton { text: Strings.return-article-list; border-width: 1px; border-radius: 24px; clicked => { ArticleModel.event("article.list", "true"); } }
-            ActionButton { text: Strings.phone-comments; border-width: 1px; border-radius: 24px; clicked => { ArticleModel.event("article.qr", "true"); } }
+            ActionButton { text: Strings.return-article-list; border-width: 1px; border-radius: 0px; clicked => { ArticleModel.event("article.list", "true"); } }
+            ActionButton { text: Strings.phone-comments; border-width: 1px; border-radius: 0px; clicked => { ArticleModel.event("article.qr", "true"); } }
         }
         if Theme.scribe: HorizontalLayout {
             height: 48px; alignment: center; spacing: 12px;
-            ActionButton { text: Strings.return-article-list; border-width: 1px; border-radius: 24px; clicked => { ArticleModel.event("article.list", "true"); } }
-            if ArticleModel.has-next: ActionButton { text: Strings.next-article + ": " + ArticleModel.next-title + " ›"; primary: true; border-radius: 24px; max-width: parent.width - 200px; clicked => { ArticleModel.event("article.next", ""); } }
+            ActionButton { text: Strings.return-article-list; border-width: 1px; border-radius: 0px; clicked => { ArticleModel.event("article.list", "true"); } }
+            if ArticleModel.has-next: ActionButton { text: Strings.next-article + ": " + ArticleModel.next-title + " ›"; primary: true; border-radius: 0px; max-width: parent.width - 200px; clicked => { ArticleModel.event("article.next", ""); } }
         }
         if Theme.scribe: HorizontalLayout {
             height: 48px; alignment: center;
-            ActionButton { text: Strings.phone-comments; border-width: 1px; border-radius: 24px; clicked => { ArticleModel.event("article.qr", "true"); } }
+            ActionButton { text: Strings.phone-comments; border-width: 1px; border-radius: 0px; clicked => { ArticleModel.event("article.qr", "true"); } }
         }
     }
 }
@@ -1428,8 +1476,8 @@ export component ReaderScreen inherits Rectangle {
         }
     }
 
-    if ReaderModel.menu: ReaderMenu { }
-    if ReaderModel.toc-open: ReaderContents { }
+    if ReaderModel.menu && !ReaderModel.toc-open: ReaderMenu { }
+    if ReaderModel.toc-open: ReaderContents { x: 0px; y: 0px; width: parent.width; height: parent.height; }
     if ReaderModel.thought-open: ThoughtPopup { }
     if ReaderModel.selection-open: SelectionPopup { }
     if ReaderModel.sync-conflict: SyncConflictPopup { }
@@ -1504,10 +1552,10 @@ export component ArticleScreen inherits Rectangle {
                     x: 0px; y: 0px; width: parent.width;
                     height: (block.inset-top + ceil(block.content-height) + block.inset-bottom) * 1px;
                     background: Theme.fill;
-                    border-top-left-radius: block.inset-top > 0 ? 6px : 0px;
-                    border-top-right-radius: block.inset-top > 0 ? 6px : 0px;
-                    border-bottom-left-radius: block.inset-bottom > 0 ? 6px : 0px;
-                    border-bottom-right-radius: block.inset-bottom > 0 ? 6px : 0px;
+                    border-top-left-radius: 0px;
+                    border-top-right-radius: 0px;
+                    border-bottom-left-radius: 0px;
+                    border-bottom-right-radius: 0px;
                     Text {
                         x: block.inset-horizontal * 1px; y: block.inset-top * 1px;
                         width: parent.width - block.inset-horizontal * 2px; height: block.content-height * 1px;
@@ -1525,7 +1573,7 @@ export component ArticleScreen inherits Rectangle {
                     x: 0px; y: 0px;
                     width: parent.width;
                     height: block.frame-height * 1px;
-                    border-radius: 6px;
+                    border-radius: 0px;
                     clip: true;
                     background: image-touch.pressed ? Theme.fill : Theme.paper;
                     if block.loaded: Image { x: 0px; y: 0px; width: parent.width; height: parent.height; source: block.picture; image-fit: cover; }
@@ -1535,7 +1583,7 @@ export component ArticleScreen inherits Rectangle {
                         Text { text: Strings.load-image; font-family: Theme.ui-font; font-size: 17px; font-weight: 700; horizontal-alignment: center; }
                         if block.meta != "": Text { text: block.meta; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; horizontal-alignment: center; }
                     }
-                    if !block.loaded: DashedOutline { stroke-color: Theme.ink; stroke: 2px; radius: 6px; }
+                    if !block.loaded: DashedOutline { stroke-color: Theme.ink; stroke: 2px; radius: 0px; }
                     image-touch := SwipeTouchArea { enabled: !block.loaded; tapped => { ArticleModel.event("article.load-image", block.id); } swiped(value) => { ArticleModel.event("article.turn", "" + value); } }
                 }
                 if block.kind == "image": Text { x: 0px; width: parent.width; y: (block.frame-height + block.caption-gap) * 1px; height: block.caption-height * 1px; text: block.text; font-family: Theme.ui-font; font-size: Theme.scribe ? 15px : 14px; color: Theme.secondary; horizontal-alignment: center; overflow: elide; }

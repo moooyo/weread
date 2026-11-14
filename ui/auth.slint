@@ -71,7 +71,7 @@ component KeyCap inherits Rectangle {
     background: root.enabled && (root.primary || root.selected || touch.pressed) ? Theme.ink : root.special ? Theme.fill : Theme.paper;
     border-width: root.enabled ? 2px : 0px;
     border-color: root.enabled ? Theme.ink : Theme.line;
-    border-radius: 6px;
+    border-radius: 0px;
     accessible-role: button;
     accessible-label: root.text;
     accessible-enabled: root.enabled;
@@ -353,7 +353,7 @@ export component LoginScreen inherits Rectangle {
                         x: (parent.width - self.width) / 2;
                         border-width: 2px;
                         border-color: Theme.ink;
-                        border-radius: 6px;
+                        border-radius: 0px;
                         Image {
                             x: 16px;
                             y: 16px;
@@ -455,7 +455,7 @@ export component LoginScreen inherits Rectangle {
                         height: Theme.scribe ? 124px : 80px;
                         border-width: index == LoginModel.code-length ? 3px : 2px;
                         border-color: index <= LoginModel.code-length ? Theme.ink : Theme.line;
-                        border-radius: Theme.scribe ? 8px : 6px;
+                        border-radius: 0px;
                         Text {
                             text: digit;
                             font-family: Theme.serif-font;
@@ -474,7 +474,7 @@ export component LoginScreen inherits Rectangle {
                         spacing: Theme.scribe ? 14px : 10px;
                         for column in [0, 1, 2]: KeyCap {
                             height: Theme.scribe ? 80px : 58px;
-                            border-radius: Theme.scribe ? 8px : 6px;
+                            border-radius: 0px;
                             text: "" + (row * 3 + column + 1);
                             text-size: Theme.scribe ? 30px : 24px;
                             text-weight: 500;
@@ -486,7 +486,7 @@ export component LoginScreen inherits Rectangle {
                         spacing: Theme.scribe ? 14px : 10px;
                         KeyCap {
                             height: Theme.scribe ? 80px : 58px;
-                            border-radius: Theme.scribe ? 8px : 6px;
+                            border-radius: 0px;
                             text: Strings.login-retry;
                             text-size: Theme.scribe ? 19px : 16px;
                             text-weight: 500;
@@ -495,7 +495,7 @@ export component LoginScreen inherits Rectangle {
                         }
                         KeyCap {
                             height: Theme.scribe ? 80px : 58px;
-                            border-radius: Theme.scribe ? 8px : 6px;
+                            border-radius: 0px;
                             text: "0";
                             text-size: Theme.scribe ? 30px : 24px;
                             text-weight: 500;
@@ -504,7 +504,7 @@ export component LoginScreen inherits Rectangle {
                         }
                         KeyCap {
                             height: Theme.scribe ? 80px : 58px;
-                            border-radius: Theme.scribe ? 8px : 6px;
+                            border-radius: 0px;
                             text: "⌫";
                             text-size: Theme.scribe ? 30px : 24px;
                             text-weight: 500;
@@ -547,7 +547,7 @@ export component LoginScreen inherits Rectangle {
                     height: 56px;
                     border-width: 2px;
                     border-color: Theme.ink;
-                    border-radius: 6px;
+                    border-radius: 0px;
                     ClipboardInput {
                         x: 12px; y: 4px; width: parent.width - 24px; height: 48px;
                         text <=> LoginModel.api-key;
@@ -655,7 +655,7 @@ component SearchBookRow inherits Rectangle {
                     background: root.book.tone == 0 ? Theme.ink : root.book.tone == 1 ? Theme.secondary : root.book.tone == 2 ? Theme.fill : Theme.paper;
                     border-width: root.book.tone == 3 ? 1px : 0px;
                     border-color: Theme.ink;
-                    border-radius: 2px;
+                    border-radius: 0px;
                     Text {
                         text: root.book.initial;
                         color: root.book.tone < 2 ? Theme.paper : Theme.ink;
@@ -739,7 +739,7 @@ export component SearchScreen inherits Rectangle {
                     horizontal-stretch: 1;
                     border-width: SearchModel.keyboard-visible ? 3px : 2px;
                     border-color: Theme.ink;
-                    border-radius: 6px;
+                    border-radius: 0px;
                     HorizontalLayout {
                         padding-left: 12px;
                         padding-right: 8px;
@@ -941,7 +941,7 @@ export component SearchScreen inherits Rectangle {
                 height: parent.height - 24px;
                 border-width: 1px;
                 border-color: Theme.line;
-                border-radius: 6px;
+                border-radius: 0px;
                 if SearchModel.query == "": Text {
                     x: 16px; y: 16px; width: parent.width - 32px; height: parent.height - 32px;
                     text: Strings.write-thought;
