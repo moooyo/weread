@@ -280,12 +280,16 @@ The cleanup receipt records no physical-device access.
 
 ## Separate introduction-preview proposal
 
-The later six-line left-column introduction preview and its full-text shortcut
-were illustrated as a conversation-only design proposal. They are not part of
-the implementation or candidate evidence above. The implemented left column
-still contains core book information and actions; the full introduction is
-loaded and shown in the right Introduction tab. Generated proposal images,
-conversation fragments, and development archives are not repository sources.
+The subsequent accepted implementation is tracked in
+[Scribe introduction preview](INTRODUCTION_PREVIEW.md). Its new source and
+verification must remain separate from this hub candidate's evidence.
+
+The six-line left-column introduction preview and its full-text shortcut
+began as a conversation-only design proposal. They are not part of this hub
+candidate's implementation or evidence above. At that stage, the left column
+contained core book information and actions, and the full introduction was
+loaded in the right Introduction tab. Generated proposal images, conversation
+fragments, and development archives are not repository sources.
 
 ## Historical boundary
 

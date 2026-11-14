@@ -73,6 +73,10 @@ mod encoded_settings_tests;
 mod book_introduction_tests;
 
 #[cfg(test)]
+#[path = "store_book_introduction_preview_tests.rs"]
+mod book_introduction_preview_tests;
+
+#[cfg(test)]
 #[path = "store_body_length_budget_tests.rs"]
 mod body_length_budget_tests;
 
@@ -368,6 +372,25 @@ pub struct BookIntroduction {
     pub intro: String,
     pub publisher: Option<String>,
     pub isbn: Option<String>,
+}
+
+pub const BOOK_INTRODUCTION_PREVIEW_SCALARS: usize = 160;
+const BOOK_INTRODUCTION_PREVIEW_ENCODED_BYTES: usize = (BOOK_INTRODUCTION_PREVIEW_SCALARS + 1) * 4;
+
+/// A bounded text-only introduction prefix, independent of full-tab metadata.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BookIntroductionPreview {
+    pub text: String,
+    pub has_more: bool,
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct BookIntroductionPreviewReadStats {
+    reads: usize,
+    encoded_bytes: usize,
+    decoded_scalars: usize,
+    result_bytes: usize,
 }
 
 #[derive(Debug)]
@@ -673,7 +696,8 @@ fn book_metadata_copied(bytes: usize) {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TextEncoding {
     Utf8,
-    Utf16,
+    Utf16Le,
+    Utf16Be,
 }
 
 impl TextEncoding {
@@ -683,7 +707,8 @@ impl TextEncoding {
         byte_admission_tests::observe_encoding_read();
         match encoding.as_str() {
             "UTF-8" => Ok(Self::Utf8),
-            "UTF-16le" | "UTF-16be" => Ok(Self::Utf16),
+            "UTF-16le" => Ok(Self::Utf16Le),
+            "UTF-16be" => Ok(Self::Utf16Be),
             _ => Err(CachedResourceLimit.into()),
         }
     }
@@ -691,7 +716,7 @@ impl TextEncoding {
     fn utf8_upper(self, encoded: usize) -> Result<usize> {
         match self {
             Self::Utf8 => Ok(encoded),
-            Self::Utf16 => encoded
+            Self::Utf16Le | Self::Utf16Be => encoded
                 .checked_add(1)
                 .map(|bytes| bytes / 2)
                 .and_then(|units| units.checked_mul(3))
@@ -704,7 +729,7 @@ impl TextEncoding {
             Self::Utf8 => Ok(encoded),
             // Rounding each cell separately can cost one code unit per cell.
             // The aggregate bound also covers malformed odd encoded lengths.
-            Self::Utf16 => encoded
+            Self::Utf16Le | Self::Utf16Be => encoded
                 .checked_add(cells)
                 .map(|bytes| bytes / 2)
                 .and_then(|units| units.checked_mul(3))
@@ -715,12 +740,123 @@ impl TextEncoding {
     fn maximum_encoded(self, maximum_utf8: usize) -> Result<i64> {
         let encoded = match self {
             Self::Utf8 => maximum_utf8,
-            Self::Utf16 => (maximum_utf8 / 3)
+            Self::Utf16Le | Self::Utf16Be => (maximum_utf8 / 3)
                 .checked_mul(2)
                 .ok_or(CachedResourceLimit)?,
         };
         i64::try_from(encoded).map_err(|_| CachedResourceLimit.into())
     }
+}
+
+fn book_introduction_preview_working_set() -> Result<usize> {
+    book_metadata_add(
+        book_metadata_add(
+            BOOK_INTRODUCTION_PREVIEW_ENCODED_BYTES,
+            book_metadata_mul(BOOK_INTRODUCTION_PREVIEW_SCALARS, 4)?,
+        )?,
+        book_metadata_mul(2, std::mem::size_of::<BookIntroductionPreview>())?,
+    )
+}
+
+fn book_introduction_preview_bytes(
+    connection: &Connection,
+    rowid: i64,
+    output: &mut [u8; BOOK_INTRODUCTION_PREVIEW_ENCODED_BYTES],
+) -> Result<usize> {
+    // Read-only incremental I/O avoids materializing a complete SQL text
+    // value or transcoding a complete UTF-16 introduction in SQLite.
+    let mut blob = connection
+        .blob_open("main", "books", "intro", rowid, true)
+        .map_err(|_| BookMetadataUnavailable)?;
+    let length = blob.len().min(output.len());
+    std::io::Read::read_exact(&mut blob, &mut output[..length])
+        .map_err(|_| BookMetadataUnavailable)?;
+    blob.close().map_err(|_| BookMetadataUnavailable)?;
+    Ok(length)
+}
+
+fn book_introduction_preview_scalar(bytes: &[u8], encoding: TextEncoding) -> Result<(char, usize)> {
+    match encoding {
+        TextEncoding::Utf8 => {
+            let width = match bytes.first().copied().ok_or(BookMetadataUnavailable)? {
+                0x00..=0x7f => 1,
+                0xc2..=0xdf => 2,
+                0xe0..=0xef => 3,
+                0xf0..=0xf4 => 4,
+                _ => return Err(BookMetadataUnavailable.into()),
+            };
+            let raw = bytes.get(..width).ok_or(BookMetadataUnavailable)?;
+            let scalar = std::str::from_utf8(raw)
+                .map_err(|_| BookMetadataUnavailable)?
+                .chars()
+                .next()
+                .ok_or(BookMetadataUnavailable)?;
+            Ok((scalar, width))
+        }
+        TextEncoding::Utf16Le | TextEncoding::Utf16Be => {
+            let unit = |offset: usize| -> Result<u16> {
+                let raw: [u8; 2] = bytes
+                    .get(offset..offset + 2)
+                    .ok_or(BookMetadataUnavailable)?
+                    .try_into()
+                    .map_err(|_| BookMetadataUnavailable)?;
+                Ok(if encoding == TextEncoding::Utf16Le {
+                    u16::from_le_bytes(raw)
+                } else {
+                    u16::from_be_bytes(raw)
+                })
+            };
+            let first = unit(0)?;
+            let (scalar, width) = match first {
+                0xd800..=0xdbff => {
+                    let second = unit(2)?;
+                    if !(0xdc00..=0xdfff).contains(&second) {
+                        return Err(BookMetadataUnavailable.into());
+                    }
+                    (
+                        0x10000 + ((u32::from(first) - 0xd800) << 10) + u32::from(second) - 0xdc00,
+                        4,
+                    )
+                }
+                0xdc00..=0xdfff => return Err(BookMetadataUnavailable.into()),
+                _ => (u32::from(first), 2),
+            };
+            Ok((
+                char::from_u32(scalar).ok_or(BookMetadataUnavailable)?,
+                width,
+            ))
+        }
+    }
+}
+
+fn decode_book_introduction_preview(
+    encoded: &[u8],
+    encoding: TextEncoding,
+) -> Result<(BookIntroductionPreview, usize)> {
+    let mut text = String::with_capacity(BOOK_INTRODUCTION_PREVIEW_SCALARS * 4);
+    let mut bytes = encoded;
+    let mut scalars = 0;
+    let mut has_more = false;
+    while !bytes.is_empty() && scalars <= BOOK_INTRODUCTION_PREVIEW_SCALARS {
+        let (scalar, width) = book_introduction_preview_scalar(bytes, encoding)?;
+        bytes = &bytes[width..];
+        scalars += 1;
+        if scalars > BOOK_INTRODUCTION_PREVIEW_SCALARS {
+            has_more = true;
+            break;
+        }
+        text.push(scalar);
+    }
+    // Trim only the admitted prefix, preserving overflow before whitespace removal.
+    let leading = text.len() - text.trim_start().len();
+    let end = text.trim_end().len();
+    if leading >= end {
+        text.clear();
+    } else {
+        text.truncate(end);
+        text.drain(..leading);
+    }
+    Ok((BookIntroductionPreview { text, has_more }, scalars))
 }
 
 /// The rowid accelerates bounded selection; the admitted ID fences reuse across
@@ -1111,7 +1247,7 @@ impl StoreResourceSnapshot<'_> {
         }
         let encoded_max = match self.text_encoding {
             TextEncoding::Utf8 => 32 * 1024,
-            TextEncoding::Utf16 => 64 * 1024,
+            TextEncoding::Utf16Le | TextEncoding::Utf16Be => 64 * 1024,
         };
         inventory_admit("key bytes", raw, encoded_max)?;
         let upper = self
@@ -1307,7 +1443,7 @@ impl StoreResourceSnapshot<'_> {
         inventory_admit("body bytes", meta.utf8_bytes_upper, maximum_bytes)?;
         let vm = match self.text_encoding {
             TextEncoding::Utf8 => meta.encoded_bytes.checked_add(2),
-            TextEncoding::Utf16 => meta
+            TextEncoding::Utf16Le | TextEncoding::Utf16Be => meta
                 .encoded_bytes
                 .checked_mul(3)
                 .and_then(|v| v.checked_add(2)),
@@ -1455,6 +1591,8 @@ pub struct Store {
     #[cfg(test)]
     book_introduction_reads: std::cell::Cell<BookIntroductionReadStats>,
     #[cfg(test)]
+    book_introduction_preview_reads: std::cell::Cell<BookIntroductionPreviewReadStats>,
+    #[cfg(test)]
     annotation_reads: std::rc::Rc<std::cell::Cell<AnnotationReadStats>>,
     #[cfg(test)]
     materialized_chapter_bytes: std::cell::Cell<usize>,
@@ -1502,6 +1640,10 @@ impl Store {
             encoded_setting_reads: std::cell::Cell::new(EncodedSettingReadStats::default()),
             #[cfg(test)]
             book_introduction_reads: std::cell::Cell::new(BookIntroductionReadStats::default()),
+            #[cfg(test)]
+            book_introduction_preview_reads: std::cell::Cell::new(
+                BookIntroductionPreviewReadStats::default(),
+            ),
             #[cfg(test)]
             annotation_reads: std::rc::Rc::new(
                 std::cell::Cell::new(AnnotationReadStats::default()),
@@ -1820,6 +1962,53 @@ impl Store {
 
     pub fn book_title(&self, id: &str) -> Result<Option<String>> {
         self.selected_book_text(id, true)
+    }
+
+    /// Read at most 161 Unicode scalars without projecting full introduction
+    /// text or its separately stored publisher/ISBN metadata.
+    pub fn book_introduction_preview(&self, id: &str) -> Result<Option<BookIntroductionPreview>> {
+        selected_book_id(id)?;
+        let transaction = self.connection.unchecked_transaction()?;
+        let header: Option<(i64, bool)> = transaction
+            .query_row(
+                "SELECT rowid,typeof(intro)='text' FROM books WHERE id=?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let Some((rowid, valid)) = header else {
+            transaction.commit()?;
+            return Ok(None);
+        };
+        if !valid {
+            return Err(BookMetadataUnavailable.into());
+        }
+        let required = book_introduction_preview_working_set()?;
+        book_metadata_admit(
+            "introduction preview working-set bytes",
+            required,
+            book_introduction_limits().bytes,
+        )?;
+        let mut encoded = [0; BOOK_INTRODUCTION_PREVIEW_ENCODED_BYTES];
+        let length = book_introduction_preview_bytes(&transaction, rowid, &mut encoded)?;
+        #[cfg(test)]
+        {
+            let mut stats = self.book_introduction_preview_reads.get();
+            stats.reads += 1;
+            stats.encoded_bytes += length;
+            self.book_introduction_preview_reads.set(stats);
+        }
+        let (preview, _scalars) =
+            decode_book_introduction_preview(&encoded[..length], self.text_encoding)?;
+        #[cfg(test)]
+        {
+            let mut stats = self.book_introduction_preview_reads.get();
+            stats.decoded_scalars += _scalars;
+            stats.result_bytes += preview.text.len();
+            self.book_introduction_preview_reads.set(stats);
+        }
+        transaction.commit()?;
+        Ok(Some(preview))
     }
 
     /// Read only the introduction tab's fields after encoding/copy/node
@@ -4312,9 +4501,11 @@ impl Store {
         let raw = usize::try_from(raw).map_err(|_| BookmarkUnavailable)?;
         let encoded_limit = match self.text_encoding {
             TextEncoding::Utf8 => l.id_bytes,
-            TextEncoding::Utf16 => l.id_bytes.checked_mul(2).ok_or(BookmarkResourceLimit {
-                resource: "id bytes",
-            })?,
+            TextEncoding::Utf16Le | TextEncoding::Utf16Be => {
+                l.id_bytes.checked_mul(2).ok_or(BookmarkResourceLimit {
+                    resource: "id bytes",
+                })?
+            }
         };
         bookmark_admit("id encoded bytes", raw, encoded_limit)?;
         let upper = self
@@ -4717,7 +4908,7 @@ impl Store {
             })?;
         let vm = match self.text_encoding {
             TextEncoding::Utf8 => encoded,
-            TextEncoding::Utf16 => encoded
+            TextEncoding::Utf16Le | TextEncoding::Utf16Be => encoded
                 .checked_mul(3)
                 .and_then(|bytes| bytes.checked_add(2))
                 .ok_or(ReportBatchLookupLimit {
@@ -5528,7 +5719,7 @@ impl BodyLengthOperation {
                         encoded.checked_mul(2).ok_or(CachedResourceLimit)?,
                         encoded.checked_add(2).ok_or(CachedResourceLimit)?,
                     ),
-                    TextEncoding::Utf16 => (
+                    TextEncoding::Utf16Le | TextEncoding::Utf16Be => (
                         encoded.checked_mul(4).ok_or(CachedResourceLimit)?,
                         encoded
                             .checked_mul(3)
@@ -7450,7 +7641,9 @@ fn bookmark_input_id(id: &str) -> Result<()> {
 fn bookmark_vm_scratch(encoding: TextEncoding, raw: usize) -> Result<usize> {
     match encoding {
         TextEncoding::Utf8 => raw.checked_add(2),
-        TextEncoding::Utf16 => raw.checked_mul(3).and_then(|v| v.checked_add(2)),
+        TextEncoding::Utf16Le | TextEncoding::Utf16Be => {
+            raw.checked_mul(3).and_then(|v| v.checked_add(2))
+        }
     }
     .ok_or_else(|| {
         BookmarkResourceLimit {
@@ -7574,7 +7767,9 @@ fn inventory_admit(resource: &'static str, requested: usize, limit: usize) -> Re
 fn inventory_text_vm_scratch(encoding: TextEncoding, raw: usize) -> Result<usize> {
     match encoding {
         TextEncoding::Utf8 => raw.checked_add(2),
-        TextEncoding::Utf16 => raw.checked_mul(3).and_then(|v| v.checked_add(2)),
+        TextEncoding::Utf16Le | TextEncoding::Utf16Be => {
+            raw.checked_mul(3).and_then(|v| v.checked_add(2))
+        }
     }
     .ok_or_else(|| {
         StoreInventoryLimit {
@@ -8263,7 +8458,9 @@ fn with_stored_setting_text_on<T>(
         })?;
     let vm = match encoding {
         TextEncoding::Utf8 => raw.checked_add(2),
-        TextEncoding::Utf16 => raw.checked_mul(3).and_then(|n| n.checked_add(2)),
+        TextEncoding::Utf16Le | TextEncoding::Utf16Be => {
+            raw.checked_mul(3).and_then(|n| n.checked_add(2))
+        }
     }
     .ok_or(StoredSettingReadLimit {
         resource: "VM scratch arithmetic",

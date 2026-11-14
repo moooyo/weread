@@ -476,5 +476,9 @@
   "image_dithering_off": "标准灰阶",
   "image_dithering_software": "软件抖动",
   "image_dithering_hardware": "硬件抖动",
-  "image_dithering_fallback": "当前使用软件回退"
+  "image_dithering_fallback": "当前使用软件回退",
+  "view_full_introduction": "查看完整简介",
+  "no_introduction": "暂无简介",
+  "introduction_unavailable": "简介暂不可用",
+  "introduction_preview_hint": "查看完整简介以继续阅读"
 }

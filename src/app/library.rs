@@ -2,6 +2,10 @@ use super::*;
 use crate::domain::BookMetadata;
 use sha2::{Digest, Sha256};
 
+#[cfg(test)]
+#[path = "book_intro_preview_tests.rs"]
+mod introduction_preview_tests;
+
 pub(super) struct BookTileMetadata<'a> {
     id: &'a str,
     title: &'a str,
@@ -1061,6 +1065,58 @@ impl App {
         };
         let book = snapshot.book;
         let introduction = snapshot.introduction;
+        // The fixed Scribe sidebar receives only a bounded text prefix. Full
+        // introduction and publisher metadata remain exclusive to that tab.
+        let (intro_preview, intro_available) = if self.profile.is_scribe() {
+            match self.store.book_introduction_preview(&book.id) {
+                Ok(Some(preview)) => {
+                    // Empty paragraphs can occupy the elided final line without
+                    // drawing a glyph. Compact only this bounded sidebar copy.
+                    let mut compact = String::with_capacity(preview.text.len());
+                    for paragraph in preview
+                        .text
+                        .split(['\n', '\r', '\u{85}', '\u{2028}', '\u{2029}'])
+                        .map(str::trim)
+                        .filter(|paragraph| !paragraph.is_empty())
+                    {
+                        if !compact.is_empty() {
+                            compact.push('\n');
+                        }
+                        compact.push_str(paragraph);
+                    }
+                    let available = !compact.is_empty() || preview.has_more;
+                    let text = if !available {
+                        String::new()
+                    } else if compact.is_empty() && preview.has_more {
+                        tr("introduction_preview_hint")
+                    } else if preview.has_more {
+                        let mut text = compact
+                            .chars()
+                            .take(crate::store::BOOK_INTRODUCTION_PREVIEW_SCALARS - 1)
+                            .collect::<String>();
+                        text.push('…');
+                        text
+                    } else {
+                        compact
+                    };
+                    (text, available)
+                }
+                Ok(None) => (String::new(), false),
+                Err(error)
+                    if error
+                        .downcast_ref::<crate::store::BookMetadataLimit>()
+                        .is_some()
+                        || error
+                            .downcast_ref::<crate::store::BookMetadataUnavailable>()
+                            .is_some() =>
+                {
+                    (tr("introduction_unavailable"), false)
+                }
+                Err(error) => return Err(error),
+            }
+        } else {
+            (String::new(), false)
+        };
         let state = ui.global::<DetailModel>();
         let metadata = self.store.chapter_metadata_with_presence(&book.id)?;
         let readable = metadata.iter().any(|entry| entry.body_present);
@@ -1121,6 +1177,8 @@ impl App {
             )
             .into(),
         );
+        state.set_intro_preview(intro_preview.into());
+        state.set_intro_available(intro_available);
         if let Some(introduction) = introduction {
             state.set_intro(introduction.intro.into());
             state.set_publisher(

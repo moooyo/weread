@@ -65,6 +65,8 @@ export global DetailModel {
     in-out property <string> summary;
     in-out property <string> chapter-summary;
     in-out property <string> intro;
+    in-out property <string> intro-preview;
+    in-out property <bool> intro-available;
     in-out property <string> metadata;
     in-out property <string> publisher;
     in-out property <string> published;
@@ -441,6 +443,7 @@ component DetailContent inherits Rectangle {
             spacing: 0px; alignment: start;
             if DetailModel.tab == "intro": VerticalLayout {
                 width: parent.width;
+                height: self.preferred-height;
                 padding-left: root.content-padding; padding-right: root.content-padding; padding-top: Theme.scribe ? 24px : 16px;
                 spacing: Theme.scribe ? 22px : 16px; alignment: start;
                 GridLayout {
@@ -470,7 +473,13 @@ component DetailContent inherits Rectangle {
                         }
                     }
                 }
-                Text { text: DetailModel.intro; font-family: Theme.serif-font; font-size: Theme.scribe ? 19px : 18px; wrap: word-wrap; }
+                Text {
+                    width: max(0px, parent.width - root.content-padding * 2);
+                    height: self.preferred-height;
+                    text: DetailModel.intro; font-family: Theme.serif-font;
+                    font-size: Theme.scribe ? 19px : 18px;
+                    wrap: word-wrap; vertical-alignment: top;
+                }
                 Rectangle {
                     height: Theme.scribe ? 64px : 56px;
                     HorizontalLayout {
@@ -566,7 +575,7 @@ component DetailContent inherits Rectangle {
 component DetailSideSummary inherits Rectangle {
     background: Theme.paper;
     clip: true;
-    // Core bindings deliberately exclude metadata that is loaded for Introduction.
+    // The preview is separately bounded; full Introduction metadata stays in the right pane.
     cover := CoverArt {
         x: (root.width - 214px) / 2; y: 0px;
         width: 214px; height: 300px;
@@ -616,12 +625,60 @@ component DetailSideSummary inherits Rectangle {
         text: Strings.continue-reading; primary: true; enabled: DetailModel.can-read;
         clicked => { DetailModel.event("read", ""); }
     }
-    ActionButton {
+    download-action := ActionButton {
         x: 0px; y: read-action.y + read-action.height + 12px;
         width: root.width; height: 48px; text-size: 16px;
         text: DetailModel.access-needs-refresh ? Strings.refresh-content-access : Strings.download-all;
         enabled: DetailModel.can-download;
         clicked => { DetailModel.event(DetailModel.access-needs-refresh ? "refresh-access" : "download", ""); }
+    }
+    intro-block := Rectangle {
+        x: 0px; y: download-action.y + download-action.height + 16px;
+        width: root.width; height: max(0px, root.height - self.y);
+        clip: true;
+        property <length> body-top: 53px;
+        property <bool> show-link: DetailModel.intro-available && self.height >= self.body-top + 60px;
+        property <length> body-limit: max(0px, min(156px, self.height - self.body-top - (self.show-link ? 60px : 0px)));
+        Rectangle { x: 0px; y: 0px; width: parent.width; height: 1px; background: Theme.line; }
+        Text {
+            x: 0px; y: 13px; width: parent.width; height: 28px;
+            text: Strings.introduction; font-family: Theme.ui-font; font-size: 20px;
+            font-weight: 700; color: Theme.ink; vertical-alignment: top;
+        }
+        intro-preview := Text {
+            x: 0px; y: intro-block.body-top; width: parent.width;
+            height: min(self.preferred-height, intro-block.body-limit);
+            text: DetailModel.intro-preview == "" ? Strings.no-introduction : DetailModel.intro-preview;
+            font-family: Theme.ui-font; font-size: 18px; color: Theme.secondary;
+            wrap: word-wrap; overflow: elide; vertical-alignment: top;
+        }
+        if intro-block.show-link: Rectangle {
+            x: 0px; y: intro-preview.y + intro-preview.height + 12px;
+            width: parent.width; height: 48px;
+            background: intro-link.pressed ? Theme.ink : Theme.paper;
+            accessible-role: button;
+            accessible-label: Strings.view-full-introduction;
+            link-caption := Text {
+                x: 0px; y: 0px; width: parent.width; height: parent.height;
+                text: Strings.view-full-introduction + " ›";
+                font-family: Theme.ui-font; font-size: 18px; font-weight: 700;
+                color: intro-link.pressed ? Theme.paper : Theme.ink;
+                horizontal-alignment: left; vertical-alignment: center; overflow: elide;
+            }
+            Rectangle {
+                x: 0px; y: parent.height - 5px;
+                width: min(parent.width, link-caption.preferred-width); height: 1px;
+                background: intro-link.pressed ? Theme.paper : Theme.ink;
+            }
+            intro-link := TouchArea {
+                x: 0px; y: 0px; width: parent.width; height: parent.height;
+                pointer-event(event) => {
+                    if event.kind == PointerEventKind.down { Theme.refresh("press"); }
+                    else if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel { Theme.refresh("release"); }
+                }
+                clicked => { DetailModel.event("tab", "intro"); }
+            }
+        }
     }
 }
 
