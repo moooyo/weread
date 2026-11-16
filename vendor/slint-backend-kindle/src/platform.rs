@@ -263,6 +263,7 @@ impl Platform for KindlePlatform {
             self.sleep_presentation.clone(),
         );
         self.initialized.store(true, Ordering::Release);
+        crate::startup_timing::mark("backend_event_loop_enter");
         let night_mode_config = self.night_mode.lock_configuration();
         let mut frame_buffer = Framebuffer::open_with_hardware_inversion(
             night_mode_config == NightModeConfig::HardwareIfSupported,
@@ -275,6 +276,7 @@ impl Platform for KindlePlatform {
             TouchInput::open(frame_buffer.width, frame_buffer.height)
                 .map_err(|e| PlatformError::Other(format!("failed to open touch input: {e}")))?,
         );
+        crate::startup_timing::mark("touch_opened");
 
         let initial_night_mode = frame_buffer
             .apply_night_mode(self.night_mode.desired())
@@ -282,13 +284,14 @@ impl Platform for KindlePlatform {
                 PlatformError::Other(format!("failed to apply initial night mode: {error}"))
             })?;
         let initial_mode = self.output_mode(initial_night_mode.software_inverse);
-        frame_buffer.fill(initial_mode.paper());
-        frame_buffer.refresh_full();
+        // Keep the startup artwork visible until a complete application frame
+        // can carry the initial FULL update. Do not submit a blank paper frame.
+        let mut initial_scene_pending = true;
         self.synchronize_dithering_eligibility(&frame_buffer);
 
         let width = frame_buffer.width as usize;
-        // The retained frame must describe the paper already filled above even
-        // if managed sleep arrives before Slint's first application frame.
+        // The retained buffer still needs a defined paper fallback if managed
+        // sleep arrives before Slint has produced its first application frame.
         let mut rgb_buffer = vec![
             Rgb8Pixel {
                 r: 255,
@@ -304,6 +307,7 @@ impl Platform for KindlePlatform {
         let mut portrait = PortraitRuntime::new(launch_render_offset());
         let mut input_generation = 1u64;
         portrait.ensure_active(&self.native_orientation, &frame_buffer)?;
+        crate::startup_timing::mark("portrait_opened");
         let mut applied_rotation = self.rotation.load(Ordering::Relaxed);
         self.window.set_size(portrait_window_size(
             panel_width,
@@ -384,7 +388,8 @@ impl Platform for KindlePlatform {
                 continue;
             }
 
-            let timeout_ms: libc::c_int = if (restore_full_frame
+            let timeout_ms: libc::c_int = if (initial_scene_pending
+                || restore_full_frame
                 || presentation_barrier
                 || self.pending_sleep_presentation()?.is_some())
                 && !portrait.input_gated()
@@ -629,7 +634,8 @@ impl Platform for KindlePlatform {
             // Hardware inversion can change while the software transform stays
             // identical. It still needs a complete framebuffer rewrite and FULL.
             let mode_changed = night_mode.changed || output_mode != gray_renderer.mode();
-            let force_full = restore_full_frame
+            let force_full = initial_scene_pending
+                || restore_full_frame
                 || presentation_barrier
                 || sleep_presentation_token.is_some()
                 || image_scene_changed
@@ -679,6 +685,11 @@ impl Platform for KindlePlatform {
                     height: size.height,
                 });
             });
+            if initial_scene_pending && !did_render {
+                // A skipped draw cannot consume the first-scene request or
+                // release the existing full-frame/input presentation barrier.
+                continue;
+            }
             if (sleep_presentation_token.is_some() || image_scene_changed) && !did_render {
                 return Err(PlatformError::Other(
                     "the requested image-processing scene did not render a complete Slint frame"
@@ -687,6 +698,7 @@ impl Platform for KindlePlatform {
             }
             let previous_raw_images = !rendered_image_scene.regions.is_empty();
             if did_render {
+                crate::startup_timing::arm_first_application_frame();
                 rendered_image_scene = RenderedImageScene::capture(
                     &image_snapshot,
                     (panel_width, panel_height),
@@ -776,6 +788,7 @@ impl Platform for KindlePlatform {
                     None => TransitionDrain::Ready,
                 };
                 presentation_barrier = false;
+                initial_scene_pending = false;
                 post_frame_input.finish_frame(drain, restore_full_frame, &self.managed_sleep);
                 restore_full_frame = false;
                 last_interaction = Instant::now();

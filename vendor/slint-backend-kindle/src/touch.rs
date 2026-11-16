@@ -1,6 +1,12 @@
 use slint::LogicalPosition;
 use slint::platform::software_renderer::MinimalSoftwareWindow;
 use slint::platform::{PointerEventButton, WindowEvent};
+use std::os::{
+    fd::{AsRawFd, IntoRawFd},
+    unix::fs::OpenOptionsExt,
+};
+
+use crate::input_discovery::{EventSnapshot, MetadataKind};
 
 // Touchscreen driver event. Layout has to match exactly what the kernel writes.
 #[repr(C)]
@@ -287,22 +293,14 @@ pub(crate) struct TouchInput {
 
 impl TouchInput {
     pub(crate) fn open(screen_width: u32, screen_height: u32) -> std::io::Result<Self> {
-        let path = Self::find_touch_device().ok_or_else(|| {
+        let file = Self::find_touch_device().ok_or_else(|| {
             std::io::Error::new(
                 std::io::ErrorKind::NotFound,
                 "no touch input device found (looked for ABS_MT_POSITION_X in /dev/input/event*)",
             )
         })?;
-        let c_path = std::ffi::CString::new(path).unwrap();
-        let fd = unsafe {
-            libc::open(
-                c_path.as_ptr(),
-                libc::O_RDONLY | libc::O_NONBLOCK | libc::O_CLOEXEC,
-            )
-        };
-        if fd < 0 {
-            return Err(std::io::Error::last_os_error());
-        }
+        // Transfer the validated descriptor instead of closing and reopening it.
+        let fd = file.into_raw_fd();
 
         // Exclusively grab the device so X/framework doesn't consume our events.
         let ret = unsafe { libc::ioctl(fd, EVIOCGRAB as _, 1 as libc::c_int) };
@@ -366,34 +364,67 @@ impl TouchInput {
         }
     }
 
-    /// Scan /dev/input/event* for a device that reports ABS_MT_POSITION_X (0x35).
-    fn find_touch_device() -> Option<String> {
+    fn query_absolute_bits(fd: libc::c_int) -> std::io::Result<[u8; 8]> {
+        let mut bits = [0u8; 8];
+        let request = read_ioctl(0x23, bits.len());
+        // SAFETY: bits has the complete writable size encoded by EVIOCGBIT.
+        if unsafe { libc::ioctl(fd, request as _, bits.as_mut_ptr()) } < 0 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            Ok(bits)
+        }
+    }
+
+    /// Validate kernel hints and retain the original checked touch descriptor.
+    fn find_touch_device() -> Option<std::fs::File> {
+        if let Some(snapshot) = EventSnapshot::capture(MetadataKind::AbsoluteAxes, 9) {
+            let mut found = None;
+            let mut current = true;
+            for candidate in snapshot.entries().filter(|entry| {
+                entry
+                    .axes()
+                    .is_some_and(|axes| axes & (1u64 << TOUCH_POSITION_X) != 0)
+            }) {
+                let file = match candidate.open_checked() {
+                    Ok(Some(file)) => file,
+                    _ => {
+                        current = false;
+                        break;
+                    }
+                };
+                let bits = match Self::query_absolute_bits(file.as_raw_fd()) {
+                    Ok(bits) => bits,
+                    Err(_) => {
+                        current = false;
+                        break;
+                    }
+                };
+                let actual = (0..64).fold(0u64, |axes, axis| {
+                    axes | (u64::from(bits[axis / 8] & (1 << (axis % 8)) != 0) << axis)
+                });
+                if candidate.axes() != Some(actual) {
+                    current = false;
+                    break;
+                }
+                found = Some(file);
+                break;
+            }
+            if current && found.is_some() && snapshot.is_current() {
+                return found;
+            }
+        }
         for n in 0..10 {
-            let path = format!("/dev/input/event{n}");
-            let c_path = std::ffi::CString::new(path.as_str()).unwrap();
-            let fd = unsafe {
-                libc::open(
-                    c_path.as_ptr(),
-                    libc::O_RDONLY | libc::O_NONBLOCK | libc::O_CLOEXEC,
-                )
+            // Preserve the legacy fallback's handling of linked event nodes.
+            let Ok(file) = std::fs::OpenOptions::new()
+                .read(true)
+                .custom_flags(libc::O_NONBLOCK | libc::O_CLOEXEC)
+                .open(format!("/dev/input/event{n}"))
+            else {
+                continue;
             };
-            if fd < 0 {
-                continue;
-            }
-            // EVIOCGBIT(EV_ABS, size) = _IOC(_IOC_READ, 'E', 0x20 + EV_ABS, size)
-            // For ABS (0x03): ioctl number is 0x80404520 + 0x03 = we compute it manually.
-            // We need at least 8 bytes to cover bit 0x35 (byte index 6, bit 5).
-            let mut abs_bits = [0u8; 8];
-            // EVIOCGBIT(EV_ABS=3, 8) on 32-bit: _IOC(2, 'E', 0x23, 8)
-            let request: libc::c_ulong = 2 << 30 | 8 << 16 | (b'E' as libc::c_ulong) << 8 | 0x23;
-            let ret = unsafe { libc::ioctl(fd, request as _, abs_bits.as_mut_ptr()) };
-            unsafe { libc::close(fd) };
-            if ret < 0 {
-                continue;
-            }
-            // Check bit 0x35 (ABS_MT_POSITION_X): byte 0x35/8 = 6, bit 0x35%8 = 5
-            if abs_bits[6] & (1 << 5) != 0 {
-                return Some(path);
+            if Self::query_absolute_bits(file.as_raw_fd()).is_ok_and(|bits| bits[6] & (1 << 5) != 0)
+            {
+                return Some(file);
             }
         }
         None

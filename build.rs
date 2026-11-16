@@ -1,9 +1,47 @@
-use std::{env, fs, path::PathBuf};
+use std::{
+    env, fs,
+    io::Read,
+    path::{Path, PathBuf},
+};
+
+const BUNDLED_FONT_FILES: &[&str] = &[
+    "NotoSansSC-Regular.otf",
+    "NotoSansSC-Medium.otf",
+    "NotoSansSC-Bold.otf",
+    "NotoSerifSC-Light.otf",
+    "NotoSerifSC-Regular.otf",
+    "NotoSerifSC-Medium.otf",
+    "NotoSerifSC-Bold.otf",
+];
+
+fn prepare_bundled_fonts(output: &Path) {
+    let directory = output.join("fonts");
+    fs::create_dir_all(&directory).expect("Create generated font directory");
+    for name in BUNDLED_FONT_FILES {
+        let source = format!("assets/fonts/{name}.gz");
+        println!("cargo:rerun-if-changed={source}");
+        let compressed = fs::File::open(&source).expect("Read a bundled font source");
+        let mut bytes = Vec::new();
+        flate2::read::GzDecoder::new(compressed)
+            .take(64 * 1024 * 1024 + 1)
+            .read_to_end(&mut bytes)
+            .expect("Expand a bundled font at build time");
+        assert!(
+            bytes.len() <= 64 * 1024 * 1024,
+            "Bundled font exceeds the size limit"
+        );
+        let target = directory.join(name);
+        if fs::read(&target).ok().as_deref() != Some(bytes.as_slice()) {
+            fs::write(target, bytes).expect("Write a generated font payload");
+        }
+    }
+}
 
 fn main() {
     println!("cargo:rerun-if-changed=assets/i18n/zh-CN.json");
     println!("cargo:rerun-if-changed=assets/design-tokens.json");
     let output = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo output directory"));
+    prepare_bundled_fonts(&output);
     let labels: serde_json::Map<String, serde_json::Value> = serde_json::from_slice(
         &fs::read("assets/i18n/zh-CN.json").expect("Read interface translations"),
     )

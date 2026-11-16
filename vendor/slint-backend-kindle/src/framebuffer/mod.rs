@@ -402,6 +402,7 @@ impl Framebuffer {
         if result < 0 {
             Err(std::io::Error::last_os_error())
         } else {
+            crate::startup_timing::update_submitted();
             Ok(())
         }
     }
@@ -613,7 +614,12 @@ impl Framebuffer {
             return false;
         }
         // SAFETY: `update` outlives the ioctl and matches the kernel's struct.
-        unsafe { libc::ioctl(self.file.as_raw_fd(), request as _, update as *const _) != -1 }
+        let accepted =
+            unsafe { libc::ioctl(self.file.as_raw_fd(), request as _, update as *const _) != -1 };
+        if accepted {
+            crate::startup_timing::update_submitted();
+        }
+        accepted
     }
 
     fn mtk_update_request(

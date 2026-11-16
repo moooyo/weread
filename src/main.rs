@@ -2,7 +2,6 @@ use std::{
     cell::{Cell, RefCell},
     collections::{BTreeMap, BTreeSet, VecDeque},
     fs,
-    io::Read,
     path::{Path, PathBuf},
     rc::Rc,
     sync::{
@@ -14,7 +13,6 @@ use std::{
 
 use anyhow::{Context, Result, anyhow, bail};
 use clap::Parser;
-use flate2::read::GzDecoder;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use slint::{ComponentHandle, fontique_010::fontique};
@@ -41,13 +39,20 @@ use font_budget::{
 #[path = "main_font_budget_tests.rs"]
 mod font_budget_tests;
 
-const SANS_REGULAR: &[u8] = include_bytes!("../assets/fonts/NotoSansSC-Regular.otf.gz");
-const SANS_MEDIUM: &[u8] = include_bytes!("../assets/fonts/NotoSansSC-Medium.otf.gz");
-const SANS_BOLD: &[u8] = include_bytes!("../assets/fonts/NotoSansSC-Bold.otf.gz");
-const SERIF_LIGHT: &[u8] = include_bytes!("../assets/fonts/NotoSerifSC-Light.otf.gz");
-const SERIF_REGULAR: &[u8] = include_bytes!("../assets/fonts/NotoSerifSC-Regular.otf.gz");
-const SERIF_MEDIUM: &[u8] = include_bytes!("../assets/fonts/NotoSerifSC-Medium.otf.gz");
-const SERIF_BOLD: &[u8] = include_bytes!("../assets/fonts/NotoSerifSC-Bold.otf.gz");
+#[cfg(test)]
+#[path = "main_startup_font_tests.rs"]
+mod startup_font_tests;
+
+const SANS_REGULAR: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/fonts/NotoSansSC-Regular.otf"));
+const SANS_MEDIUM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/fonts/NotoSansSC-Medium.otf"));
+const SANS_BOLD: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/fonts/NotoSansSC-Bold.otf"));
+const SERIF_LIGHT: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/fonts/NotoSerifSC-Light.otf"));
+const SERIF_REGULAR: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/fonts/NotoSerifSC-Regular.otf"));
+const SERIF_MEDIUM: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/fonts/NotoSerifSC-Medium.otf"));
+const SERIF_BOLD: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/fonts/NotoSerifSC-Bold.otf"));
 const MAX_FONT_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_FAILURE_RECORDS: usize = 32;
 const MAX_FAILURE_MESSAGE_BYTES: usize = 8 * 1024;
@@ -203,32 +208,34 @@ struct RegisteredFace {
     weight: f32,
 }
 
+type FontBytes = Arc<dyn AsRef<[u8]> + Send + Sync>;
+
 struct PreparedFont {
-    bytes: Arc<Vec<u8>>,
+    bytes: FontBytes,
     faces: Vec<RegisteredFace>,
     metrics: BTreeMap<u32, TextMetrics>,
 }
 
 struct BundledFonts {
-    sans_regular: Arc<Vec<u8>>,
-    sans_medium: Arc<Vec<u8>>,
-    sans_bold: Arc<Vec<u8>>,
-    serif_light: Arc<Vec<u8>>,
-    serif_regular: Arc<Vec<u8>>,
-    serif_medium: Arc<Vec<u8>>,
-    serif_bold: Arc<Vec<u8>>,
+    sans_regular: &'static [u8],
+    sans_medium: &'static [u8],
+    sans_bold: &'static [u8],
+    serif_light: &'static [u8],
+    serif_regular: &'static [u8],
+    serif_medium: &'static [u8],
+    serif_bold: &'static [u8],
 }
 
 impl BundledFonts {
     fn load() -> Result<Self> {
         Ok(Self {
-            sans_regular: decompress_font(SANS_REGULAR).context("Load bundled Sans Regular")?,
-            sans_medium: decompress_font(SANS_MEDIUM).context("Load bundled Sans Medium")?,
-            sans_bold: decompress_font(SANS_BOLD).context("Load bundled Sans Bold")?,
-            serif_light: decompress_font(SERIF_LIGHT).context("Load bundled Serif Light")?,
-            serif_regular: decompress_font(SERIF_REGULAR).context("Load bundled Serif Regular")?,
-            serif_medium: decompress_font(SERIF_MEDIUM).context("Load bundled Serif Medium")?,
-            serif_bold: decompress_font(SERIF_BOLD).context("Load bundled Serif Bold")?,
+            sans_regular: SANS_REGULAR,
+            sans_medium: SANS_MEDIUM,
+            sans_bold: SANS_BOLD,
+            serif_light: SERIF_LIGHT,
+            serif_regular: SERIF_REGULAR,
+            serif_medium: SERIF_MEDIUM,
+            serif_bold: SERIF_BOLD,
         })
     }
 }
@@ -269,6 +276,7 @@ fn query_native_portrait_probe() -> Result<(bool, u32)> {
 }
 
 fn main() -> std::process::ExitCode {
+    startup_mark("main_enter");
     let arguments = Arguments::parse();
     // This hidden launcher probe runs before diagnostics, fonts, state, the
     // startup worker, or any framebuffer mapping and touch acquisition.
@@ -364,6 +372,13 @@ mod native_portrait_probe_tests {
     }
 }
 
+fn startup_mark(stage: &'static str) {
+    #[cfg(all(feature = "kindle", target_os = "linux"))]
+    slint_backend_kindle::record_startup_stage(stage);
+    #[cfg(not(all(feature = "kindle", target_os = "linux")))]
+    let _ = stage;
+}
+
 fn run(arguments: Arguments) -> Result<()> {
     let data_dir = arguments
         .data_dir
@@ -373,6 +388,7 @@ fn run(arguments: Arguments) -> Result<()> {
     let actions = load_actions(arguments.actions.as_deref())?;
     let deadline = automatic_deadline(&arguments, &actions)?;
     let platform = Arc::new(Platform::new(arguments.device, arguments.kindle)?);
+    startup_mark("platform_ready");
     install_shutdown_signals(arguments.kindle)?;
     let startup_data_dir = if arguments.demo {
         data_dir.join("demo")
@@ -383,21 +399,22 @@ fn run(arguments: Arguments) -> Result<()> {
         weread::preferences::startup_dark_mode_hint(&startup_data_dir).unwrap_or(false);
     let mut startup = platform::StartupScreen::show(&platform, startup_dark_mode)
         .context("Show the native startup screen")?;
+    startup_mark("startup_feedback_ready");
     startup.set_stage(platform::StartupStage::Fonts);
     let fonts = BundledFonts::load()?;
+    startup_mark("fonts_loaded");
     if STOP_REQUESTED.load(Ordering::Relaxed) {
         return Ok(());
     }
 
-    // The raw startup worker owns the framebuffer during font decompression.
+    // The raw startup worker owns the framebuffer during initial preparation.
     // Join it before the installer changes process environment, then resume it.
     startup.pause().context("Pause native startup feedback")?;
+    startup_mark("startup_feedback_paused");
     startup.set_stage(platform::StartupStage::Display);
     #[cfg(all(feature = "kindle", target_os = "linux"))]
     let _kindle_backend = if arguments.kindle {
-        Some(platform::install_kindle_backend(
-            fonts.sans_regular.as_slice(),
-        )?)
+        Some(platform::install_kindle_backend(fonts.sans_regular)?)
     } else {
         None
     };
@@ -433,7 +450,9 @@ fn run(arguments: Arguments) -> Result<()> {
     if arguments.kindle {
         bail!("The native Kindle backend is unavailable in this build");
     }
+    startup_mark("backend_ready");
     startup.resume().context("Resume native startup feedback")?;
+    startup_mark("startup_feedback_resumed");
 
     if !arguments.kindle {
         #[cfg(feature = "desktop")]
@@ -447,8 +466,10 @@ fn run(arguments: Arguments) -> Result<()> {
     }
 
     let ui = AppWindow::new().context("Create the application window")?;
+    startup_mark("window_created");
     platform::configure_window(ui.window(), &platform)?;
     let font_records = initialize_fonts(&ui, &fonts, &data_dir)?;
+    startup_mark("fonts_registered");
     if STOP_REQUESTED.load(Ordering::Relaxed) {
         return Ok(());
     }
@@ -460,6 +481,7 @@ fn run(arguments: Arguments) -> Result<()> {
         .build()
         .context("Create background workers")?;
     App::begin_state_open().context("Mark application state initialization")?;
+    startup_mark("application_attach_begin");
     let application = App::attach(
         &ui,
         AppOptions {
@@ -484,6 +506,7 @@ fn run(arguments: Arguments) -> Result<()> {
         &runtime,
     )
     .context("Open application state")?;
+    startup_mark("application_attached");
 
     let failures = Rc::new(RefCell::new(FailureLog::default()));
     let quitting = Rc::new(Cell::new(false));
@@ -610,7 +633,9 @@ fn run(arguments: Arguments) -> Result<()> {
     let loop_result = (|| -> Result<()> {
         // The normal backend opens and writes the panel only after this join.
         startup.finish().context("Finish native startup feedback")?;
+        startup_mark("startup_feedback_finished");
         ui.show()?;
+        startup_mark("software_ready");
         if !native {
             set_profile_window_size(ui.window(), profile)?;
         }
@@ -736,17 +761,6 @@ fn automatic_deadline(arguments: &Arguments, actions: &[ScriptAction]) -> Result
     Ok(milliseconds.map(Duration::from_millis))
 }
 
-fn decompress_font(bytes: &[u8]) -> Result<Arc<Vec<u8>>> {
-    let mut decoded = Vec::new();
-    GzDecoder::new(bytes)
-        .take(MAX_FONT_BYTES + 1)
-        .read_to_end(&mut decoded)?;
-    if decoded.len() as u64 > MAX_FONT_BYTES {
-        bail!("A bundled font exceeds the font size limit");
-    }
-    Ok(Arc::new(decoded))
-}
-
 fn font_face_count(bytes: &[u8]) -> Result<usize> {
     if bytes.len() as u64 > MAX_FONT_BYTES {
         return Err(FontLimitError::Payload.into());
@@ -760,24 +774,39 @@ fn font_face_count(bytes: &[u8]) -> Result<usize> {
     }
 }
 
+#[cfg(test)]
 fn prepare_font(bytes: Arc<Vec<u8>>, budget: &mut FontBudget) -> Result<PreparedFont> {
-    // Bundled/in-memory sources have already been read or decompressed. File
+    // In-memory fixtures have already been read. File
     // sources use the charged reader and enter the next helper directly.
     budget.record_read(bytes.len())?;
     prepare_font_after_read(bytes, budget)
 }
 
 fn prepare_font_after_read(bytes: Arc<Vec<u8>>, budget: &mut FontBudget) -> Result<PreparedFont> {
-    let raw_faces = font_face_count(bytes.as_slice())?;
-    budget.reserve_font(bytes.len(), raw_faces)?;
+    prepare_font_payload(bytes, None, budget)
+}
+
+fn prepare_bundled_font(bytes: &'static [u8], budget: &mut FontBudget) -> Result<PreparedFont> {
+    budget.record_read(bytes.len())?;
+    prepare_font_payload(Arc::new(bytes), Some(bytes), budget)
+}
+
+fn prepare_font_payload(
+    bytes: FontBytes,
+    static_source: Option<&'static [u8]>,
+    budget: &mut FontBudget,
+) -> Result<PreparedFont> {
+    let data = bytes.as_ref().as_ref();
+    let raw_faces = font_face_count(data)?;
+    budget.reserve_font(data.len(), raw_faces)?;
     // Both parsers see the same immutable data. Borrowed parsing validates
     // every admitted offset/table without cloning the collection payload.
     for index in 0..raw_faces {
-        owned_ttf_parser::Face::parse(bytes.as_slice(), index as u32)
+        owned_ttf_parser::Face::parse(data, index as u32)
             .map_err(|error| anyhow!("The font face is invalid: {error}"))?;
-        admit_font_axes(bytes.as_slice(), index as u32)?;
-        admit_font_names(bytes.as_slice(), index as u32, budget)?;
-        glyph_budget::admit_font_glyphs(bytes.as_slice(), index as u32, budget)?;
+        admit_font_axes(data, index as u32)?;
+        admit_font_names(data, index as u32, budget)?;
+        glyph_budget::admit_font_glyphs(data, index as u32, budget)?;
     }
     let mut temporary = fontique::Collection::new(fontique::CollectionOptions {
         shared: false,
@@ -838,8 +867,11 @@ fn prepare_font_after_read(bytes: Arc<Vec<u8>>, budget: &mut FontBudget) -> Resu
             }
             metrics.insert(
                 face.index,
-                TextMetrics::from_font(bytes.as_slice(), face.index)
-                    .map_err(|error| anyhow!(error))?,
+                match static_source {
+                    Some(source) => TextMetrics::from_static_font(source, face.index),
+                    None => TextMetrics::from_font(data, face.index),
+                }
+                .map_err(|error| anyhow!(error))?,
             );
         }
     }
@@ -1009,19 +1041,29 @@ fn publish_font(font: &PreparedFont, budget: &mut FontBudget) {
     let _ = shared.register_fonts(fontique::Blob::new(font.bytes.clone()), None);
 }
 
+#[cfg(test)]
 fn register_font_data(bytes: Arc<Vec<u8>>, budget: &mut FontBudget) -> Result<PreparedFont> {
     let font = prepare_font(bytes, budget)?;
     publish_font(&font, budget);
     Ok(font)
 }
 
+fn register_bundled_font_data(
+    bytes: &'static [u8],
+    budget: &mut FontBudget,
+) -> Result<PreparedFont> {
+    let font = prepare_bundled_font(bytes, budget)?;
+    publish_font(&font, budget);
+    Ok(font)
+}
+
 fn register_bundled_weight(
-    bytes: Arc<Vec<u8>>,
+    bytes: &'static [u8],
     family: &str,
     weight: f32,
     budget: &mut FontBudget,
 ) -> Result<(PreparedFont, RegisteredFace)> {
-    let font = prepare_font(bytes, budget)?;
+    let font = prepare_bundled_font(bytes, budget)?;
     let face = font
         .faces
         .iter()
@@ -1050,8 +1092,8 @@ fn initialize_fonts(
 ) -> Result<Vec<FontRecord>> {
     // The software renderer reads this same shared Fontique collection.
     let mut budget = FontBudget::default();
-    let sans_font = register_font_data(fonts.sans_regular.clone(), &mut budget)?;
-    let serif_font = register_font_data(fonts.serif_regular.clone(), &mut budget)?;
+    let sans_font = register_bundled_font_data(fonts.sans_regular, &mut budget)?;
+    let serif_font = register_bundled_font_data(fonts.serif_regular, &mut budget)?;
     let sans = sans_font
         .faces
         .first()
@@ -1061,19 +1103,15 @@ fn initialize_fonts(
         .first()
         .context("Bundled Serif font has no face")?;
     let (sans_medium_font, sans_medium) =
-        register_bundled_weight(fonts.sans_medium.clone(), &sans.family, 500.0, &mut budget)?;
+        register_bundled_weight(fonts.sans_medium, &sans.family, 500.0, &mut budget)?;
     let (sans_bold_font, sans_bold) =
-        register_bundled_weight(fonts.sans_bold.clone(), &sans.family, 700.0, &mut budget)?;
+        register_bundled_weight(fonts.sans_bold, &sans.family, 700.0, &mut budget)?;
     let (serif_light_font, serif_light) =
-        register_bundled_weight(fonts.serif_light.clone(), &serif.family, 300.0, &mut budget)?;
-    let (serif_medium_font, serif_medium) = register_bundled_weight(
-        fonts.serif_medium.clone(),
-        &serif.family,
-        500.0,
-        &mut budget,
-    )?;
+        register_bundled_weight(fonts.serif_light, &serif.family, 300.0, &mut budget)?;
+    let (serif_medium_font, serif_medium) =
+        register_bundled_weight(fonts.serif_medium, &serif.family, 500.0, &mut budget)?;
     let (serif_bold_font, serif_bold) =
-        register_bundled_weight(fonts.serif_bold.clone(), &serif.family, 700.0, &mut budget)?;
+        register_bundled_weight(fonts.serif_bold, &serif.family, 700.0, &mut budget)?;
     let sans_metrics = registered_metrics(&sans_font, sans)?;
     let serif_metrics = registered_metrics(&serif_font, serif)?;
     ui.global::<Theme>().set_ui_font(sans.family.clone().into());
@@ -1171,7 +1209,7 @@ fn load_custom_font(
     }
     let bytes = Arc::new(read_font_payload(file, MAX_FONT_BYTES, budget)?);
     let font = prepare_font_after_read(bytes, budget)?;
-    let digest = hex::encode(Sha256::digest(font.bytes.as_slice()));
+    let digest = hex::encode(Sha256::digest(font.bytes.as_ref().as_ref()));
     // Stage the complete file before mutating old selections or the shared
     // registry. TextMetrics clones below only clone their prepared Arc owners.
     budget.reserve_metadata(font_record_copy_bytes(records, chosen_weights)?)?;

@@ -2,7 +2,7 @@
 
 Recorded: 2026-11-03 (Asia/Shanghai).
 
-The application bundles Simplified Chinese faces from Noto CJK for interface text, book titles, and reading text. Seven resources provide Sans Regular (400), Medium (500), and Bold (700), and Serif Light (300), Regular (400), Medium (500), and Bold (700). They are compressed with gzip for storage and decompressed before registration with Slint and the reader's font metrics implementation. The actual Medium face supplies the interface's 500-weight text; Serif Light and Medium supply the corresponding reader weight choices.
+The application bundles Simplified Chinese faces from Noto CJK for interface text, book titles, and reading text. Seven resources provide Sans Regular (400), Medium (500), and Bold (700), and Serif Light (300), Regular (400), Medium (500), and Bold (700). Their canonical repository resources remain gzip-compressed. The 2026-11-17 startup candidate expands them into Cargo's build output and embeds those unchanged OTF bytes in the executable. Fontique and reader metrics borrow the static payloads without runtime decompression or full bundled-font copies. The actual Medium face supplies the interface's 500-weight text; Serif Light and Medium supply the corresponding reader weight choices. [Startup performance](STARTUP_PERFORMANCE_20261117.md) separates verification and device measurements from this implementation.
 
 ## Sources and license
 
@@ -70,6 +70,9 @@ file and preserves previous choices. The seven bundled payloads total
 64,104,120 input bytes and forecast 128,208,240 blob/metric bytes when registered
 and copied once; the defaults also admit one additional 64 MiB single-face font.
 These are logical project policies, not total renderer RSS or wall-clock caps.
+The startup candidate retains these conservative admission prices even when
+bundled payloads and metrics share static bytes. Custom-font ownership and
+full-file admission are unchanged.
 The caret/font changes passed the corrected 818-library/23-binary checkpoint,
 including all 20 Main font cases after per-test-thread software platform setup.
 The independent 64 × 1024 × 1024 raw-name scan-work allowance also charges each

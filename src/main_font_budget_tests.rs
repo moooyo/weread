@@ -33,7 +33,7 @@ std::thread_local! {
     };
 }
 
-fn initialize_font_test_platform() {
+pub(super) fn initialize_font_test_platform() {
     FONT_TEST_PLATFORM.with(|_| ());
 }
 
@@ -778,7 +778,7 @@ fn inventory_path_bytes_are_admitted_before_full_prefix_paths_accumulate() {
 }
 
 #[test]
-fn the_seven_real_bundled_payloads_fit_the_default_envelope_and_copy_once() {
+fn the_seven_real_bundled_payloads_fit_the_default_envelope_and_prepare_once() {
     initialize_font_test_platform();
     let fonts = BundledFonts::load().unwrap();
     let payloads = [
@@ -798,7 +798,7 @@ fn the_seven_real_bundled_payloads_fit_the_default_envelope_and_copy_once() {
     );
     for (index, bytes) in payloads.into_iter().enumerate() {
         let previous_work = budget.glyph_work_usage;
-        let prepared = register_font_data(bytes.clone(), &mut budget).unwrap_or_else(|error| {
+        let prepared = register_bundled_font_data(bytes, &mut budget).unwrap_or_else(|error| {
             panic!(
                 "Bundled font {index} failed admission: {error:#}; usage: {:?}; categories: {:?}; font_delta: {:?}",
                 budget.usage(), budget.glyph_work_usage,

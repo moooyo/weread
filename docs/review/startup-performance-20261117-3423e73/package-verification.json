@@ -1,0 +1,28 @@
+{
+  "members": 36,
+  "crc": true,
+  "modes": true,
+  "explicit_inputs": true,
+  "program_matches": true,
+  "approved_penguin_cover_preserved": true,
+  "launcher_syntax": true,
+  "baseline": {
+    "sha256": "00a763f9372bf0b03650d456959b903cb6ea1241bb5966097a2a3742f7f4be67",
+    "bytes": 84930720,
+    "static_arm": true
+  },
+  "candidate": {
+    "sha256": "5271918d104eeb3d8dad630b8bb0cfa33525970201d2b891da6d1fc709fc453f",
+    "bytes": 95168304,
+    "static_arm": true
+  },
+  "delivery": {
+    "filename": "weread-kindle-0.2.0-startup-20261117.zip",
+    "sha256": "c7dfb005b9532d45cc996da1ee8555311cd3d05996b50f7881be651281fa81fe",
+    "bytes": 68383605,
+    "changed_members_since_measured_runtime_package": [
+      "weread/app/README.md"
+    ],
+    "runtime_bytes_and_modes_unchanged": true
+  }
+}

@@ -2759,6 +2759,7 @@ class LauncherLifecycleTests(unittest.TestCase):
         # budget remains observable while the synthetic exit tail is fenced.
         self.script(self.bin / "usleep", 'case "$1" in\n'
                     '    100000) exec sleep 0.1 ;;\n'
+                    '    20000) exec sleep 0.02 ;;\n'
                     '    *) exec sleep 0.01 ;;\n'
                     'esac')
         app = self.home / "app" / "weread"

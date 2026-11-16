@@ -272,7 +272,21 @@ fn finite_or(value: f32, default: f32) -> f32 {
 /// Font-derived advances, with an explicit approximate fallback for missing fonts.
 #[derive(Clone, Default)]
 pub struct TextMetrics {
-    font: Option<Arc<OwnedFace>>,
+    font: Option<Arc<MetricsFace>>,
+}
+
+enum MetricsFace {
+    Owned(OwnedFace),
+    Static(owned_ttf_parser::Face<'static>),
+}
+
+impl MetricsFace {
+    fn as_face_ref(&self) -> &owned_ttf_parser::Face<'_> {
+        match self {
+            Self::Owned(face) => face.as_face_ref(),
+            Self::Static(face) => face,
+        }
+    }
 }
 
 impl TextMetrics {
@@ -285,7 +299,16 @@ impl TextMetrics {
         let font =
             OwnedFace::from_vec(bytes, collection_index).map_err(|error| error.to_string())?;
         Ok(Self {
-            font: Some(Arc::new(font)),
+            font: Some(Arc::new(MetricsFace::Owned(font))),
+        })
+    }
+
+    /// Borrow build-expanded font bytes directly from the executable.
+    pub fn from_static_font(bytes: &'static [u8], collection_index: u32) -> Result<Self, String> {
+        let font = owned_ttf_parser::Face::parse(bytes, collection_index)
+            .map_err(|error| error.to_string())?;
+        Ok(Self {
+            font: Some(Arc::new(MetricsFace::Static(font))),
         })
     }
 

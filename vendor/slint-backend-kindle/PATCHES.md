@@ -249,6 +249,26 @@ window before the existing flag checks. Both descriptors still immediately enter
 `OwnedFd` ownership and close on every subsequent error path. This patch makes
 no additional legacy-kernel or physical-device support claim.
 
+## Startup discovery and first-frame optimization (2026-11-17)
+
+The bounded `input_discovery` module is adapted from Aidoku commit
+`4ce1fd156a7a4a75ca2fda5f4324991d6b02ce92`. Its sysfs hints must match the opened
+character descriptor and a repeated complete roster; original evdev validation,
+fallback scanning, portrait ambiguity, input grabs, and synchronization remain.
+The selected touch descriptor is handed to its owner without reopening it.
+
+The initial FULL update moves from an empty paper frame to the first actual
+application draw. Pending initial presentation survives a skipped draw. The
+existing native restoration, Y4-image, sleep, and input barriers are retained.
+Optional `WEREAD_STARTUP_TIMING=1` markers record monotonic startup stages and
+the first actual application SEND acceptance. They contain no account data or
+device identifiers and are disabled during ordinary launches.
+
+Independent WeRead verification passed 147 backend cases, 211 launcher cases,
+and a scoped five-pair Scribe 2022 / firmware 5.19.5 startup comparison.
+`docs/STARTUP_PERFORMANCE_20261117.md` records exact artifacts and limits;
+Aidoku results are not WeRead verification.
+
 ## Verification boundary
 
 On 2026-11-12, the complete standalone backend suite passed 95 tests on

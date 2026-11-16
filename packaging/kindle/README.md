@@ -39,7 +39,7 @@ The accepted artwork and source-reviewed metadata contract do not establish
 physical-device display acceptance; this change has not been installed on a
 Kindle as part of this task.
 
-Remote verification on `test-env` passed all four existing development-archive
+Cover-only revision `3423e73` passed remote verification on `test-env`: all four existing development-archive
 tests and fourteen scoped checks: accepted-master/thumbnail byte identity,
 grayscale geometry, the single third-line Icon field, lossless base64 decoding,
 unchanged launcher body after removing that comment, LF encoding, both shell
@@ -57,6 +57,9 @@ the embedded thumbnail is
 `6495846ff49df3c43c35f27552b02f8a126ffa6c3ab3a9c736cd4cbfcaec7529`.
 The verified launcher SHA-256 is
 `3d9e2855d9fb1fed906e6909dcf8be6ba3d2be8f63b8348e16310623fb3cc431`.
+The later [startup optimization](../../docs/STARTUP_PERFORMANCE_20261117.md)
+retains these exact image bytes while updating helper polling. Its launcher
+and performance evidence have separate identities in that report.
 
 The resource-review candidate retains application diagnostics in `data/logs/application.log` and two fixed backups, each limited to 1 MiB with an 8 KiB message limit. A diagnostic I/O failure closes that sink and suppresses repeated fallback messages. Normal document launches maintain `launcher.log` with a 64 KiB threshold and in-place truncation; `last-launch.log` is replaced on a normal launch and `application-bootstrap.log` on each application generation. The latter two capture finite bootstrap or unexpected external output and are not general byte-capped collectors. Direct `--detached` fixtures retain their captured output.
 
@@ -130,7 +133,7 @@ format, reference revision, and separate software/device gates.
 
 The launcher checks the allowlist before modifying services. It leaves `powerd` and `lab126_gui` running. It stops `statusbar` only if Upstart reported it running and pauses only `awesome` processes that were running. Each display takeover records its own baseline, and restoration returns the services changed by that takeover. Exit and signal cleanup retain those ownership boundaries.
 
-Startup feedback displays the project name, startup stage, and activity dots from embedded grayscale artwork before runtime font decompression. Dot animation is limited to 0.8 Hz. Its temporary worker is joined before backend environment changes and releases its framebuffer before the normal event loop opens display and input resources. The current Reader defaults to the body view with `notes_panel=false`. These source behaviors do not imply that the latest executable has completed physical acceptance.
+Startup feedback displays the project name, startup stage, and activity dots from embedded grayscale artwork before font and application initialization. The startup-performance candidate uses build-expanded bundled fonts. Dot animation is limited to 0.8 Hz. Its temporary worker is joined before backend environment changes and releases its framebuffer before the normal event loop opens display and input resources. The current Reader defaults to the body view with `notes_panel=false`. These source behaviors do not imply that the latest executable has completed physical acceptance.
 
 The current supervisor requests a cycle-bound resident pause and stops the verified application process only after durable state and released input are acknowledged. With the sleep-cover preference enabled and native display ownership eligible, the application first presents its prepared current-book cover, then saves and quiesces. A matching cover acknowledgement retains that display ownership without a stock-screen transition or frame-guard capture. Native passcodes, Special Offers, unknown capability, and missing cover acknowledgement retain stock handoff. Custom-screen wake confirms the current power event and active state, hides the overlay, and restores the same process's complete frame before input and work resume. Stock wake additionally observes native-mode and portrait state. Failed or unavailable resident handshakes retain the earlier saved-session cold recovery as a bounded fallback. That fallback must not be reported as same-process acceptance. The backend's optional direct RTC suspend schedule remains disabled. [Book-cover sleep](../../docs/SLEEP_COVER.md) records the source comparison and separate software/device gates.
 

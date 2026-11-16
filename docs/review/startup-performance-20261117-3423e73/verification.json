@@ -1,0 +1,66 @@
+{
+  "date": "2026-11-17",
+  "environment": "test-env",
+  "cargo_build_jobs": 6,
+  "checks": {
+    "library": {
+      "passed": 1699,
+      "ignored_existing_benchmarks": 4,
+      "log": "candidate-app-tests.log",
+      "log_sha256": "bdfc492b681bc9b5cb426dda9cfb9c2c7a76059a4fa467a3bb7efbe528d0ba00"
+    },
+    "main": {
+      "passed": 55,
+      "log": "candidate-main-tests.log",
+      "log_sha256": "af27f9e73eedcf2bdf2cb637a6e220ca078829d851b085593deef9fbac1baf36"
+    },
+    "backend": {
+      "passed": 147,
+      "log": "candidate-backend-tests.log",
+      "log_sha256": "cdad5c6f1a11a837761500ec5876714798017f910315a7aac06dace5d422264b"
+    },
+    "launcher": {
+      "passed": 211,
+      "log": "candidate-launcher-tests.log",
+      "log_sha256": "e0c78b541db3cf6837bc0c049e597be07153ce1b9cc792acdf122826595c3b0d"
+    },
+    "desktop_ui": {
+      "passed": 133,
+      "log": "candidate-ui.log",
+      "log_sha256": "608d081a71b19dbb46c5593972caacac3fb92ee05bfec8cf181c7244685964db"
+    },
+    "package_contracts": {
+      "passed": 4,
+      "log": "candidate-package-tests.log",
+      "log_sha256": "4a160235c0add54f7a5997815d0e01a072210439de4899c702c94dd3cd814662"
+    }
+  },
+  "corrections": [
+    "Adapted an old owned-font test caller to static font data.",
+    "Initialized the per-thread Slint fixture for the new static-font test; the final Main rerun passed.",
+    "Rejected mixed-clock totals from the first diagnostic batch; repeated the complete comparison with common receipt timestamps and production FBInk behavior."
+  ],
+  "arm_build": true,
+  "format": true,
+  "package_crc_and_modes": true,
+  "physical": {
+    "model": "Kindle Scribe 2022",
+    "firmware": "5.19.5",
+    "accepted_launches": 12,
+    "warmups": 2,
+    "measured_pairs": 5,
+    "every_pair_faster": true,
+    "success": true,
+    "lease_released": true,
+    "native_restored": true,
+    "lighting_restored": true,
+    "same_boot": true,
+    "installed_program_and_data_unchanged": true,
+    "temporary_stage_removed": true
+  },
+  "limits": [
+    "Warm process launches only; no reboot or cache eviction.",
+    "Driver SEND receipt is not optical panel completion or physical-tap latency.",
+    "The normal installation was not replaced; touch, rotation and sleep/wake have no new physical acceptance."
+  ]
+}

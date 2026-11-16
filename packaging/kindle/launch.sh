@@ -363,7 +363,7 @@ write_managed_request() {
 
 managed_wait_tick() {
     if command -v usleep >/dev/null 2>&1; then
-        usleep 100000
+        usleep 20000
     else
         sleep 1
     fi
@@ -371,7 +371,8 @@ managed_wait_tick() {
 
 managed_wait_budget() {
     if command -v usleep >/dev/null 2>&1; then
-        printf '%s\n' "$((10 * $1))"
+        # Preserve the requested total wait while detecting completion sooner.
+        printf '%s\n' "$((50 * $1))"
     else
         printf '%s\n' "$1"
     fi

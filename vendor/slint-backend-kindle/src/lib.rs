@@ -21,6 +21,7 @@ mod clipboard;
 mod dithering;
 mod framebuffer;
 mod gyro;
+mod input_discovery;
 mod managed_sleep;
 mod orientation;
 mod platform;
@@ -29,6 +30,7 @@ mod refresh;
 mod render_control;
 mod sleep_presentation;
 mod splash;
+mod startup_timing;
 mod touch;
 mod wakeup;
 
@@ -40,6 +42,7 @@ pub use refresh::{
 };
 pub use render_control::{NightModeConfig, RenderError, RenderHandle};
 pub use splash::{StartupImage, StartupImages, StartupSplash};
+pub use startup_timing::mark as record_startup_stage;
 
 use platform::KindlePlatform;
 use slint::platform::WindowAdapter;

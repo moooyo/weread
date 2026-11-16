@@ -3,11 +3,13 @@
 //! Only a named pressure-only accelerometer is eligible. This descriptor never
 //! receives EVIOCGRAB, and no touchscreen event stream is consumed here.
 
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::io::{self, Read};
 use std::mem::size_of;
 use std::os::fd::{AsRawFd, RawFd};
-use std::os::unix::fs::{FileTypeExt, OpenOptionsExt};
+use std::os::unix::fs::FileTypeExt;
+
+use crate::input_discovery::{EventSnapshot, MetadataKind, open_event};
 
 const EVENT_SYNC: u16 = 0;
 const EVENT_KEY: u8 = 1;
@@ -225,20 +227,20 @@ fn query_bits<const N: usize>(file: &File, event: u8) -> io::Result<[libc::c_ulo
     }
 }
 
-fn inspect_sensor(file: &File) -> io::Result<bool> {
+fn inspect_sensor(file: &File) -> io::Result<Option<[u8; NAME_BYTES]>> {
     if !file.metadata()?.file_type().is_char_device() {
-        return Ok(false);
+        return Ok(None);
     }
     let events = query_bits::<1>(file, 0)?;
     if !has_bit(&events, EVENT_ABSOLUTE as usize)
         || has_bit(&events, EVENT_KEY as usize)
         || has_bit(&events, EVENT_RELATIVE as usize)
     {
-        return Ok(false);
+        return Ok(None);
     }
     let axes = query_bits::<ABS_WORDS>(file, EVENT_ABSOLUTE as u8)?;
     if !eligible_events(&events, &axes) {
-        return Ok(false);
+        return Ok(None);
     }
     let mut name = [0u8; NAME_BYTES];
     // SAFETY: name has the length encoded in EVIOCGNAME and is live for the
@@ -254,7 +256,69 @@ fn inspect_sensor(file: &File) -> io::Result<bool> {
         return Err(io::Error::last_os_error());
     }
     name[NAME_BYTES - 1] = 0;
-    Ok(trusted_name(&name))
+    Ok(trusted_name(&name).then_some(name))
+}
+
+fn record_unique_sensor(found: &mut Option<File>, file: File) -> io::Result<()> {
+    if found.is_some() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "multiple recognized portrait sensors are ambiguous",
+        ));
+    }
+    *found = Some(file);
+    Ok(())
+}
+
+fn discover_sensor() -> io::Result<Option<File>> {
+    if let Some(snapshot) = EventSnapshot::capture(MetadataKind::Name, 31) {
+        let mut found = None;
+        let mut current = true;
+        for candidate in snapshot
+            .entries()
+            .filter(|entry| entry.name().is_some_and(trusted_name))
+        {
+            let file = match candidate.open_checked() {
+                Ok(Some(file)) => file,
+                _ => {
+                    current = false;
+                    break;
+                }
+            };
+            let name = match inspect_sensor(&file) {
+                Ok(Some(name)) => name,
+                _ => {
+                    current = false;
+                    break;
+                }
+            };
+            let end = name
+                .iter()
+                .position(|byte| *byte == 0)
+                .unwrap_or(name.len());
+            if candidate.name() != Some(&name[..end]) {
+                current = false;
+                break;
+            }
+            record_unique_sensor(&mut found, file)?;
+        }
+        if current && found.is_some() && snapshot.is_current() {
+            return Ok(found);
+        }
+        // Drop tentative owners before returning to authoritative descriptor scanning.
+    }
+    let mut found = None;
+    for index in 0..=31 {
+        let file = match open_event(index) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        if inspect_sensor(&file)?.is_some() {
+            record_unique_sensor(&mut found, file)?;
+        }
+    }
+    Ok(found)
 }
 
 fn current_pose(file: &File) -> io::Result<Option<NativePortrait>> {
@@ -302,36 +366,13 @@ impl GyroObserver {
     /// Retain exactly one recognized, pressure-only sensor. All descriptors of
     /// rejected candidates close immediately through File's ordinary Drop.
     pub(crate) fn open() -> io::Result<Option<Self>> {
-        let mut found = None;
-        for index in 0..=31 {
-            let path = format!("/dev/input/event{index}");
-            let file = match OpenOptions::new()
-                .read(true)
-                .custom_flags(libc::O_NONBLOCK | libc::O_CLOEXEC | libc::O_NOFOLLOW)
-                .open(&path)
-            {
-                Ok(file) => file,
-                Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
-                Err(error) => return Err(error),
-            };
-            if !inspect_sensor(&file)? {
-                continue;
-            }
-            if found.is_some() {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "multiple recognized portrait sensors are ambiguous",
-                ));
-            }
-            found = Some(Self {
-                file,
-                state: DirectionState::default(),
-                bytes: [0; EVENT_BYTES],
-                filled: 0,
-                backlog: false,
-            });
-        }
-        Ok(found)
+        Ok(discover_sensor()?.map(|file| Self {
+            file,
+            state: DirectionState::default(),
+            bytes: [0; EVENT_BYTES],
+            filled: 0,
+            backlog: false,
+        }))
     }
 
     pub(crate) fn fd(&self) -> RawFd {
@@ -426,6 +467,25 @@ fn snapshot_backlog() -> io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_second_validated_portrait_descriptor_remains_ambiguous() {
+        let mut found = None;
+        record_unique_sensor(&mut found, File::open("/dev/null").unwrap()).unwrap();
+        let original = found.as_ref().unwrap().as_raw_fd();
+        let error = record_unique_sensor(&mut found, File::open("/dev/null").unwrap()).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(found.as_ref().unwrap().as_raw_fd(), original);
+        assert!(
+            found
+                .as_ref()
+                .unwrap()
+                .metadata()
+                .unwrap()
+                .file_type()
+                .is_char_device()
+        );
+    }
 
     fn event(kind: u16, code: u16, value: i32) -> InputEvent {
         InputEvent {

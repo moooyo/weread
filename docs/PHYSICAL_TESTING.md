@@ -17,6 +17,31 @@ dates remain attached to their own results.
 
 No device address, credential, serial number, private note text, or account content is part of this record. Offline demonstration results do not establish live-account authentication, content entitlements, or upstream writes.
 
+## Isolated startup comparison (2026-11-17)
+
+The [startup optimization](STARTUP_PERFORMANCE_20261117.md) was compared with
+main `3423e73` plus shared opt-in timing instrumentation on the identified Scribe
+2022 / firmware 5.19.5. Both variants used the same compiler, release profile,
+and isolated offline demonstration snapshot. The accepted batch retained the
+normal Scriptlet FBInk behavior and used two warmups plus five alternating
+AB/BA pairs. All twelve launches completed and every candidate pair was faster.
+
+Median software readiness changed from 10.82 to 8.43 seconds, and first Library
+SEND receipt from 12.25 to 9.30 seconds. Final paired software and native
+framebuffer captures were identical over all 1860 x 2480 pixels. Selected input
+devices matched across every case. The first-SEND resident sample changed from
+221,632 to 105,632 KiB. These are warm process launches and software/driver
+observations, not physical tap latency or optical panel-completion timings.
+
+Candidate ARM `5271918d104e`, launcher `60d7def6c9f3`, and unchanged frame guard
+`689ef367eabe` ran only from owned temporary paths. The regular application,
+launcher, configuration, and database retained their pre-batch hashes. Native
+control and lighting were restored, staging and owned transports were closed,
+and the exact shared lease was released. No daily-use installation was updated.
+Physical gestures, rotation, sleep/wake, other hardware, and authenticated use
+have no new acceptance from this comparison. The report separately preserves
+the discarded initial clock-mixed diagnostic batch and its completed cleanup.
+
 ## Skills guide preserved-data deployment
 
 On 2026-11-15 (Asia/Shanghai), the operator requested main merge/push and

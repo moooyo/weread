@@ -78,6 +78,16 @@ This changes no application use case, source adapter, runtime image cache,
 current-book sleep cover, or persistence layout. Artwork approval and packaging
 verification remain separate from physical-device display acceptance.
 
+The 2026-11-17 [startup optimization](STARTUP_PERFORMANCE_20261117.md) moves
+canonical gzip font expansion to the build and shares static font payloads
+with Fontique and reader metrics. Custom-font admission remains unchanged.
+The platform uses bounded sysfs hints only to shortlist inputs; checked
+descriptors and a repeated complete roster remain authoritative. The first
+real application scene carries the initial FULL update without releasing input
+early. Faster helper polling retains the original nominal sleep budgets and ownership
+checks. No source adapter, persistence layout, network policy, or ordinary
+startup route changes.
+
 Resource admission uses RAII credits retained through active work, queued results, and UI processing: eight metadata credits, two public-image credits within that budget, one login credit, bounded download-fetch credits acquired before chapter-data acquisition or cloning, one ordered download-packet credit, and one independent opportunistic progress credit. Download plans retain only bounded remaining-task metadata. A cached checkpoint sends identity and cursor data under the packet credit; persistence verifies the actual durable task, chapter, full-content ownership, and nonblank text before advancing the cursor. Only the current visible chapter is read when needed. Download preparation remains serial, with its permit held by the actual blocking worker. Busy and cancellation outcomes settle application state immediately without an unlimited control queue or receiver ownership cycle. Account and sleep fences discard actual stale packets rather than releasing credits while their buffers remain alive.
 
 Fixed reviewed HTTPS/443 destinations retain capped first-party connection reuse. One shared arbitrary-resource client disables idle retention, with transport choice checked again for each redirect hop independently of cookie permission. Catalog admission prices new-row and inherited-owner metadata before copying; existing bodies remain in SQL during stable-UID reindexing. Cached underline and thought reads admit encoded bytes and record count in SQL before deserialization. The UI pages lightweight thought descriptors before loading bounded visible previews. Cache integrity proofs are operation-local, use streaming reads, and check original publication-destination identity before scoped cleanup can mutate it.

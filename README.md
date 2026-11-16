@@ -10,6 +10,15 @@ the document launcher's Icon metadata and travels with the development package.
 User-book artwork and current-book sleep covers retain their existing behavior.
 Physical display acceptance of this new launcher cover remains open.
 
+The 2026-11-17 [startup optimization](docs/STARTUP_PERFORMANCE_20261117.md)
+pre-expands bundled fonts, shares their static bytes, narrows evdev discovery
+with verified sysfs hints, and removes the separate blank startup refresh.
+Five paired warm Scribe 2022 / firmware 5.19.5 launches reduced software-ready
+time from 10.82 to 8.43 seconds and first Library SEND from 12.25 to 9.30 seconds.
+The paired final images were identical. Remote software gates passed; the
+regular device installation was preserved. These are scoped measurements,
+not optical panel-completion timing or a general device-support claim.
+
 The 2026-11-16 [image-preparation work](docs/IMAGE_PREPARATION_PERFORMANCE_20261116.md) moves final Reader/Article picture preparation and cover conversion to bounded workers. Repeated publication reuses current shared pixels, and optional full sleep covers wait for reading inactivity. Current source, palette, resource, and power-event boundaries remain explicit; the feature record separates paired software measurements from device acceptance.
 
 The accepted [Skills setup guidance](docs/LOGIN_UI.md#skills-setup-guidance) adds the official prerequisite and a full-page guide to QR Login. Four numbered rows form one centered group; upper-left Back obtains a fresh challenge, and upper-right X retains ordinary exit. Temporary authentication work is cancelled and fenced while the guide is open. The public QR has transparent light modules and a bounded, replicated alpha raster for precise scaling. Manual credential editing remains absent. [Detail pagination](docs/DETAIL_HUB.md#viewport-capacity-follow-up) now derives bounded capacities from the actual viewport, including 19 catalog rows on the standard Scribe profile. These changes keep the current persistence layout and do not require a data reset.

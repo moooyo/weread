@@ -1,0 +1,901 @@
+{
+  "date": "2026-11-17",
+  "scope": "Isolated offline demo; alternating warm AB/BA launches; no cache eviction or reboot.",
+  "variants": {
+    "baseline": {
+      "application_sha256": "00a763f9372bf0b03650d456959b903cb6ea1241bb5966097a2a3742f7f4be67",
+      "application_bytes": 84930720,
+      "launcher_sha256": "3d9e2855d9fb1fed906e6909dcf8be6ba3d2be8f63b8348e16310623fb3cc431"
+    },
+    "candidate": {
+      "application_sha256": "5271918d104eeb3d8dad630b8bb0cfa33525970201d2b891da6d1fc709fc453f",
+      "application_bytes": 95168304,
+      "launcher_sha256": "60d7def6c9f35eceb89b647b388b5306ea0a1ee09c7fe8fa3e9d03037710b3ca"
+    }
+  },
+  "clock_contract": "Request and collector receipt timestamps both use device /proc/uptime with 10 ms resolution. In-process stage durations use CLOCK_MONOTONIC only. No cross-clock subtraction.",
+  "entry_contract": "Native Scriptlet request; production default FBInk behavior and approved penguin Icon retained; isolated offline demo, capture, timing, and bounded automatic exit.",
+  "medians": {
+    "baseline": {
+      "software_ready_ms": 10820.0,
+      "first_frame_send_ms": 12250.0,
+      "pre_exec_ms": 5400.0,
+      "platform_init_ms": 21.154,
+      "fonts_load_ms": 1760.492,
+      "fonts_registration_ms": 2879.861,
+      "backend_install_ms": 63.412,
+      "application_attach_ms": 166.469,
+      "event_loop_to_send_ms": 1411.778,
+      "portrait_calibration_ms": 1190.0
+    },
+    "candidate": {
+      "software_ready_ms": 8430.0,
+      "first_frame_send_ms": 9300.0,
+      "pre_exec_ms": 4550.0,
+      "platform_init_ms": 21.311,
+      "fonts_load_ms": 1.671,
+      "fonts_registration_ms": 3071.04,
+      "backend_install_ms": 84.948,
+      "application_attach_ms": 133.789,
+      "event_loop_to_send_ms": 871.506,
+      "portrait_calibration_ms": 660.0
+    }
+  },
+  "memory_medians_kib": {
+    "baseline": {
+      "VmHWM": 221632,
+      "VmRSS": 221632,
+      "RssAnon": 148172,
+      "RssFile": 73448,
+      "RssShmem": 0
+    },
+    "candidate": {
+      "VmHWM": 105632,
+      "VmRSS": 105632,
+      "RssAnon": 22520,
+      "RssFile": 83112,
+      "RssShmem": 0
+    }
+  },
+  "pairs": [
+    {
+      "round": 1,
+      "order": [
+        "baseline",
+        "candidate"
+      ],
+      "software_ready_reduction_ms": 2990.0,
+      "first_frame_send_reduction_ms": 3540.0
+    },
+    {
+      "round": 2,
+      "order": [
+        "candidate",
+        "baseline"
+      ],
+      "software_ready_reduction_ms": 2110.0,
+      "first_frame_send_reduction_ms": 2710.0
+    },
+    {
+      "round": 3,
+      "order": [
+        "baseline",
+        "candidate"
+      ],
+      "software_ready_reduction_ms": 2330.0,
+      "first_frame_send_reduction_ms": 2890.0
+    },
+    {
+      "round": 4,
+      "order": [
+        "candidate",
+        "baseline"
+      ],
+      "software_ready_reduction_ms": 2540.0,
+      "first_frame_send_reduction_ms": 3090.0
+    },
+    {
+      "round": 5,
+      "order": [
+        "baseline",
+        "candidate"
+      ],
+      "software_ready_reduction_ms": 2460.0,
+      "first_frame_send_reduction_ms": 2970.0
+    }
+  ],
+  "cases": [
+    {
+      "case": "baseline-warmup",
+      "variant": "baseline",
+      "warmup": true,
+      "metrics": {
+        "software_ready_ms": 11020.0,
+        "first_frame_send_ms": 12650.0,
+        "pre_exec_ms": 5440.0,
+        "platform_init_ms": 19.909,
+        "fonts_load_ms": 1835.28,
+        "fonts_registration_ms": 2898.599,
+        "backend_install_ms": 56.04,
+        "application_attach_ms": 177.749,
+        "event_loop_to_send_ms": 1627.664,
+        "portrait_calibration_ms": 1160.0
+      },
+      "memory_kib": {
+        "VmHWM": 221572,
+        "VmRSS": 221572,
+        "RssAnon": 148176,
+        "RssFile": 73396,
+        "RssShmem": 0
+      },
+      "monotonic_stages_from_process_entry_ms": {
+        "main_enter": 0.0,
+        "platform_ready": 19.909,
+        "startup_feedback_ready": 553.495,
+        "fonts_loaded": 2388.775,
+        "startup_feedback_paused": 2389.711,
+        "backend_ready": 2445.752,
+        "startup_feedback_resumed": 2445.919,
+        "window_created": 2458.682,
+        "fonts_registered": 5357.282,
+        "application_attach_begin": 5368.524,
+        "application_attached": 5546.273,
+        "startup_feedback_finished": 5547.847,
+        "software_ready": 5579.966,
+        "backend_event_loop_enter": 5580.556,
+        "touch_opened": 5910.885,
+        "portrait_opened": 6781.439,
+        "first_application_frame_send": 7208.22
+      },
+      "receipt_stages_from_native_request_ms": {
+        "main_enter": 5440.0,
+        "platform_ready": 5460.0,
+        "startup_feedback_ready": 6000.0,
+        "fonts_loaded": 7830.0,
+        "startup_feedback_paused": 7830.0,
+        "backend_ready": 7890.0,
+        "startup_feedback_resumed": 7890.0,
+        "window_created": 7900.0,
+        "fonts_registered": 10800.0,
+        "application_attach_begin": 10810.0,
+        "application_attached": 10990.0,
+        "startup_feedback_finished": 10990.0,
+        "software_ready": 11020.0,
+        "backend_event_loop_enter": 11020.0,
+        "touch_opened": 11350.0,
+        "portrait_opened": 12220.0,
+        "first_application_frame_send": 12650.0
+      }
+    },
+    {
+      "case": "candidate-warmup",
+      "variant": "candidate",
+      "warmup": true,
+      "metrics": {
+        "software_ready_ms": 9400.0,
+        "first_frame_send_ms": 10280.0,
+        "pre_exec_ms": 5160.0,
+        "platform_init_ms": 40.816,
+        "fonts_load_ms": 1.756,
+        "fonts_registration_ms": 3187.848,
+        "backend_install_ms": 305.693,
+        "application_attach_ms": 106.182,
+        "event_loop_to_send_ms": 883.45,
+        "portrait_calibration_ms": 630.0
+      },
+      "memory_kib": {
+        "VmHWM": 105624,
+        "VmRSS": 105624,
+        "RssAnon": 22516,
+        "RssFile": 83108,
+        "RssShmem": 0
+      },
+      "monotonic_stages_from_process_entry_ms": {
+        "main_enter": 0.0,
+        "platform_ready": 40.816,
+        "startup_feedback_ready": 604.152,
+        "fonts_loaded": 605.908,
+        "startup_feedback_paused": 606.755,
+        "backend_ready": 912.448,
+        "startup_feedback_resumed": 912.635,
+        "window_created": 930.758,
+        "fonts_registered": 4118.606,
+        "application_attach_begin": 4124.409,
+        "application_attached": 4230.591,
+        "startup_feedback_finished": 4231.22,
+        "software_ready": 4238.804,
+        "backend_event_loop_enter": 4239.409,
+        "touch_opened": 4276.373,
+        "portrait_opened": 4814.643,
+        "first_application_frame_send": 5122.859
+      },
+      "receipt_stages_from_native_request_ms": {
+        "main_enter": 5160.0,
+        "platform_ready": 5200.0,
+        "startup_feedback_ready": 5760.0,
+        "fonts_loaded": 5770.0,
+        "startup_feedback_paused": 5770.0,
+        "backend_ready": 6070.0,
+        "startup_feedback_resumed": 6070.0,
+        "window_created": 6090.0,
+        "fonts_registered": 9280.0,
+        "application_attach_begin": 9280.0,
+        "application_attached": 9390.0,
+        "startup_feedback_finished": 9390.0,
+        "software_ready": 9400.0,
+        "backend_event_loop_enter": 9400.0,
+        "touch_opened": 9440.0,
+        "portrait_opened": 9970.0,
+        "first_application_frame_send": 10280.0
+      }
+    },
+    {
+      "case": "baseline-01",
+      "variant": "baseline",
+      "warmup": false,
+      "metrics": {
+        "software_ready_ms": 11370.0,
+        "first_frame_send_ms": 12760.0,
+        "pre_exec_ms": 5560.0,
+        "platform_init_ms": 58.418,
+        "fonts_load_ms": 1833.408,
+        "fonts_registration_ms": 3089.472,
+        "backend_install_ms": 73.484,
+        "application_attach_ms": 90.315,
+        "event_loop_to_send_ms": 1395.304,
+        "portrait_calibration_ms": 1260.0
+      },
+      "memory_kib": {
+        "VmHWM": 221688,
+        "VmRSS": 221688,
+        "RssAnon": 148172,
+        "RssFile": 73516,
+        "RssShmem": 0
+      },
+      "monotonic_stages_from_process_entry_ms": {
+        "main_enter": 0.0,
+        "platform_ready": 58.418,
+        "startup_feedback_ready": 682.953,
+        "fonts_loaded": 2516.361,
+        "startup_feedback_paused": 2518.159,
+        "backend_ready": 2591.644,
+        "startup_feedback_resumed": 2592.066,
+        "window_created": 2615.844,
+        "fonts_registered": 5705.317,
+        "application_attach_begin": 5708.352,
+        "application_attached": 5798.667,
+        "startup_feedback_finished": 5799.594,
+        "software_ready": 5807.531,
+        "backend_event_loop_enter": 5808.16,
+        "touch_opened": 6080.28,
+        "portrait_opened": 6910.937,
+        "first_application_frame_send": 7203.465
+      },
+      "receipt_stages_from_native_request_ms": {
+        "main_enter": 5560.0,
+        "platform_ready": 5620.0,
+        "startup_feedback_ready": 6240.0,
+        "fonts_loaded": 8080.0,
+        "startup_feedback_paused": 8080.0,
+        "backend_ready": 8150.0,
+        "startup_feedback_resumed": 8150.0,
+        "window_created": 8180.0,
+        "fonts_registered": 11270.0,
+        "application_attach_begin": 11270.0,
+        "application_attached": 11360.0,
+        "startup_feedback_finished": 11360.0,
+        "software_ready": 11370.0,
+        "backend_event_loop_enter": 11370.0,
+        "touch_opened": 11640.0,
+        "portrait_opened": 12470.0,
+        "first_application_frame_send": 12760.0
+      }
+    },
+    {
+      "case": "candidate-01",
+      "variant": "candidate",
+      "warmup": false,
+      "metrics": {
+        "software_ready_ms": 8380.0,
+        "first_frame_send_ms": 9220.0,
+        "pre_exec_ms": 4500.0,
+        "platform_init_ms": 21.311,
+        "fonts_load_ms": 2.535,
+        "fonts_registration_ms": 3065.909,
+        "backend_install_ms": 85.123,
+        "application_attach_ms": 132.554,
+        "event_loop_to_send_ms": 833.699,
+        "portrait_calibration_ms": 660.0
+      },
+      "memory_kib": {
+        "VmHWM": 105592,
+        "VmRSS": 105592,
+        "RssAnon": 22520,
+        "RssFile": 83072,
+        "RssShmem": 0
+      },
+      "monotonic_stages_from_process_entry_ms": {
+        "main_enter": 0.0,
+        "platform_ready": 21.311,
+        "startup_feedback_ready": 563.257,
+        "fonts_loaded": 565.792,
+        "startup_feedback_paused": 567.243,
+        "backend_ready": 652.366,
+        "startup_feedback_resumed": 652.641,
+        "window_created": 664.612,
+        "fonts_registered": 3730.521,
+        "application_attach_begin": 3737.132,
+        "application_attached": 3869.686,
+        "startup_feedback_finished": 3871.579,
+        "software_ready": 3881.778,
+        "backend_event_loop_enter": 3881.869,
+        "touch_opened": 3883.923,
+        "portrait_opened": 4411.592,
+        "first_application_frame_send": 4715.569
+      },
+      "receipt_stages_from_native_request_ms": {
+        "main_enter": 4500.0,
+        "platform_ready": 4520.0,
+        "startup_feedback_ready": 5060.0,
+        "fonts_loaded": 5070.0,
+        "startup_feedback_paused": 5070.0,
+        "backend_ready": 5150.0,
+        "startup_feedback_resumed": 5150.0,
+        "window_created": 5160.0,
+        "fonts_registered": 8230.0,
+        "application_attach_begin": 8240.0,
+        "application_attached": 8370.0,
+        "startup_feedback_finished": 8370.0,
+        "software_ready": 8380.0,
+        "backend_event_loop_enter": 8380.0,
+        "touch_opened": 8380.0,
+        "portrait_opened": 8910.0,
+        "first_application_frame_send": 9220.0
+      }
+    },
+    {
+      "case": "candidate-02",
+      "variant": "candidate",
+      "warmup": false,
+      "metrics": {
+        "software_ready_ms": 8580.0,
+        "first_frame_send_ms": 9440.0,
+        "pre_exec_ms": 4630.0,
+        "platform_init_ms": 22.366,
+        "fonts_load_ms": 1.116,
+        "fonts_registration_ms": 3121.702,
+        "backend_install_ms": 84.182,
+        "application_attach_ms": 152.656,
+        "event_loop_to_send_ms": 857.354,
+        "portrait_calibration_ms": 710.0
+      },
+      "memory_kib": {
+        "VmHWM": 105632,
+        "VmRSS": 105632,
+        "RssAnon": 22520,
+        "RssFile": 83112,
+        "RssShmem": 0
+      },
+      "monotonic_stages_from_process_entry_ms": {
+        "main_enter": 0.0,
+        "platform_ready": 22.366,
+        "startup_feedback_ready": 563.487,
+        "fonts_loaded": 564.602,
+        "startup_feedback_paused": 565.884,
+        "backend_ready": 650.066,
+        "startup_feedback_resumed": 650.33,
+        "window_created": 662.701,
+        "fonts_registered": 3784.403,
+        "application_attach_begin": 3791.977,
+        "application_attached": 3944.633,
+        "startup_feedback_finished": 3946.353,
+        "software_ready": 3954.972,
+        "backend_event_loop_enter": 3955.599,
+        "touch_opened": 3984.944,
+        "portrait_opened": 4511.214,
+        "first_application_frame_send": 4812.953
+      },
+      "receipt_stages_from_native_request_ms": {
+        "main_enter": 4630.0,
+        "platform_ready": 4650.0,
+        "startup_feedback_ready": 5190.0,
+        "fonts_loaded": 5200.0,
+        "startup_feedback_paused": 5200.0,
+        "backend_ready": 5280.0,
+        "startup_feedback_resumed": 5280.0,
+        "window_created": 5290.0,
+        "fonts_registered": 8410.0,
+        "application_attach_begin": 8420.0,
+        "application_attached": 8570.0,
+        "startup_feedback_finished": 8580.0,
+        "software_ready": 8580.0,
+        "backend_event_loop_enter": 8590.0,
+        "touch_opened": 8610.0,
+        "portrait_opened": 9140.0,
+        "first_application_frame_send": 9440.0
+      }
+    },
+    {
+      "case": "baseline-02",
+      "variant": "baseline",
+      "warmup": false,
+      "metrics": {
+        "software_ready_ms": 10690.0,
+        "first_frame_send_ms": 12150.0,
+        "pre_exec_ms": 5240.0,
+        "platform_init_ms": 20.195,
+        "fonts_load_ms": 1752.839,
+        "fonts_registration_ms": 2879.861,
+        "backend_install_ms": 63.412,
+        "application_attach_ms": 160.331,
+        "event_loop_to_send_ms": 1457.229,
+        "portrait_calibration_ms": 1260.0
+      },
+      "memory_kib": {
+        "VmHWM": 221688,
+        "VmRSS": 221688,
+        "RssAnon": 148172,
+        "RssFile": 73516,
+        "RssShmem": 0
+      },
+      "monotonic_stages_from_process_entry_ms": {
+        "main_enter": 0.0,
+        "platform_ready": 20.195,
+        "startup_feedback_ready": 553.812,
+        "fonts_loaded": 2306.651,
+        "startup_feedback_paused": 2307.888,
+        "backend_ready": 2371.3,
+        "startup_feedback_resumed": 2371.582,
+        "window_created": 2392.822,
+        "fonts_registered": 5272.683,
+        "application_attach_begin": 5280.069,
+        "application_attached": 5440.4,
+        "startup_feedback_finished": 5441.252,
+        "software_ready": 5451.592,
+        "backend_event_loop_enter": 5451.672,
+        "touch_opened": 5776.199,
+        "portrait_opened": 6606.439,
+        "first_application_frame_send": 6908.901
+      },
+      "receipt_stages_from_native_request_ms": {
+        "main_enter": 5240.0,
+        "platform_ready": 5260.0,
+        "startup_feedback_ready": 5790.0,
+        "fonts_loaded": 7540.0,
+        "startup_feedback_paused": 7540.0,
+        "backend_ready": 7610.0,
+        "startup_feedback_resumed": 7610.0,
+        "window_created": 7630.0,
+        "fonts_registered": 10510.0,
+        "application_attach_begin": 10520.0,
+        "application_attached": 10680.0,
+        "startup_feedback_finished": 10680.0,
+        "software_ready": 10690.0,
+        "backend_event_loop_enter": 10690.0,
+        "touch_opened": 11010.0,
+        "portrait_opened": 11840.0,
+        "first_application_frame_send": 12150.0
+      }
+    },
+    {
+      "case": "baseline-03",
+      "variant": "baseline",
+      "warmup": false,
+      "metrics": {
+        "software_ready_ms": 10820.0,
+        "first_frame_send_ms": 12250.0,
+        "pre_exec_ms": 5400.0,
+        "platform_init_ms": 21.154,
+        "fonts_load_ms": 1737.55,
+        "fonts_registration_ms": 2842.698,
+        "backend_install_ms": 59.999,
+        "application_attach_ms": 184.964,
+        "event_loop_to_send_ms": 1429.393,
+        "portrait_calibration_ms": 1190.0
+      },
+      "memory_kib": {
+        "VmHWM": 221632,
+        "VmRSS": 221632,
+        "RssAnon": 148184,
+        "RssFile": 73448,
+        "RssShmem": 0
+      },
+      "monotonic_stages_from_process_entry_ms": {
+        "main_enter": 0.0,
+        "platform_ready": 21.154,
+        "startup_feedback_ready": 561.326,
+        "fonts_loaded": 2298.876,
+        "startup_feedback_paused": 2300.113,
+        "backend_ready": 2360.112,
+        "startup_feedback_resumed": 2360.397,
+        "window_created": 2380.476,
+        "fonts_registered": 5223.175,
+        "application_attach_begin": 5228.673,
+        "application_attached": 5413.637,
+        "startup_feedback_finished": 5414.791,
+        "software_ready": 5424.996,
+        "backend_event_loop_enter": 5425.047,
+        "touch_opened": 5743.151,
+        "portrait_opened": 6553.693,
+        "first_application_frame_send": 6854.44
+      },
+      "receipt_stages_from_native_request_ms": {
+        "main_enter": 5400.0,
+        "platform_ready": 5420.0,
+        "startup_feedback_ready": 5960.0,
+        "fonts_loaded": 7700.0,
+        "startup_feedback_paused": 7700.0,
+        "backend_ready": 7760.0,
+        "startup_feedback_resumed": 7760.0,
+        "window_created": 7780.0,
+        "fonts_registered": 10620.0,
+        "application_attach_begin": 10630.0,
+        "application_attached": 10810.0,
+        "startup_feedback_finished": 10810.0,
+        "software_ready": 10820.0,
+        "backend_event_loop_enter": 10820.0,
+        "touch_opened": 11140.0,
+        "portrait_opened": 11960.0,
+        "first_application_frame_send": 12250.0
+      }
+    },
+    {
+      "case": "candidate-03",
+      "variant": "candidate",
+      "warmup": false,
+      "metrics": {
+        "software_ready_ms": 8490.0,
+        "first_frame_send_ms": 9360.0,
+        "pre_exec_ms": 4600.0,
+        "platform_init_ms": 21.71,
+        "fonts_load_ms": 1.671,
+        "fonts_registration_ms": 3071.04,
+        "backend_install_ms": 88.403,
+        "application_attach_ms": 133.789,
+        "event_loop_to_send_ms": 871.506,
+        "portrait_calibration_ms": 720.0
+      },
+      "memory_kib": {
+        "VmHWM": 105632,
+        "VmRSS": 105632,
+        "RssAnon": 22520,
+        "RssFile": 83112,
+        "RssShmem": 0
+      },
+      "monotonic_stages_from_process_entry_ms": {
+        "main_enter": 0.0,
+        "platform_ready": 21.71,
+        "startup_feedback_ready": 561.993,
+        "fonts_loaded": 563.664,
+        "startup_feedback_paused": 565.033,
+        "backend_ready": 653.436,
+        "startup_feedback_resumed": 653.643,
+        "window_created": 666.122,
+        "fonts_registered": 3737.162,
+        "application_attach_begin": 3743.368,
+        "application_attached": 3877.157,
+        "startup_feedback_finished": 3878.579,
+        "software_ready": 3887.762,
+        "backend_event_loop_enter": 3887.857,
+        "touch_opened": 3890.575,
+        "portrait_opened": 4416.003,
+        "first_application_frame_send": 4759.364
+      },
+      "receipt_stages_from_native_request_ms": {
+        "main_enter": 4600.0,
+        "platform_ready": 4620.0,
+        "startup_feedback_ready": 5160.0,
+        "fonts_loaded": 5170.0,
+        "startup_feedback_paused": 5170.0,
+        "backend_ready": 5250.0,
+        "startup_feedback_resumed": 5260.0,
+        "window_created": 5270.0,
+        "fonts_registered": 8340.0,
+        "application_attach_begin": 8340.0,
+        "application_attached": 8480.0,
+        "startup_feedback_finished": 8480.0,
+        "software_ready": 8490.0,
+        "backend_event_loop_enter": 8490.0,
+        "touch_opened": 8490.0,
+        "portrait_opened": 9020.0,
+        "first_application_frame_send": 9360.0
+      }
+    },
+    {
+      "case": "candidate-04",
+      "variant": "candidate",
+      "warmup": false,
+      "metrics": {
+        "software_ready_ms": 8430.0,
+        "first_frame_send_ms": 9300.0,
+        "pre_exec_ms": 4550.0,
+        "platform_init_ms": 21.058,
+        "fonts_load_ms": 1.627,
+        "fonts_registration_ms": 3065.651,
+        "backend_install_ms": 84.948,
+        "application_attach_ms": 135.769,
+        "event_loop_to_send_ms": 876.756,
+        "portrait_calibration_ms": 660.0
+      },
+      "memory_kib": {
+        "VmHWM": 105632,
+        "VmRSS": 105632,
+        "RssAnon": 22520,
+        "RssFile": 83112,
+        "RssShmem": 0
+      },
+      "monotonic_stages_from_process_entry_ms": {
+        "main_enter": 0.0,
+        "platform_ready": 21.058,
+        "startup_feedback_ready": 557.399,
+        "fonts_loaded": 559.026,
+        "startup_feedback_paused": 561.611,
+        "backend_ready": 646.559,
+        "startup_feedback_resumed": 646.835,
+        "window_created": 659.524,
+        "fonts_registered": 3725.174,
+        "application_attach_begin": 3731.627,
+        "application_attached": 3867.396,
+        "startup_feedback_finished": 3869.081,
+        "software_ready": 3877.605,
+        "backend_event_loop_enter": 3878.228,
+        "touch_opened": 3905.056,
+        "portrait_opened": 4427.168,
+        "first_application_frame_send": 4754.984
+      },
+      "receipt_stages_from_native_request_ms": {
+        "main_enter": 4550.0,
+        "platform_ready": 4570.0,
+        "startup_feedback_ready": 5110.0,
+        "fonts_loaded": 5110.0,
+        "startup_feedback_paused": 5110.0,
+        "backend_ready": 5200.0,
+        "startup_feedback_resumed": 5200.0,
+        "window_created": 5210.0,
+        "fonts_registered": 8270.0,
+        "application_attach_begin": 8280.0,
+        "application_attached": 8420.0,
+        "startup_feedback_finished": 8420.0,
+        "software_ready": 8430.0,
+        "backend_event_loop_enter": 8430.0,
+        "touch_opened": 8450.0,
+        "portrait_opened": 8980.0,
+        "first_application_frame_send": 9300.0
+      }
+    },
+    {
+      "case": "baseline-04",
+      "variant": "baseline",
+      "warmup": false,
+      "metrics": {
+        "software_ready_ms": 10970.0,
+        "first_frame_send_ms": 12390.0,
+        "pre_exec_ms": 5410.0,
+        "platform_init_ms": 20.617,
+        "fonts_load_ms": 1802.233,
+        "fonts_registration_ms": 2919.655,
+        "backend_install_ms": 69.677,
+        "application_attach_ms": 166.469,
+        "event_loop_to_send_ms": 1410.666,
+        "portrait_calibration_ms": 1150.0
+      },
+      "memory_kib": {
+        "VmHWM": 221616,
+        "VmRSS": 221616,
+        "RssAnon": 148172,
+        "RssFile": 73444,
+        "RssShmem": 0
+      },
+      "monotonic_stages_from_process_entry_ms": {
+        "main_enter": 0.0,
+        "platform_ready": 20.617,
+        "startup_feedback_ready": 564.11,
+        "fonts_loaded": 2366.343,
+        "startup_feedback_paused": 2367.961,
+        "backend_ready": 2437.639,
+        "startup_feedback_resumed": 2438.001,
+        "window_created": 2461.44,
+        "fonts_registered": 5381.095,
+        "application_attach_begin": 5389.033,
+        "application_attached": 5555.501,
+        "startup_feedback_finished": 5556.77,
+        "software_ready": 5566.113,
+        "backend_event_loop_enter": 5566.665,
+        "touch_opened": 5863.885,
+        "portrait_opened": 6674.454,
+        "first_application_frame_send": 6977.331
+      },
+      "receipt_stages_from_native_request_ms": {
+        "main_enter": 5410.0,
+        "platform_ready": 5430.0,
+        "startup_feedback_ready": 5970.0,
+        "fonts_loaded": 7780.0,
+        "startup_feedback_paused": 7780.0,
+        "backend_ready": 7850.0,
+        "startup_feedback_resumed": 7850.0,
+        "window_created": 7870.0,
+        "fonts_registered": 10790.0,
+        "application_attach_begin": 10800.0,
+        "application_attached": 10960.0,
+        "startup_feedback_finished": 10970.0,
+        "software_ready": 10970.0,
+        "backend_event_loop_enter": 10980.0,
+        "touch_opened": 11270.0,
+        "portrait_opened": 12090.0,
+        "first_application_frame_send": 12390.0
+      }
+    },
+    {
+      "case": "baseline-05",
+      "variant": "baseline",
+      "warmup": false,
+      "metrics": {
+        "software_ready_ms": 10750.0,
+        "first_frame_send_ms": 12160.0,
+        "pre_exec_ms": 5290.0,
+        "platform_init_ms": 21.557,
+        "fonts_load_ms": 1760.492,
+        "fonts_registration_ms": 2866.224,
+        "backend_install_ms": 61.916,
+        "application_attach_ms": 171.573,
+        "event_loop_to_send_ms": 1411.778,
+        "portrait_calibration_ms": 1060.0
+      },
+      "memory_kib": {
+        "VmHWM": 221296,
+        "VmRSS": 221296,
+        "RssAnon": 148172,
+        "RssFile": 73124,
+        "RssShmem": 0
+      },
+      "monotonic_stages_from_process_entry_ms": {
+        "main_enter": 0.0,
+        "platform_ready": 21.557,
+        "startup_feedback_ready": 563.067,
+        "fonts_loaded": 2323.559,
+        "startup_feedback_paused": 2324.771,
+        "backend_ready": 2386.687,
+        "startup_feedback_resumed": 2386.993,
+        "window_created": 2407.596,
+        "fonts_registered": 5273.82,
+        "application_attach_begin": 5280.528,
+        "application_attached": 5452.101,
+        "startup_feedback_finished": 5453.07,
+        "software_ready": 5462.326,
+        "backend_event_loop_enter": 5463.631,
+        "touch_opened": 5737.069,
+        "portrait_opened": 6568.826,
+        "first_application_frame_send": 6875.409
+      },
+      "receipt_stages_from_native_request_ms": {
+        "main_enter": 5290.0,
+        "platform_ready": 5310.0,
+        "startup_feedback_ready": 5850.0,
+        "fonts_loaded": 7610.0,
+        "startup_feedback_paused": 7610.0,
+        "backend_ready": 7670.0,
+        "startup_feedback_resumed": 7670.0,
+        "window_created": 7690.0,
+        "fonts_registered": 10560.0,
+        "application_attach_begin": 10570.0,
+        "application_attached": 10740.0,
+        "startup_feedback_finished": 10740.0,
+        "software_ready": 10750.0,
+        "backend_event_loop_enter": 10750.0,
+        "touch_opened": 11020.0,
+        "portrait_opened": 11860.0,
+        "first_application_frame_send": 12160.0
+      }
+    },
+    {
+      "case": "candidate-05",
+      "variant": "candidate",
+      "warmup": false,
+      "metrics": {
+        "software_ready_ms": 8290.0,
+        "first_frame_send_ms": 9190.0,
+        "pre_exec_ms": 4420.0,
+        "platform_init_ms": 21.046,
+        "fonts_load_ms": 2.804,
+        "fonts_registration_ms": 3071.978,
+        "backend_install_ms": 83.622,
+        "application_attach_ms": 132.385,
+        "event_loop_to_send_ms": 897.633,
+        "portrait_calibration_ms": 600.0
+      },
+      "memory_kib": {
+        "VmHWM": 105632,
+        "VmRSS": 105632,
+        "RssAnon": 22520,
+        "RssFile": 83112,
+        "RssShmem": 0
+      },
+      "monotonic_stages_from_process_entry_ms": {
+        "main_enter": 0.0,
+        "platform_ready": 21.046,
+        "startup_feedback_ready": 554.126,
+        "fonts_loaded": 556.929,
+        "startup_feedback_paused": 558.095,
+        "backend_ready": 641.716,
+        "startup_feedback_resumed": 641.985,
+        "window_created": 653.566,
+        "fonts_registered": 3725.544,
+        "application_attach_begin": 3732.146,
+        "application_attached": 3864.531,
+        "startup_feedback_finished": 3865.816,
+        "software_ready": 3874.695,
+        "backend_event_loop_enter": 3874.779,
+        "touch_opened": 3876.959,
+        "portrait_opened": 4402.761,
+        "first_application_frame_send": 4772.412
+      },
+      "receipt_stages_from_native_request_ms": {
+        "main_enter": 4420.0,
+        "platform_ready": 4440.0,
+        "startup_feedback_ready": 4970.0,
+        "fonts_loaded": 4970.0,
+        "startup_feedback_paused": 4970.0,
+        "backend_ready": 5060.0,
+        "startup_feedback_resumed": 5060.0,
+        "window_created": 5070.0,
+        "fonts_registered": 8140.0,
+        "application_attach_begin": 8150.0,
+        "application_attached": 8280.0,
+        "startup_feedback_finished": 8280.0,
+        "software_ready": 8290.0,
+        "backend_event_loop_enter": 8290.0,
+        "touch_opened": 8290.0,
+        "portrait_opened": 8820.0,
+        "first_application_frame_send": 9190.0
+      }
+    }
+  ],
+  "frames": {
+    "final.png": {
+      "sizes": [
+        [
+          1860,
+          2480
+        ],
+        [
+          1860,
+          2480
+        ]
+      ],
+      "identical": true,
+      "difference_bounds": null,
+      "sha256": [
+        "4193d77f9acfe33d18e1dd630b5774c8f2e30483597f1b9b10e2108953d7d019",
+        "4193d77f9acfe33d18e1dd630b5774c8f2e30483597f1b9b10e2108953d7d019"
+      ]
+    },
+    "native-content.ppm": {
+      "sizes": [
+        [
+          1860,
+          2480
+        ],
+        [
+          1860,
+          2480
+        ]
+      ],
+      "identical": true,
+      "difference_bounds": null,
+      "sha256": [
+        "0a109c9c097a0a0c6a8e43ff8918ebec6aef17139439ecfc96a6ccbe484587b9",
+        "0a109c9c097a0a0c6a8e43ff8918ebec6aef17139439ecfc96a6ccbe484587b9"
+      ]
+    }
+  },
+  "same_input_devices_all_runs": true,
+  "lifecycle": {
+    "success": true,
+    "lease_released": true,
+    "native_restored": true,
+    "lighting_restored": true,
+    "same_boot": true,
+    "installed_program_and_data_unchanged": true,
+    "temporary_stage_removed": true
+  }
+}
