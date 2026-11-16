@@ -22,6 +22,42 @@ weread/app/manifest.draft.json
 
 Fonts, icons, the dictionary and interface strings are embedded in the executable; their notices are bundled separately. The launcher creates persistent state under `/mnt/us/weread/data/`, including `fonts/` and `logs/`. Ordinary app-only updates preserve `data/`; an explicitly authorized pre-release reset may remove it. The build script never copies credentials, books, or operator state into the staged output.
 
+### Application entry cover
+
+The operator accepted the [penguin cover](../../assets/branding/README.md) on
+2026-11-17. Its only lettering is `WeRead`; a winking penguin appears inside a
+Kindle-style reader. The 1024 x 1536 grayscale master is retained with a
+256 x 384 thumbnail. The launcher embeds that thumbnail in its third-line
+`# Icon: data:image/png;base64,...` metadata, so the existing build and archive
+steps carry the artwork in `documents/weread.sh` without a separate image file.
+
+Install the updated launcher together with the matching application files.
+SH_Integration reads the icon while indexing the document entry. No runtime
+change, user-book cover replacement, data reset, or current-book sleep-cover
+change is involved. Keep the icon field unwrapped within the first six lines.
+The accepted artwork and source-reviewed metadata contract do not establish
+physical-device display acceptance; this change has not been installed on a
+Kindle as part of this task.
+
+Remote verification on `test-env` passed all four existing development-archive
+tests and fourteen scoped checks: accepted-master/thumbnail byte identity,
+grayscale geometry, the single third-line Icon field, lossless base64 decoding,
+unchanged launcher body after removing that comment, LF encoding, both shell
+syntax checks, and synthetic archive CRC, content, executable mode, and input
+allowlist. An initial ad hoc check hit an unrelated Python module shadow in
+the remote home directory; the isolated-directory `python3 -I` rerun passed.
+No Rust rebuild or device run was needed for this metadata-only launcher edit.
+Evidence is retained at
+`test-env:/tmp/weread-penguin-cover-20261117-r1/evidence/verification.json`
+and the adjacent `package-tests.log`.
+
+The accepted master SHA-256 is
+`b3c6d82c6c94ff7cbc5e101b25cb37f1c0a5b6943bf2a1ba8a89c961501d463b`;
+the embedded thumbnail is
+`6495846ff49df3c43c35f27552b02f8a126ffa6c3ab3a9c736cd4cbfcaec7529`.
+The verified launcher SHA-256 is
+`3d9e2855d9fb1fed906e6909dcf8be6ba3d2be8f63b8348e16310623fb3cc431`.
+
 The resource-review candidate retains application diagnostics in `data/logs/application.log` and two fixed backups, each limited to 1 MiB with an 8 KiB message limit. A diagnostic I/O failure closes that sink and suppresses repeated fallback messages. Normal document launches maintain `launcher.log` with a 64 KiB threshold and in-place truncation; `last-launch.log` is replaced on a normal launch and `application-bootstrap.log` on each application generation. The latter two capture finite bootstrap or unexpected external output and are not general byte-capped collectors. Direct `--detached` fixtures retain their captured output.
 
 Keep the matching executable and launcher together. The current pre-release build expects the current storage layout and complete reporting snapshots. An explicitly authorized reset discards previous application state; it is not an upgrade or a rollback mechanism. [Resource lifetime review](../../docs/RESOURCE_LEAK_REVIEW.md) retains the historical candidate-specific evidence.
@@ -157,6 +193,7 @@ USB takeover ends application ownership and restores the firmware. The user expl
 
 - [KOReader launcher at `7649e93f5ee2a5dfc3c69bacf0385aac37352949`](https://github.com/koreader/koreader/blob/7649e93f5ee2a5dfc3c69bacf0385aac37352949/platform/kindle/koreader.sh): firmware version source, `statusbar`, `awesome` stop/continue, and restoration patterns.
 - [Jobman launcher at `9727c0e0a060c5d7e6dfeae2d572b69b6f556753`](https://github.com/KindleTweaks/jobman/blob/9727c0e0a060c5d7e6dfeae2d572b69b6f556753/companion/dist/documents/jobman.sh): detached document launch and `powerd` screen-saver/USB event observation.
+- [SH_Integration header parser](https://github.com/KindleModding/sh_integration/blob/adb7ef5c570a25c76fd64e94837ae0f590bd3b9c/utils/utils.c) and [extractor](https://github.com/KindleModding/sh_integration/blob/adb7ef5c570a25c76fd64e94837ae0f590bd3b9c/extractor/main.c): the first-six-lines Icon metadata contract and native catalog thumbnail handoff.
 - [Jobman KPM manifest at the same revision](https://github.com/KindleTweaks/jobman/blob/9727c0e0a060c5d7e6dfeae2d572b69b6f556753/companion/jobman_1.2.2_kindlehf/manifest.json): candidate manifest shape only.
 
 These are static source references. This project's launcher has not been accepted on a physical Kindle merely because a reference project reports device tests.

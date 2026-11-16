@@ -4,6 +4,12 @@ An independent Rust and Slint reading application for jailbroken Kindle devices.
 
 Implementation started on 2026-11-03 (Asia/Shanghai), following the supplied WeRead for Kindle design handoff v0.2. The application shares its UI and application core between a desktop backend and an isolated Kindle backend. See [implementation status](docs/IMPLEMENTATION_STATUS.md) for completed features, verification evidence, and remaining acceptance gates.
 
+The accepted [Kindle entry cover](assets/branding/README.md) shows `WeRead` above
+a reader containing a winking penguin. Its grayscale thumbnail is embedded in
+the document launcher's Icon metadata and travels with the development package.
+User-book artwork and current-book sleep covers retain their existing behavior.
+Physical display acceptance of this new launcher cover remains open.
+
 The 2026-11-16 [image-preparation work](docs/IMAGE_PREPARATION_PERFORMANCE_20261116.md) moves final Reader/Article picture preparation and cover conversion to bounded workers. Repeated publication reuses current shared pixels, and optional full sleep covers wait for reading inactivity. Current source, palette, resource, and power-event boundaries remain explicit; the feature record separates paired software measurements from device acceptance.
 
 The accepted [Skills setup guidance](docs/LOGIN_UI.md#skills-setup-guidance) adds the official prerequisite and a full-page guide to QR Login. Four numbered rows form one centered group; upper-left Back obtains a fresh challenge, and upper-right X retains ordinary exit. Temporary authentication work is cancelled and fenced while the guide is open. The public QR has transparent light modules and a bounded, replicated alpha raster for precise scaling. Manual credential editing remains absent. [Detail pagination](docs/DETAIL_HUB.md#viewport-capacity-follow-up) now derives bounded capacities from the actual viewport, including 19 catalog rows on the standard Scribe profile. These changes keep the current persistence layout and do not require a data reset.

@@ -71,6 +71,13 @@ limit or a general claim for all network conditions.
 
 The application has its own package identity, executable, data directory, UI, and launcher. Reusing a GUI framework or a device adapter does not turn it into a plugin of another application.
 
+The accepted 2026-11-17 [penguin launcher artwork](../assets/branding/README.md)
+is a static packaging asset. Its grayscale thumbnail is embedded in the shell
+document's Icon metadata for SH_Integration to register with the Kindle catalog.
+This changes no application use case, source adapter, runtime image cache,
+current-book sleep cover, or persistence layout. Artwork approval and packaging
+verification remain separate from physical-device display acceptance.
+
 Resource admission uses RAII credits retained through active work, queued results, and UI processing: eight metadata credits, two public-image credits within that budget, one login credit, bounded download-fetch credits acquired before chapter-data acquisition or cloning, one ordered download-packet credit, and one independent opportunistic progress credit. Download plans retain only bounded remaining-task metadata. A cached checkpoint sends identity and cursor data under the packet credit; persistence verifies the actual durable task, chapter, full-content ownership, and nonblank text before advancing the cursor. Only the current visible chapter is read when needed. Download preparation remains serial, with its permit held by the actual blocking worker. Busy and cancellation outcomes settle application state immediately without an unlimited control queue or receiver ownership cycle. Account and sleep fences discard actual stale packets rather than releasing credits while their buffers remain alive.
 
 Fixed reviewed HTTPS/443 destinations retain capped first-party connection reuse. One shared arbitrary-resource client disables idle retention, with transport choice checked again for each redirect hop independently of cookie permission. Catalog admission prices new-row and inherited-owner metadata before copying; existing bodies remain in SQL during stable-UID reindexing. Cached underline and thought reads admit encoded bytes and record count in SQL before deserialization. The UI pages lightweight thought descriptors before loading bounded visible previews. Cache integrity proofs are operation-local, use streaming reads, and check original publication-destination identity before scoped cleanup can mutate it.

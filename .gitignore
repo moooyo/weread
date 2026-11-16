@@ -18,6 +18,7 @@
 /dist/
 /build/
 /artifacts/
+/output/imagegen/
 
 # Editor and operating-system files
 .idea/
