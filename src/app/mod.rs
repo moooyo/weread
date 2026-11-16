@@ -1,9 +1,11 @@
 mod article_images;
+mod article_preparation;
 mod auth;
 mod auxiliary;
 mod backend;
 mod book_images;
 mod download_recovery;
+mod image_preparation;
 mod image_processing;
 mod image_raster;
 mod library;
@@ -355,6 +357,7 @@ pub struct App {
     managed_sleep: managed_sleep::ManagedSleep,
     sleep_screen: sleep_screen::SleepScreenState,
     image_processing: image_processing::ImageProcessingState,
+    article_preparation: article_preparation::ArticlePreparationState,
     resident_lifecycle: managed_lifecycle::ResidentLifecycle,
     lighting: lighting::LightingState,
     store: Store,
@@ -443,7 +446,7 @@ pub struct App {
     pending_catalog_images: BTreeMap<String, bool>,
     pending_covers: BTreeSet<String>,
     pending_cover_requests: BTreeMap<String, backend::CoverRequestContext>,
-    cover_ui_changes: BTreeMap<String, PathBuf>,
+    cover_ui_changes: BTreeMap<String, slint::Image>,
     deferred_cover_refill: Option<Route>,
     pending_articles: BTreeSet<String>,
     pending_article_requests: BTreeMap<String, u64>,
@@ -544,6 +547,7 @@ impl App {
             managed_sleep: managed_sleep::ManagedSleep::default(),
             sleep_screen: sleep_screen::SleepScreenState::default(),
             image_processing: image_processing::ImageProcessingState::default(),
+            article_preparation: article_preparation::ArticlePreparationState::default(),
             resident_lifecycle: managed_lifecycle::ResidentLifecycle::default(),
             lighting: lighting::LightingState::default(),
             store,
@@ -831,6 +835,26 @@ impl App {
         if self.immediate_job_error.is_some() {
             return Ok(());
         }
+        if section == "shell" && action == "shell.image-preparation-ready" {
+            let started = Instant::now();
+            let changed = self.poll_image_preparation()?;
+            if changed && matches!(self.route, Route::Reader(..) | Route::Article(_)) {
+                self.render()?;
+                // A reply can arrive just before the worker's exit flag. Give
+                // that join boundary one deferred retry, never a polling loop.
+                if value == "1" && self.image_preparation_busy() {
+                    let weak = self.ui.clone();
+                    slint::Timer::single_shot(Duration::from_millis(1), move || {
+                        if let Some(ui) = weak.upgrade() {
+                            ui.global::<ShellModel>()
+                                .invoke_event("shell.image-preparation-ready".into(), "0".into());
+                        }
+                    });
+                }
+                self.record_image_preparation_wake(started.elapsed());
+            }
+            return Ok(());
+        }
         if section == "search"
             && self.search_purpose == "thought"
             && self.reader.thought_edit_blocked
@@ -875,6 +899,8 @@ impl App {
             return Err(error);
         }
         let mut changed = self.poll_lighting();
+        changed |= self.poll_image_preparation()?;
+        changed |= self.poll_article_preparation()?;
         for _ in 0..64 {
             match self.events.try_recv() {
                 Ok(event) => {
@@ -929,9 +955,12 @@ impl App {
             self.render()?;
         } else {
             self.flush_download_ui(Instant::now())?;
-            self.flush_cover_ui();
             self.refill_deferred_visible_covers();
         }
+        // Current job results and Reader requests take priority over optional
+        // cover admission. A hidden cover completion never rebuilds the Reader.
+        self.poll_cover_preparation()?;
+        self.flush_cover_ui();
         self.sync_presented_image_processing()
     }
 
@@ -939,6 +968,7 @@ impl App {
         let saved = (|| {
             self.join_task_wake_guard(task_wake::STOP_TIMEOUT)?;
             self.persist_shutdown_state()?;
+            self.quiesce_image_workers(task_wake::STOP_TIMEOUT)?;
             // Save the Reader before waiting for device I/O, then require a joined
             // lighting worker before acknowledging sleep or native ownership.
             self.stop_lighting_hardware()?;
@@ -986,6 +1016,9 @@ impl App {
         // Notify every hardware producer before spending a shared join budget.
         self.task_wake.prepare_terminal_cleanup();
         self.request_lighting_stop();
+        self.pause_image_preparation();
+        self.cancel_cover_preparation();
+        self.cancel_article_preparation();
         self.jobs.cancel_all();
         // Closing the original receiver drops buffered image packets and their
         // checkpoint senders, including work already queued before the fence.
@@ -998,6 +1031,11 @@ impl App {
             &mut failure,
             self.join_task_wake_guard(timeout.saturating_sub(started.elapsed())),
             "wake maintenance",
+        );
+        retain_terminal_cleanup_error(
+            &mut failure,
+            self.quiesce_image_workers(timeout.saturating_sub(started.elapsed())),
+            "image preparation",
         );
         retain_terminal_cleanup_error(
             &mut failure,
@@ -1015,6 +1053,44 @@ impl App {
             Some(error) => Err(error),
             None => Ok(()),
         }
+    }
+
+    /// Cancel CPU work before joining; every worker shares this one stop budget.
+    fn quiesce_image_workers(&mut self, timeout: Duration) -> Result<()> {
+        let started = Instant::now();
+        self.pause_image_preparation();
+        self.cancel_cover_preparation();
+        self.cancel_article_preparation();
+        let mut failure = None;
+        retain_terminal_cleanup_error(
+            &mut failure,
+            self.quiesce_image_preparation(timeout.saturating_sub(started.elapsed())),
+            "Reader image pixels",
+        );
+        retain_terminal_cleanup_error(
+            &mut failure,
+            self.quiesce_cover_preparation(timeout.saturating_sub(started.elapsed())),
+            "cover image pixels",
+        );
+        retain_terminal_cleanup_error(
+            &mut failure,
+            self.quiesce_article_preparation(timeout.saturating_sub(started.elapsed())),
+            "article canonical images",
+        );
+        match failure {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
+    }
+
+    /// Diagnostic counters for isolated performance fixtures; no content identity.
+    #[doc(hidden)]
+    pub fn image_preparation_diagnostics(&self) -> serde_json::Value {
+        serde_json::json!({
+            "reader": self.reader_image_preparation_diagnostics(),
+            "sleep": self.cover_preparation_diagnostics(),
+            "article": self.article_preparation_diagnostics(),
+        })
     }
 
     /// Save state and request an explicit user exit through one lifecycle path.

@@ -36,6 +36,9 @@ const MAX_FONT_BYTES: u64 = 64 * 1024 * 1024;
 const SLEEP_COVER_SIZE: (u32, u32) = (300, 450);
 const RAMP_SIZE: (u32, u32) = (1024, 256);
 const RAMP_FORMAT: &str = "weread-offline-gray8-ramp-v1";
+const PERFORMANCE_FORMAT: &str = "weread-reader-image-performance-v1";
+const PERFORMANCE_SOURCE_FORMAT: &str = "weread-offline-perf05-images-v1";
+const PERFORMANCE_COVER_URL: &str = "https://example.invalid/perf05-cover.png";
 
 #[derive(Parser)]
 #[command(about = "Render isolated offline UI states with observable public models")]
@@ -68,6 +71,19 @@ struct Arguments {
     /// A complete current preference snapshot; never a legacy payload patch.
     #[arg(long, value_parser = ["off", "software", "hardware"])]
     image_method: Option<String>,
+    /// Eight public Perf05 PNG members, extracted by the remote verifier.
+    #[arg(long)]
+    performance_images: Option<PathBuf>,
+    /// Export real dispatch/tick samples and prepared-model checkpoints.
+    #[arg(long)]
+    performance_report: Option<PathBuf>,
+    #[arg(long, default_value = "candidate")]
+    performance_label: String,
+    #[arg(long, default_value = "full", value_parser = ["full", "thumbnail", "none"])]
+    performance_cover: String,
+    /// Seed only a fresh public performance directory without opening a window.
+    #[arg(long)]
+    seed_performance_only: bool,
 }
 
 #[derive(Deserialize)]
@@ -78,6 +94,144 @@ struct Action {
     action: String,
     #[serde(default)]
     value: String,
+    #[serde(default)]
+    label: String,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct ReaderTarget {
+    chapter: String,
+    page: i32,
+    images: Vec<String>,
+}
+
+struct PendingPerformanceAction {
+    index: usize,
+    started: Instant,
+    target: Option<ReaderTarget>,
+}
+
+struct PerformanceRecorder {
+    started: Instant,
+    attach_us: u64,
+    initial_ready_us: Option<u64>,
+    initial_target: Option<ReaderTarget>,
+    dispatches: Vec<Value>,
+    ticks: Vec<Value>,
+    checkpoints: Vec<Value>,
+    pending: Option<PendingPerformanceAction>,
+}
+
+fn elapsed_us(started: Instant) -> u64 {
+    started.elapsed().as_micros().min(u128::from(u64::MAX)) as u64
+}
+
+fn reader_target(ui: &AppWindow) -> Option<ReaderTarget> {
+    if ui.global::<ShellModel>().get_route().as_str() != "reader" {
+        return None;
+    }
+    let reader = ui.global::<ReaderModel>();
+    Some(ReaderTarget {
+        chapter: reader.get_chapter_title().to_string(),
+        page: reader.get_page(),
+        images: reader
+            .get_images()
+            .iter()
+            .map(|row| row.id.to_string())
+            .collect(),
+    })
+}
+
+fn target_ready(ui: &AppWindow, target: &Option<ReaderTarget>) -> bool {
+    reader_target(ui).as_ref() == target.as_ref()
+        && ui
+            .global::<ReaderModel>()
+            .get_images()
+            .iter()
+            .all(|row| row.loaded)
+}
+
+fn compact_reader_state(ui: &AppWindow) -> Value {
+    let reader = ui.global::<ReaderModel>();
+    json!({
+        "route": ui.global::<ShellModel>().get_route().to_string(),
+        "chapter": reader.get_chapter_title().to_string(),
+        "page": reader.get_page(), "page_count": reader.get_page_count(),
+        "show_heading": reader.get_show_heading(), "menu": reader.get_menu(),
+        "images": reader.get_images().iter().map(|row| json!({
+            "id": row.id.to_string(), "loaded": row.loaded,
+            "y": row.y, "width": row.width, "height": row.height,
+        })).collect::<Vec<_>>(),
+    })
+}
+
+fn performance_diagnostics(application: &App) -> Value {
+    #[cfg(feature = "performance-diagnostics")]
+    {
+        application.image_preparation_diagnostics()
+    }
+    #[cfg(not(feature = "performance-diagnostics"))]
+    {
+        let _ = application;
+        Value::Null
+    }
+}
+
+impl PerformanceRecorder {
+    fn new(started: Instant, attach_us: u64, ui: &AppWindow) -> Self {
+        Self {
+            started,
+            attach_us,
+            initial_ready_us: None,
+            initial_target: reader_target(ui),
+            dispatches: Vec::new(),
+            ticks: Vec::new(),
+            checkpoints: Vec::new(),
+            pending: None,
+        }
+    }
+
+    fn poll_ready(&mut self, ui: &AppWindow) {
+        if self.initial_ready_us.is_none() && target_ready(ui, &self.initial_target) {
+            self.initial_ready_us = Some(elapsed_us(self.started));
+        }
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|pending| target_ready(ui, &pending.target))
+        {
+            let pending = self.pending.take().unwrap();
+            self.dispatches[pending.index]["ready_us"] = json!(elapsed_us(pending.started));
+            self.dispatches[pending.index]["ready_state"] = compact_reader_state(ui);
+        }
+    }
+
+    fn record_dispatch(
+        &mut self,
+        action: &Action,
+        started: Instant,
+        dispatch_us: u64,
+        ui: &AppWindow,
+        application: &App,
+    ) {
+        if let Some(pending) = self.pending.take() {
+            self.dispatches[pending.index]["superseded"] = json!(true);
+        }
+        let index = self.dispatches.len();
+        self.dispatches.push(json!({
+            "at_us": elapsed_us(self.started), "label": action.label,
+            "section": action.section, "action": action.action, "value": action.value,
+            "dispatch_us": dispatch_us, "ready_us": null, "superseded": false,
+            "state": compact_reader_state(ui),
+            "diagnostics": performance_diagnostics(application),
+        }));
+        self.pending = Some(PendingPerformanceAction {
+            index,
+            started,
+            target: reader_target(ui),
+        });
+        self.poll_ready(ui);
+    }
 }
 
 fn main() -> std::process::ExitCode {
@@ -96,6 +250,21 @@ fn run(arguments: Arguments) -> Result<()> {
     }
     if arguments.exit_after_ms == 0 {
         bail!("A nonzero bounded deadline is required");
+    }
+    if let Some(images) = arguments.performance_images.as_deref() {
+        seed_performance_images(
+            &arguments.data_dir,
+            images,
+            arguments.device,
+            arguments.image_method.as_deref().unwrap_or("software"),
+            &arguments.performance_cover,
+        )?;
+        if arguments.seed_performance_only {
+            println!("Public performance data: {}", arguments.data_dir.display());
+            return Ok(());
+        }
+    } else if arguments.seed_performance_only || arguments.performance_report.is_some() {
+        bail!("Performance runs require --performance-images");
     }
     let image_fixture = arguments
         .fixture
@@ -162,6 +331,7 @@ fn run(arguments: Arguments) -> Result<()> {
         .worker_threads(2)
         .enable_all()
         .build()?;
+    let attach_started = Instant::now();
     let application = App::attach(
         &ui,
         AppOptions {
@@ -175,6 +345,14 @@ fn run(arguments: Arguments) -> Result<()> {
         platform.clone(),
         &runtime,
     )?;
+    let attach_us = elapsed_us(attach_started);
+    let performance = arguments.performance_report.as_ref().map(|_| {
+        Rc::new(RefCell::new(PerformanceRecorder::new(
+            attach_started,
+            attach_us,
+            &ui,
+        )))
+    });
     let fixture_qr = fixture_qr()?;
     let fixture_cover = fixture_sleep_cover();
     let fixture_visible = Rc::new(Cell::new(true));
@@ -196,11 +374,13 @@ fn run(arguments: Arguments) -> Result<()> {
     let timer_fixture_visible = fixture_visible.clone();
     let profile = arguments.device;
     let deadline = arguments.exit_after_ms;
+    let timer_performance = performance.clone();
     let started = Instant::now();
     let mut next_action = 0;
+    let mut last_performance_tick = Instant::now();
     timer.start(
         slint::TimerMode::Repeated,
-        Duration::from_millis(50),
+        Duration::from_millis(if performance.is_some() { 20 } else { 50 }),
         move || {
             let Some(ui) = weak_ui.upgrade() else {
                 timer_failures
@@ -216,11 +396,30 @@ fn run(arguments: Arguments) -> Result<()> {
                     set_geometry(ui.window(), profile)?;
                 }
                 let elapsed = started.elapsed().as_millis() as u64;
+                if let Some(performance) = timer_performance.as_ref() {
+                    performance.borrow_mut().poll_ready(&ui);
+                }
                 while let Some(action) = actions.get(next_action) {
                     if action.at_ms > elapsed {
                         break;
                     }
-                    if action.section == "fixture" {
+                    if action.section == "probe" {
+                        let recorder = timer_performance
+                            .as_ref()
+                            .context("Probe actions require --performance-report")?;
+                        if action.action != "checkpoint" {
+                            bail!("Unknown performance probe action {}", action.action);
+                        }
+                        let checkpoint = capture_performance_checkpoint(
+                            &ui,
+                            &fixture_capture,
+                            profile,
+                            &timer_platform,
+                            &timer_application.borrow(),
+                            &action.value,
+                        )?;
+                        recorder.borrow_mut().checkpoints.push(checkpoint);
+                    } else if action.section == "fixture" {
                         if !fixture.as_deref().is_some_and(|name| {
                             name.starts_with("sleep-") || name.starts_with("login-")
                         }) {
@@ -247,15 +446,41 @@ fn run(arguments: Arguments) -> Result<()> {
                     } else if action.section == "keyboard" {
                         dispatch_keyboard(ui.window(), &action.action, &action.value)?;
                     } else {
+                        let dispatch_started = Instant::now();
                         timer_application.borrow_mut().dispatch(
                             &action.section,
                             &action.action,
                             &action.value,
                         )?;
+                        let dispatch_us = elapsed_us(dispatch_started);
+                        if let Some(performance) = timer_performance.as_ref() {
+                            performance.borrow_mut().record_dispatch(
+                                action,
+                                dispatch_started,
+                                dispatch_us,
+                                &ui,
+                                &timer_application.borrow(),
+                            );
+                        }
                     }
                     next_action += 1;
                 }
-                timer_application.borrow_mut().tick()?;
+                if timer_performance.is_none()
+                    || last_performance_tick.elapsed() >= Duration::from_millis(100)
+                {
+                    last_performance_tick = Instant::now();
+                    let tick_started = Instant::now();
+                    timer_application.borrow_mut().tick()?;
+                    let tick_us = elapsed_us(tick_started);
+                    if let Some(performance) = timer_performance.as_ref() {
+                        let mut performance = performance.borrow_mut();
+                        let at_us = elapsed_us(performance.started);
+                        performance
+                            .ticks
+                            .push(json!({"at_us": at_us, "tick_us": tick_us}));
+                        performance.poll_ready(&ui);
+                    }
+                }
                 // These named overlays expose otherwise unavailable display states only.
                 // They neither alter controller authorization nor invoke source operations.
                 apply_fixture(
@@ -283,6 +508,9 @@ fn run(arguments: Arguments) -> Result<()> {
     set_geometry(ui.window(), arguments.device)?;
     slint::run_event_loop()?;
     timer.stop();
+    let final_diagnostics = performance
+        .as_ref()
+        .map(|_| performance_diagnostics(&application.borrow()));
     application.borrow_mut().shutdown()?;
     if !failures.borrow().is_empty() {
         bail!("{}", failures.borrow().join("\n"));
@@ -300,6 +528,37 @@ fn run(arguments: Arguments) -> Result<()> {
             &platform,
         ))?,
     )?;
+    if let (Some(performance), Some(report_path)) =
+        (performance.as_ref(), arguments.performance_report.as_ref())
+    {
+        let performance = performance.borrow();
+        if let Some(parent) = report_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(
+            report_path,
+            serde_json::to_vec_pretty(&json!({
+                "format": PERFORMANCE_FORMAT,
+                "label": arguments.performance_label,
+                "environment": "Designated remote Linux desktop; real App, public isolated fixtures, no physical Kindle",
+                "timing_boundary": "App dispatch/tick CPU wall time and model-ready polling; excludes panel submission and optical completion",
+                "action_and_ready_poll_ms": 20, "app_tick_ms": 100,
+                "profile": arguments.device.id(),
+                "image_method": arguments.image_method.as_deref().unwrap_or("software"),
+                "cover_seed": arguments.performance_cover,
+                "source_receipt": arguments.data_dir.join("synthetic-perf05-images.json"),
+                "attach_us": performance.attach_us,
+                "initial_ready_us": performance.initial_ready_us,
+                "duration_us": elapsed_us(performance.started),
+                "dispatches": performance.dispatches,
+                "ticks": performance.ticks,
+                "checkpoints": performance.checkpoints,
+                "final_diagnostics": final_diagnostics,
+                "diagnostics_available": cfg!(feature = "performance-diagnostics"),
+                "preload_boundary": "WeRead has no prepared next-page bitmap mode. Offline chapter-download prefetch is inapplicable; model-ready reuse and page/chapter transitions are measured separately.",
+            }))?,
+        )?;
+    }
     ui.hide()?;
     drop(application);
     runtime.shutdown_timeout(Duration::from_secs(3));
@@ -439,6 +698,243 @@ fn seed_image_ramp(
         bail!("The persisted fixture has no complete current preferences snapshot");
     }
     Ok(())
+}
+
+fn performance_cover_key(prefix: &str) -> String {
+    let book = "demo-0";
+    let mut digest = Sha256::new();
+    digest.update((book.len() as u64).to_be_bytes());
+    digest.update(book.as_bytes());
+    digest.update(PERFORMANCE_COVER_URL.as_bytes());
+    format!("{prefix}:{}", hex::encode(digest.finalize()))
+}
+
+fn seed_performance_images(
+    root: &Path,
+    images: &Path,
+    profile: DeviceProfile,
+    method: &str,
+    cover: &str,
+) -> Result<()> {
+    use weread::{
+        book_assets::{BookAssetStore, DEFAULT_IMAGE_BUDGET},
+        cache::FileCache,
+        domain::{Book, Chapter, ContentStatus, ReadingPosition},
+        source::images::{DownloadedChapterImages, ImageAsset},
+        store::Store,
+    };
+
+    let receipt_path = root.join("synthetic-perf05-images.json");
+    if receipt_path.is_file() {
+        let receipt: Value = serde_json::from_slice(&fs::read(&receipt_path)?)?;
+        if receipt["format"] != PERFORMANCE_SOURCE_FORMAT
+            || receipt["synthetic"] != true
+            || receipt["method"] != method
+            || receipt["cover_seed"] != cover
+        {
+            bail!("The existing directory does not match this public performance fixture");
+        }
+        return Ok(());
+    }
+    if root.exists() && fs::read_dir(root)?.next().is_some() {
+        bail!("Performance seeding requires a fresh empty directory");
+    }
+    let mut inputs = Vec::new();
+    for entry in fs::read_dir(images)? {
+        let entry = entry?;
+        if entry.file_type()?.is_file()
+            && entry
+                .path()
+                .extension()
+                .is_some_and(|extension| extension.to_string_lossy().eq_ignore_ascii_case("png"))
+        {
+            inputs.push(entry.path());
+            if inputs.len() > 8 {
+                bail!("The public Perf05 fixture must contain exactly eight PNG files");
+            }
+        }
+    }
+    inputs.sort();
+    if inputs.len() != 8 {
+        bail!("The public Perf05 fixture must contain exactly eight PNG files");
+    }
+    let data = root.join("demo");
+    fs::create_dir_all(&data)?;
+    let store = Store::open(data.join("library.sqlite"))?;
+    weread::demo::seed(&store)?;
+    store.upsert_book(&Book {
+        id: "demo-0".into(),
+        title: "Perf05 public image fixture".into(),
+        author: "Offline performance fixture".into(),
+        source: "demo".into(),
+        cover_url: if cover == "none" {
+            String::new()
+        } else {
+            PERFORMANCE_COVER_URL.into()
+        },
+        total_chapters: 8,
+        on_shelf: true,
+        ..Default::default()
+    })?;
+    let assets = BookAssetStore::open(data.join("images"), DEFAULT_IMAGE_BUDGET)?;
+    let cache = FileCache::open(data.join("covers"), 96 * 1024 * 1024)?;
+    let mut chapters = Vec::new();
+    for (index, input) in inputs.iter().enumerate() {
+        let mut bytes = Vec::new();
+        fs::File::open(input)?
+            .take(8 * 1024 * 1024 + 1)
+            .read_to_end(&mut bytes)?;
+        if bytes.is_empty() || bytes.len() > 8 * 1024 * 1024 {
+            bail!("A Perf05 PNG exceeds the existing eight-MiB source-image allowance");
+        }
+        let dimensions = image::ImageReader::new(std::io::Cursor::new(&bytes))
+            .with_guessed_format()?
+            .into_dimensions()?;
+        if dimensions != (2480, 3508) {
+            bail!("The input is not the expected 2480 by 3508 Perf05 PNG");
+        }
+        let digest = hex::encode(Sha256::digest(&bytes));
+        let source_name = format!("perf05-frame-{index:02}.png");
+        let chapter_id = format!("demo-chapter-{index}");
+        let body = format!(
+            "Public performance frame {index}. This short text belongs to the isolated fixture."
+        );
+        store.upsert_chapter(&Chapter {
+            id: chapter_id.clone(),
+            book_id: "demo-0".into(),
+            index: index as u32,
+            title: format!("Perf05 frame {index}"),
+            body: Some(body.clone()),
+            cached: true,
+            content_status: ContentStatus::Full,
+            ..Default::default()
+        })?;
+        if index == 0 && cover != "none" {
+            cache.put_cover(&performance_cover_key("cover"), &bytes, 400, 560)?;
+            if cover == "full" {
+                let viewport = profile.physical_size();
+                cache.put_cover(
+                    &performance_cover_key("sleep-cover"),
+                    &bytes,
+                    viewport.0.clamp(1, 1536),
+                    viewport.1.clamp(1, 2048),
+                )?;
+            }
+        }
+        let packet = DownloadedChapterImages {
+            assets: vec![ImageAsset {
+                id: digest.clone(),
+                media_type: "image/png".into(),
+                extension: "png".into(),
+                source_names: vec![source_name.clone()],
+                bytes,
+            }],
+            source_to_asset: BTreeMap::from([(source_name.clone(), digest.clone())]),
+        };
+        let html = format!(
+            "<img src=\"{source_name}\" alt=\"Perf05 public frame {index}\" /><p>{body}</p>"
+        );
+        let manifest =
+            assets.commit_chapter(&store, "demo-0", &chapter_id, &html, &body, Some(&packet))?;
+        if !manifest.complete
+            || manifest.images.len() != 1
+            || !assets.complete(&store, "demo-0", &chapter_id)?
+        {
+            bail!("The public asset API did not complete the Perf05 chapter");
+        }
+        let picture = &manifest.images[0];
+        if picture.anchor != Some(0) {
+            bail!("The Perf05 picture must precede the canonical body text");
+        }
+        let canonical_path = assets
+            .image_path(picture)?
+            .context("The Perf05 canonical picture is missing")?;
+        chapters.push(json!({"index": index, "chapter_uid": chapter_id,
+            "input_name": input.file_name().map(|name| name.to_string_lossy().into_owned()), "source_sha256": digest,
+            "source_size": [dimensions.0, dimensions.1], "source_bytes": packet.assets[0].bytes.len(),
+            "asset_id": picture.asset_id, "image_id": picture.id, "anchor": picture.anchor,
+            "canonical_path": canonical_path, "canonical_size": [picture.width, picture.height],
+            "text_sha256": manifest.text_sha256}));
+    }
+    store.save_position(&ReadingPosition {
+        book_id: "demo-0".into(),
+        device: "fixture".into(),
+        ..Default::default()
+    })?;
+    store.set_setting("demo.images-seeded", &true)?;
+    let mut preferences = AppPreferences::for_device(profile.is_scribe());
+    preferences.image_dithering = ImageDithering::parse(method);
+    preferences.sleep_cover = true;
+    store.set_setting("preferences", &preferences)?;
+    fs::write(
+        receipt_path,
+        serde_json::to_vec_pretty(&json!({
+            "format": PERFORMANCE_SOURCE_FORMAT, "synthetic": true, "book_id": "demo-0",
+            "method": method, "cover_seed": cover, "chapters": chapters,
+            "boundary": "Only public Perf05 image members and synthetic canonical text; no account or network source operations",
+        }))?,
+    )?;
+    Ok(())
+}
+
+fn capture_performance_checkpoint(
+    ui: &AppWindow,
+    capture: &Path,
+    profile: DeviceProfile,
+    platform: &Platform,
+    application: &App,
+    label: &str,
+) -> Result<Value> {
+    if label.is_empty()
+        || label.len() > 64
+        || !label
+            .bytes()
+            .all(|value| value.is_ascii_alphanumeric() || matches!(value, b'-' | b'_'))
+    {
+        bail!("A performance checkpoint needs a short ASCII identifier");
+    }
+    let stem = capture
+        .file_stem()
+        .context("The capture has no filename")?
+        .to_string_lossy();
+    let path = capture.with_file_name(format!("{stem}.{label}.png"));
+    if path.exists() {
+        bail!("A performance checkpoint must not replace an earlier capture");
+    }
+    capture_window(ui, &path, profile)?;
+    let mut pictures = Vec::new();
+    for (index, row) in ui.global::<ReaderModel>().get_images().iter().enumerate() {
+        if !row.loaded {
+            continue;
+        }
+        let pixels = row
+            .picture
+            .to_rgb8()
+            .context("The prepared Reader picture has no inspectable RGB pixels")?;
+        let picture_path = path.with_file_name(format!("{stem}.{label}.picture-{index}.png"));
+        image::save_buffer_with_format(
+            &picture_path,
+            pixels.as_bytes(),
+            pixels.width(),
+            pixels.height(),
+            image::ColorType::Rgb8,
+            image::ImageFormat::Png,
+        )?;
+        pictures.push(json!({"id": row.id.to_string(), "path": picture_path,
+            "size": [pixels.width(), pixels.height()], "sha256": hex::encode(Sha256::digest(pixels.as_bytes())),
+            "shared_buffer_address": pixels.as_bytes().as_ptr() as usize,
+            "y": row.y, "width": row.width, "height": row.height, "caption": row.caption.to_string()}));
+    }
+    let state_path = path.with_extension("state.json");
+    fs::write(
+        &state_path,
+        serde_json::to_vec_pretty(&model_state(ui, None, true, platform))?,
+    )?;
+    Ok(
+        json!({"label": label, "path": path, "state_path": state_path,
+        "state": compact_reader_state(ui), "pictures": pictures,
+        "diagnostics": performance_diagnostics(application)}),
+    )
 }
 
 fn capture_reader_picture_buffers(ui: &AppWindow, capture: &Path) -> Result<()> {

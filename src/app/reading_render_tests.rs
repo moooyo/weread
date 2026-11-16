@@ -1137,3 +1137,114 @@ fn reader_content_access_keeps_trials_readable_without_claiming_full_progress() 
         .expect("The isolated content-access scenario must not panic")
         .expect("The isolated content-access scenario must succeed");
 }
+
+fn run_pending_picture_pointer_scenario() -> Result<()> {
+    let windows = Rc::new(RefCell::new(Vec::new()));
+    let elapsed = Rc::new(Cell::new(Duration::ZERO));
+    slint::platform::set_platform(Box::new(ReaderTestPlatform {
+        windows: windows.clone(),
+        elapsed,
+    }))?;
+    let metrics = reader_test_metrics()?;
+    let directory = tempfile::tempdir()?;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    let (ui, application) = attach_reader_fixture(directory.path(), &metrics, &runtime)?;
+    let adapter = windows.borrow().last().unwrap().clone();
+    let shell = ui.global::<ShellModel>();
+    shell.set_dialog_kind("".into());
+    shell.set_toast("".into());
+    let reader = ui.global::<ReaderModel>();
+    reader.set_show_heading(false);
+    reader.set_notes_panel(false);
+    reader.set_menu(false);
+    reader.set_margin(72);
+    let captured = Rc::new(RefCell::new(Vec::new()));
+    let reader_events = captured.clone();
+    reader.on_event(move |action, value| {
+        reader_events
+            .borrow_mut()
+            .push((action.to_string(), value.to_string()));
+    });
+    shell.set_route("reader".into());
+    let point = LogicalPosition::new(690.0, 180.0);
+    for preparing in [true, false] {
+        captured.borrow_mut().clear();
+        reader.set_images(model(vec![ReaderImage {
+            id: "pending-reader-picture".into(),
+            width: 600.0,
+            height: 424.0,
+            preparing,
+            ..Default::default()
+        }]));
+        let _ = pixels(&ui, &adapter);
+        press_pointer(&ui, point)?;
+        release_pointer(&ui, point)?;
+        let events = captured.borrow();
+        if preparing {
+            assert!(events.iter().any(|(action, _)| action == "reader.tap"));
+            assert!(
+                !events
+                    .iter()
+                    .any(|(action, _)| action == "reader.load-image")
+            );
+        } else {
+            assert_eq!(
+                events.as_slice(),
+                &[("reader.load-image".into(), "pending-reader-picture".into())]
+            );
+        }
+    }
+
+    let article = ui.global::<ArticleModel>();
+    let article_events = captured.clone();
+    article.on_event(move |action, value| {
+        article_events
+            .borrow_mut()
+            .push((action.to_string(), value.to_string()));
+    });
+    shell.set_route("article".into());
+    for preparing in [true, false] {
+        captured.borrow_mut().clear();
+        article.set_blocks(model(vec![ArticleBlock {
+            id: "pending-article-picture".into(),
+            kind: "image".into(),
+            height: 424,
+            frame_height: 400.0,
+            preparing,
+            ..Default::default()
+        }]));
+        let _ = pixels(&ui, &adapter);
+        press_pointer(&ui, point)?;
+        release_pointer(&ui, point)?;
+        let events = captured.borrow();
+        if preparing {
+            assert!(events.iter().any(|(action, _)| action == "article.tap"));
+            assert!(
+                !events
+                    .iter()
+                    .any(|(action, _)| action == "article.load-image")
+            );
+        } else {
+            assert_eq!(
+                events.as_slice(),
+                &[(
+                    "article.load-image".into(),
+                    "pending-article-picture".into()
+                )]
+            );
+        }
+    }
+    application.borrow_mut().terminal_shutdown()?;
+    ui.hide()?;
+    Ok(())
+}
+
+#[test]
+fn preparing_pictures_preserve_reader_and_article_page_taps() {
+    std::thread::spawn(run_pending_picture_pointer_scenario)
+        .join()
+        .expect("The pending-picture pointer scenario must not panic")
+        .expect("The pending-picture pointer scenario must succeed");
+}

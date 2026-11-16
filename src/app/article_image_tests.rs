@@ -7,6 +7,7 @@ use crate::{
     platform::{ManagedSleepState, PlatformError, RenderSink},
 };
 use anyhow::{Context, bail, ensure};
+use slint::Model;
 use slint::platform::{
     Platform as UiPlatform, WindowAdapter,
     software_renderer::{MinimalSoftwareWindow, RepaintBufferType},
@@ -246,10 +247,48 @@ fn collect_transport(runtime: &tokio::runtime::Runtime, app: &App) -> Result<Vec
     Ok(packets)
 }
 
+fn drain_article_preparation(app: &mut App) -> Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while app.article_preparation.is_busy() {
+        ensure!(
+            Instant::now() < deadline,
+            "The article fixture's canonical image preparation did not drain"
+        );
+        if app.poll_article_preparation()? {
+            app.render()?;
+        }
+        if app.article_preparation.is_busy() {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+    Ok(())
+}
+
+fn article_image_rows(app: &App) -> Vec<(String, bool, (u32, u32))> {
+    let Some(ui) = app.ui.upgrade() else {
+        return Vec::new();
+    };
+    ui.global::<ArticleModel>()
+        .get_blocks()
+        .iter()
+        .map(|block| {
+            let size = block.picture.size();
+            (
+                block.id.to_string(),
+                block.loaded,
+                (size.width, size.height),
+            )
+        })
+        .collect()
+}
+
 fn finish_all(runtime: &tokio::runtime::Runtime, app: &mut App) -> Result<usize> {
     let bytes = png()?;
     let mut accepted = 0;
     for _ in 0..IMAGE_COUNT + 2 {
+        // CPU jobs retain the same pending identities as their transports.
+        // Settle them before counting the next expected network packets.
+        drain_article_preparation(app)?;
         app.tick()?;
         let packets = collect_transport(runtime, app)?;
         if packets.is_empty() {
@@ -282,6 +321,7 @@ fn finish_all(runtime: &tokio::runtime::Runtime, app: &mut App) -> Result<usize>
 }
 
 fn assert_idle(app: &mut App) -> Result<()> {
+    drain_article_preparation(app)?;
     assert!(!app.article.image_work.has_work());
     assert!(app.pending_article_images.is_empty());
     assert_eq!(app.jobs.cover_capacity(), 2);
@@ -405,6 +445,7 @@ fn failure_case(runtime: &tokio::runtime::Runtime, app: &mut App) -> Result<()> 
     for packet in packets {
         assert!(app.handle_job(packet.event(Ok(png()?)))?);
     }
+    drain_article_preparation(app)?;
     assert_eq!(app.article.loaded_images.len(), 1);
     assert!(app.article.image_work.has_work());
     assert!(app.pending_article_images.is_empty());
@@ -446,6 +487,7 @@ fn failure_case(runtime: &tokio::runtime::Runtime, app: &mut App) -> Result<()> 
     assert!(!app.handle_job(failed.event(Ok(png()?)))?);
     assert_eq!(app.article.loaded_images.len(), IMAGE_COUNT - 1);
     assert!(app.handle_job(current.event(Ok(png()?)))?);
+    drain_article_preparation(app)?;
     assert_eq!(app.article.loaded_images.len(), IMAGE_COUNT);
     assert_idle(app)
 }
@@ -463,6 +505,7 @@ fn cancel_busy_case(runtime: &tokio::runtime::Runtime, app: &mut App) -> Result<
     for packet in packets {
         assert!(app.handle_job(packet.event(Ok(png()?)))?);
     }
+    drain_article_preparation(app)?;
     assert_eq!(app.article.loaded_images.len(), 1);
     assert_idle(app)?;
     app.dispatch("article", "article.auto-images", "")?;
@@ -510,6 +553,113 @@ fn stale_document_case(runtime: &tokio::runtime::Runtime, app: &mut App) -> Resu
         assert!(app.handle_job(packet.event(Ok(png()?)))?);
     }
     assert_eq!(finish_all(runtime, app)?, IMAGE_COUNT - 2);
+    assert_eq!(app.article.loaded_images.len(), IMAGE_COUNT);
+    assert_idle(app)
+}
+
+fn prepared_stale_case(runtime: &tokio::runtime::Runtime, app: &mut App) -> Result<()> {
+    seed_and_open(app, false, "Prepared old route marker")?;
+    app.dispatch("article", "article.load-all-images", "")?;
+    let mut packets = collect_transport(runtime, app)?;
+    assert_eq!(packets.len(), 2);
+    let prepared = packets.remove(0);
+    let waiting = packets.remove(0);
+    assert!(app.handle_job(prepared.event(Ok(png()?)))?);
+    assert!(app.article_preparation.is_busy());
+    assert_eq!(app.pending_article_images.len(), 2);
+    assert_eq!(app.article.image_work.available_capacity(), 0);
+    assert_eq!(app.jobs.cover_capacity(), 0);
+    assert!(app.article.loaded_images.is_empty());
+    assert!(app.cache.get_for_commit(&prepared.key)?.is_none());
+
+    app.navigate(Route::Library, false)?;
+    assert!(app.pending_article_images.is_empty());
+    assert!(app.article_preparation.is_busy());
+    assert_eq!(app.jobs.cover_capacity(), 0);
+    let parses = app.article.document_parses;
+    let checks = app.article.image_cache_checks;
+    let rows = article_image_rows(app);
+    drain_article_preparation(app)?;
+    assert_eq!(app.route, Route::Library);
+    assert!(!app.article_preparation.is_busy());
+    assert_eq!(app.jobs.cover_capacity(), 1);
+    assert!(app.cache.get_for_commit(&prepared.key)?.is_none());
+    assert!(app.article.loaded_images.is_empty());
+    assert_eq!(app.article.document_parses, parses);
+    assert_eq!(app.article.image_cache_checks, checks);
+    assert_eq!(article_image_rows(app), rows);
+    assert!(!app.handle_job(waiting.event(Ok(png()?)))?);
+    assert_eq!(app.jobs.cover_capacity(), 2);
+
+    seed_and_open(app, false, "Prepared old document marker")?;
+    app.dispatch("article", "article.load-all-images", "")?;
+    let mut packets = collect_transport(runtime, app)?;
+    assert_eq!(packets.len(), 2);
+    let prepared = packets.remove(0);
+    let waiting = packets.remove(0);
+    assert!(app.handle_job(prepared.event(Ok(png()?)))?);
+    assert!(app.article_preparation.is_busy());
+    assert_eq!(app.pending_article_images.len(), 2);
+    assert_eq!(app.article.image_work.available_capacity(), 0);
+    assert_eq!(app.jobs.cover_capacity(), 0);
+    assert!(app.cache.get_for_commit(&prepared.key)?.is_none());
+
+    // Replace the same article directly, without a route or account change.
+    // The old request must not gain access to the replacement document.
+    seed_and_open(app, false, "Prepared replacement document marker")?;
+    assert!(app.article.pages.len() > 1);
+    app.article.page = 1;
+    app.render()?;
+    assert!(app.pending_article_images.is_empty());
+    assert!(app.article_preparation.is_busy());
+    assert_eq!(app.jobs.cover_capacity(), 0);
+    let parses = app.article.document_parses;
+    let checks = app.article.image_cache_checks;
+    let rows = article_image_rows(app);
+    drain_article_preparation(app)?;
+    assert_eq!(app.route, Route::Article(ARTICLE_ID.into()));
+    assert!(
+        app.article
+            .html
+            .contains("Prepared replacement document marker")
+    );
+    assert_eq!(app.article.page, 1);
+    assert!(!app.article_preparation.is_busy());
+    assert_eq!(app.jobs.cover_capacity(), 1);
+    assert!(app.cache.get_for_commit(&prepared.key)?.is_none());
+    assert!(app.article.loaded_images.is_empty());
+    assert_eq!(app.article.document_parses, parses);
+    assert_eq!(app.article.image_cache_checks, checks);
+    assert_eq!(article_image_rows(app), rows);
+    assert!(!app.handle_job(waiting.event(Ok(png()?)))?);
+    assert_eq!(app.jobs.cover_capacity(), 2);
+
+    seed_and_open(app, false, "Prepared quiescence retry marker")?;
+    app.dispatch("article", "article.load-all-images", "")?;
+    let mut packets = collect_transport(runtime, app)?;
+    assert_eq!(packets.len(), 2);
+    let prepared = packets.remove(0);
+    let waiting = packets.remove(0);
+    assert!(app.handle_job(prepared.event(Ok(png()?)))?);
+    assert!(app.article_preparation.is_busy());
+    assert_eq!(app.pending_article_images.len(), 2);
+    assert_eq!(app.article.image_work.available_capacity(), 0);
+    assert_eq!(app.jobs.cover_capacity(), 0);
+    app.quiesce_article_preparation(Duration::from_secs(3))?;
+    assert!(!app.article_preparation.is_busy());
+    assert!(app.pending_article_images.is_empty());
+    assert_eq!(app.article.image_work.available_capacity(), 2);
+    assert!(app.article.image_work.has_work());
+    assert_eq!(app.article.image_work.request_for(&prepared.id), None);
+    assert_eq!(app.article.image_work.request_for(&waiting.id), None);
+    assert_eq!(app.jobs.cover_capacity(), 1);
+    assert!(app.cache.get_for_commit(&prepared.key)?.is_none());
+    assert!(app.cache.get_for_commit(&waiting.key)?.is_none());
+    assert!(app.article.loaded_images.is_empty());
+    assert!(!app.handle_job(waiting.event(Ok(png()?)))?);
+    assert_eq!(app.jobs.cover_capacity(), 2);
+    assert!(app.cache.get_for_commit(&waiting.key)?.is_none());
+    assert_eq!(finish_all(runtime, app)?, IMAGE_COUNT);
     assert_eq!(app.article.loaded_images.len(), IMAGE_COUNT);
     assert_idle(app)
 }
@@ -600,6 +750,7 @@ fn app_case(scenario: &str) -> Result<()> {
             "failure" => failure_case(&runtime, &mut app),
             "cancel-busy" => cancel_busy_case(&runtime, &mut app),
             "stale-document" => stale_document_case(&runtime, &mut app),
+            "prepared-stale" => prepared_stale_case(&runtime, &mut app),
             "resident" => resident_case(&runtime, &mut app),
             _ => bail!("Unknown article integration scenario"),
         }
@@ -788,6 +939,14 @@ fn old_results_cannot_change_another_route_or_a_new_document_with_the_same_id() 
     isolated(
         "old_results_cannot_change_another_route_or_a_new_document_with_the_same_id",
         "stale-document",
+    )
+}
+
+#[test]
+fn prepared_results_retain_credits_and_reject_changed_documents() -> Result<()> {
+    isolated(
+        "prepared_results_retain_credits_and_reject_changed_documents",
+        "prepared-stale",
     )
 }
 

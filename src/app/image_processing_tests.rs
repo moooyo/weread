@@ -1,6 +1,6 @@
 //! Actual published image scenes own processing until a complete replacement.
 
-use super::super::underline_projection_tests::{BOOK, Fixture, isolated};
+use super::super::underline_projection_tests::{BOOK, CHAPTER, Fixture, isolated};
 use super::*;
 use crate::{
     cache::InventoryReadStats,
@@ -8,6 +8,7 @@ use crate::{
     reader::layout_budget::LayoutLimits,
     store::{BookMetadataLimits, with_book_metadata_test_limits},
 };
+use anyhow::ensure;
 use slint::Model;
 use std::sync::{
     Mutex,
@@ -62,6 +63,7 @@ fn rows(value: u8) -> ModelRc<ReaderImage> {
     model(vec![ReaderImage {
         id: "published-picture".into(),
         loaded: true,
+        preparing: false,
         picture: image(value),
         width: 2.0,
         height: 26.0,
@@ -521,6 +523,154 @@ fn an_article_scene_replaces_reader_models_and_respects_article_overlays() -> Re
         assert_eq!(article.get_blocks().row_count(), 0);
     }
     fixture.finish()
+}
+
+fn actual_reader_reuses_pixels_and_rejects_a_changed_current_source() -> Result<()> {
+    use crate::source::images::{DownloadedChapterImages, ImageAsset};
+    use std::io::Cursor;
+
+    let fixture = Fixture::new("Before.\nAfter.", vec![], false)?;
+    {
+        let mut app = fixture.app();
+        let mut encoded = Cursor::new(Vec::new());
+        image::DynamicImage::ImageLuma8(image::GrayImage::from_fn(32, 16, |x, y| {
+            image::Luma([((x * 7 + y * 11) % 256) as u8])
+        }))
+        .write_to(&mut encoded, image::ImageFormat::Png)?;
+        let bytes = encoded.into_inner();
+        let id = hex::encode(Sha256::digest(&bytes));
+        let packet = DownloadedChapterImages {
+            assets: vec![ImageAsset {
+                id: id.clone(),
+                media_type: "image/png".into(),
+                extension: "png".into(),
+                source_names: vec!["picture.png".into()],
+                bytes,
+            }],
+            source_to_asset: BTreeMap::from([("picture.png".into(), id)]),
+        };
+        let manifest = app.book_assets.commit_chapter(
+            &app.store,
+            BOOK,
+            CHAPTER,
+            "<p>Before.</p><img src='picture.png' alt='Synthetic picture'><p>After.</p>",
+            "Before.\nAfter.",
+            Some(&packet),
+        )?;
+        assert_eq!(manifest.images.len(), 1);
+        assert!(manifest.images[0].anchor.is_some());
+        let path = app.book_assets.image_path(&manifest.images[0])?.unwrap();
+        app.prefs.image_dithering = ImageDithering::Software;
+        app.reflow_reader()?;
+        app.render_reader()?;
+        assert!(app.image_preparation_busy());
+        assert!(
+            fixture
+                .ui()
+                .global::<ReaderModel>()
+                .get_images()
+                .row_data(0)
+                .unwrap()
+                .preparing
+        );
+        let toast = fixture.ui().global::<ShellModel>().get_toast();
+        app.load_reader_image(&manifest.images[0].id)?;
+        assert_eq!(fixture.ui().global::<ShellModel>().get_toast(), toast);
+        assert!(
+            !fixture
+                .ui()
+                .global::<ReaderModel>()
+                .get_images()
+                .row_data(0)
+                .unwrap()
+                .loaded
+        );
+        let started = Instant::now();
+        let last_reading_activity = app.reader.last_active;
+        while app.image_preparation_busy() {
+            ensure!(
+                started.elapsed() < Duration::from_secs(20),
+                "The controlled image worker did not finish"
+            );
+            app.dispatch("shell", "shell.image-preparation-ready", "0")?;
+            std::thread::yield_now();
+        }
+        assert_eq!(app.reader.last_active, last_reading_activity);
+        assert!(
+            app.reader_image_preparation_diagnostics()["wake_callbacks"]
+                .as_u64()
+                .unwrap()
+                >= 1
+        );
+        app.render_reader()?;
+        let row = fixture
+            .ui()
+            .global::<ReaderModel>()
+            .get_images()
+            .row_data(0)
+            .unwrap();
+        assert!(row.loaded);
+        assert!(!row.preparing);
+        let first = row.picture.to_rgb8().unwrap();
+        let first_pointer = first.as_bytes().as_ptr();
+        let first_pixels = first.as_bytes().to_vec();
+        let started_workers = app.reader_image_preparation_diagnostics()["workers_started"]
+            .as_u64()
+            .unwrap();
+        fixture.ui().global::<ReaderModel>().set_menu(true);
+        app.render_reader()?;
+        let repeated = fixture
+            .ui()
+            .global::<ReaderModel>()
+            .get_images()
+            .row_data(0)
+            .unwrap()
+            .picture
+            .to_rgb8()
+            .unwrap();
+        assert_eq!(repeated.as_bytes().as_ptr(), first_pointer);
+        assert_eq!(repeated.as_bytes(), first_pixels.as_slice());
+        assert_eq!(
+            app.reader_image_preparation_diagnostics()["workers_started"].as_u64(),
+            Some(started_workers)
+        );
+        assert!(
+            app.reader_image_preparation_diagnostics()["cache_hits"]
+                .as_u64()
+                .unwrap()
+                >= 1
+        );
+
+        // A ready scene is not a cache-integrity receipt for a later operation.
+        std::fs::write(path, b"changed cached payload")?;
+        app.render_reader()?;
+        // A text-bound manifest may retain its missing-image placeholder.
+        // Neither that row nor the preparation cache can retain old pixels.
+        let rejected = fixture.ui().global::<ReaderModel>().get_images();
+        assert!(rejected.row_count() <= 1);
+        for row in rejected.iter() {
+            assert_eq!(row.id.as_str(), manifest.images[0].id);
+            assert!(!row.loaded);
+            assert!(!row.preparing);
+            let size = row.picture.size();
+            assert_eq!((size.width, size.height), (0, 0));
+        }
+        assert!(!app.image_preparation_busy());
+        assert_eq!(
+            app.reader_image_preparation_diagnostics()["ready"].as_bool(),
+            Some(false)
+        );
+        assert!(app.image_processing.scene.is_none());
+    }
+    fixture.finish()
+}
+
+#[test]
+fn reader_preparation_reuses_final_pixels_and_revalidates_current_sources() -> Result<()> {
+    isolated(
+        "app::image_processing::tests::reader_preparation_reuses_final_pixels_and_revalidates_current_sources",
+        actual_reader_reuses_pixels_and_rejects_a_changed_current_source,
+    )
 }
 
 #[test]

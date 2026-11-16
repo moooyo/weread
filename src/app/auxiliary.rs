@@ -3243,6 +3243,7 @@ impl App {
                     }
                     .into(),
                     loaded: picture.is_some(),
+                    preparing: false,
                     picture: slint::Image::default(),
                     height: block.height.min(i32::MAX as u32) as i32,
                     letter_spacing: block.letter_spacing,
@@ -3631,6 +3632,7 @@ impl App {
     }
 
     pub(super) fn clear_article_image_work(&mut self) {
+        self.cancel_article_preparation();
         self.article.image_work.clear();
         self.pending_article_images.clear();
     }

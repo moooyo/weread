@@ -522,12 +522,13 @@ class Verifier:
                     require(difference > 0.005, "Changing the statistics period did not change its rendered controls or data")
                     return {"period_difference_ratio": difference}
                 self.assertion(f"{key}/{profile}-{period}-rendered", period_changed, baselines[profile], capture)
-        chart_baseline = self.run_case(f"{key}/chart-before-selection", screen="stats", actions=[action(300, "auxiliary", "stats.previous")])
+        # The default maximum bar depends on the date; choose a fixed origin.
+        chart_baseline = self.run_case(f"{key}/chart-before-selection", screen="stats", actions=[action(300, "auxiliary", "stats.previous"), action(400, "auxiliary", "stats.bar", "0")])
         selected = self.run_case(f"{key}/chart-selected", screen="stats", actions=[action(300, "auxiliary", "stats.previous"), action(600, "pointer", "tap", "60,410"), action(900, "auxiliary", "stats.bar-next")])
         self.assertion(f"{key}/uses-local-reading-records", lambda: {"reading_seconds": require_reading_sessions(selected.database)}, selected)
         def chart_changed() -> dict[str, Any]:
             difference = pixel_difference(chart_baseline.path, selected.path, crop=(20, 288, 612, 528))
-            require(difference > 0.0005, "Pointer and step navigation did not change the selected statistics value")
+            require(difference > 0.0005, "Pointer and step navigation did not change the selected statistics bar")
             return {"chart_selection_difference_ratio": difference}
         self.assertion(f"{key}/chart-selection-rendered", chart_changed, chart_baseline, selected)
 

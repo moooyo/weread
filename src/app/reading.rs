@@ -2780,6 +2780,7 @@ impl App {
     pub(super) fn reader_action(&mut self, action: &str, value: &str) -> Result<()> {
         let action = action.strip_prefix("reader.").unwrap_or(action);
         self.reader.last_active = Instant::now();
+        self.note_cover_reading_activity();
         match action {
             "back" => {
                 let toc_open = self

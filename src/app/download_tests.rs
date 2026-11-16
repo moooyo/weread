@@ -445,13 +445,8 @@ fn run_reader_image_complement(
         anchor
     );
     assert_eq!(ui.global::<ReaderModel>().get_images().row_count(), 1);
-    assert!(
-        ui.global::<ReaderModel>()
-            .get_images()
-            .row_data(0)
-            .unwrap()
-            .loaded
-    );
+    let image = ui.global::<ReaderModel>().get_images().row_data(0).unwrap();
+    assert!(image.loaded || image.preparing);
     assert!(
         state
             .book_assets
@@ -462,6 +457,14 @@ fn run_reader_image_complement(
         1
     );
     assert_eq!(state.store.task(&task.id)?.unwrap().next_index, 1);
+    while state.image_preparation_busy() {
+        state.poll_image_preparation()?;
+        std::thread::yield_now();
+    }
+    state.render_reader()?;
+    let image = ui.global::<ReaderModel>().get_images().row_data(0).unwrap();
+    assert!(image.loaded);
+    assert!(!image.preparing);
     Ok(())
 }
 

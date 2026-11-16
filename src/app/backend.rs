@@ -55,6 +55,12 @@ pub(super) struct CoverRequestContext {
     url: String,
 }
 
+struct CoverTransport {
+    // Field order also protects stale and refused transport payloads.
+    result: source::Result<Vec<u8>>,
+    credits: Option<crate::jobs::JobCredits>,
+}
+
 /// One admitted catalog operation. UID keys borrow the immutable new rows and
 /// are discarded after resolving old indices; every consumer then uses numbers.
 struct CatalogReindex<'a> {
@@ -148,7 +154,7 @@ impl App {
         let JobEvent {
             request,
             result,
-            credits: _credits,
+            credits: mut image_credits,
             ..
         } = event;
         let mut render = true;
@@ -456,7 +462,7 @@ impl App {
                 }
             },
             JobResult::Cover { book_id, result } => {
-                self.cover_result(request, &book_id, result)?;
+                self.cover_result_with_credits(request, &book_id, result, image_credits.take())?;
                 render = false;
             }
             JobResult::ArticleImage {
@@ -464,7 +470,13 @@ impl App {
                 image_id,
                 result,
             } => {
-                render = self.article_image_result(request, &article_id, &image_id, result)?;
+                render = self.article_image_result_with_credits(
+                    request,
+                    &article_id,
+                    &image_id,
+                    result,
+                    image_credits.take(),
+                )?;
             }
             JobResult::LoginBegin(result) => {
                 if request != self.login_request || self.route != Route::Login {
@@ -1282,7 +1294,7 @@ impl App {
             }
     }
 
-    fn visible_cover_ids(&self) -> Vec<String> {
+    pub(super) fn visible_cover_ids(&self) -> Vec<String> {
         let Some(ui) = self.ui.upgrade() else {
             return Vec::new();
         };
@@ -1320,6 +1332,9 @@ impl App {
         if !self.visible_cover_page_active() {
             return;
         }
+        if matches!(self.route, Route::Reader(..)) && !self.sleep_cover_admission_ready() {
+            return;
+        }
         for id in self.visible_cover_ids() {
             if id.is_empty() || self.pending_covers.contains(&id) {
                 continue;
@@ -1335,6 +1350,9 @@ impl App {
             let Some(book) = book.filter(|book| !book.cover_url.is_empty()) else {
                 continue;
             };
+            if self.cover_work_pending(&id, &book.cover_url) {
+                continue;
+            }
             let cache_key = if matches!(self.route, Route::Reader(..)) {
                 let Some(key) = sleep_screen::cover_key(&id, &book.cover_url) else {
                     continue;
@@ -1352,11 +1370,13 @@ impl App {
                 .ok()
                 .flatten()
                 .is_some_and(|time| Utc::now().timestamp().saturating_sub(time) < 60)
-                || self.cache.get(&cache_key).ok().flatten().is_some()
+                || ((!matches!(self.route, Route::Reader(..))
+                    || self.sleep_cover_cached_full_usable())
+                    && self.cache.get(&cache_key).ok().flatten().is_some())
             {
                 continue;
             }
-            if self.jobs.cover_capacity() == 0 {
+            if self.jobs.cover_capacity() == 0 || !self.cover_preparation_has_capacity() {
                 // One route marker replaces a waiting queue. A later tick can
                 // refill it even if unrelated, stale metadata releases capacity.
                 self.deferred_cover_refill = Some(self.route.clone());
@@ -1380,7 +1400,7 @@ impl App {
             self.deferred_cover_refill = None;
             return;
         }
-        if self.jobs.cover_capacity() > 0 {
+        if self.jobs.cover_capacity() > 0 && self.cover_preparation_has_capacity() {
             self.schedule_visible_covers();
         }
     }
@@ -1609,46 +1629,43 @@ impl App {
         Ok(true)
     }
 
-    fn article_image_result(
+    fn article_image_result_with_credits(
         &mut self,
         request: u64,
         article_id: &str,
         id: &str,
         result: source::Result<Vec<u8>>,
+        credits: Option<crate::jobs::JobCredits>,
     ) -> Result<bool> {
         if article_id != self.article.id
             || !matches!(&self.route, Route::Article(id) if id == &self.article.id)
             || !self.article.image_work.is_ready_for(&self.article.id)
         {
+            drop(result);
+            drop(credits);
             return Ok(false);
         }
         let Some(index) = self.article.image_work.accepts(id, request) else {
+            drop(result);
+            drop(credits);
             return Ok(false);
         };
         let key = format!("article-image:{article_id}:{id}");
-        let url = self
-            .article
-            .image_work
-            .image(index)
-            .map(|image| image.url.as_str())
-            .unwrap_or("");
-        let cache_key = image_processing::article_cache_key(article_id, id, url);
-        self.pending_article_images.remove(&key);
-        let mut loaded = false;
+        let mut credits = credits;
         let outcome = match result {
             Ok(bytes) => {
-                let (width, height) = self.profile.physical_size();
-                match self.cache.put_gray8(
-                    &cache_key,
-                    &bytes,
-                    width.saturating_sub(128).min(2048),
-                    height.min(2048),
+                match self.enqueue_article_preparation(
+                    request,
+                    article_id,
+                    id,
+                    index,
+                    bytes,
+                    credits.take(),
                 ) {
-                    Ok(path) => {
-                        self.article.loaded_images.insert(id.to_owned(), path);
-                        loaded = true;
-                        ArticleImageOutcome::Success
-                    }
+                    // Pending document intent and admission credits remain
+                    // owned until the canonical worker result is settled.
+                    Ok(true) => return Ok(true),
+                    Ok(false) => ArticleImageOutcome::Busy,
                     Err(_) => {
                         self.show_toast("image_load_failed");
                         ArticleImageOutcome::Failed
@@ -1661,13 +1678,14 @@ impl App {
                 ArticleImageOutcome::Failed
             }
         };
+        self.pending_article_images.remove(&key);
         self.article.image_work.finish(index, request, outcome);
         if outcome == ArticleImageOutcome::Busy {
             // Synchronous admission rejection must not recursively re-enter
             // image submission. The next tick continues the retained intent.
             return Ok(true);
         }
-        if loaded || self.continue_article_image_work()? {
+        if self.continue_article_image_work()? {
             self.reflow_article()?;
             let (width, height) = self.platform.logical_viewport_size();
             self.refresh_display(RefreshReason::ImageLoaded(crate::platform::RefreshRect {
@@ -1677,6 +1695,7 @@ impl App {
                 height,
             }));
         }
+        drop(credits);
         Ok(true)
     }
 
@@ -1694,13 +1713,14 @@ impl App {
     }
 
     pub(super) fn clear_pending_cover_requests(&mut self) {
+        self.cancel_cover_preparation();
         self.pending_covers.clear();
         self.pending_cover_requests.clear();
         self.cover_ui_changes.clear();
         self.deferred_cover_refill = None;
     }
 
-    fn current_cover_url(&self, book_id: &str) -> Option<String> {
+    pub(super) fn current_cover_url(&self, book_id: &str) -> Option<String> {
         if self.route == Route::Search && self.search_purpose == "books" {
             if let Some(book) = self.search_results.iter().find(|book| book.id == book_id) {
                 return Some(book.cover_url.clone());
@@ -1721,12 +1741,24 @@ impl App {
         }
     }
 
+    #[cfg(test)]
     fn cover_result(
         &mut self,
         request: u64,
         book_id: &str,
         result: source::Result<Vec<u8>>,
     ) -> Result<()> {
+        self.cover_result_with_credits(request, book_id, result, None)
+    }
+
+    fn cover_result_with_credits(
+        &mut self,
+        request: u64,
+        book_id: &str,
+        result: source::Result<Vec<u8>>,
+        credits: Option<crate::jobs::JobCredits>,
+    ) -> Result<()> {
+        let transport = CoverTransport { result, credits };
         let Some(context) = self.pending_cover_requests.get(book_id) else {
             return Ok(());
         };
@@ -1735,32 +1767,27 @@ impl App {
         }
         let context = self.pending_cover_requests.remove(book_id).unwrap();
         self.pending_covers.remove(book_id);
-        if !matches!(&result, Err(source::SourceError::Busy))
+        if !matches!(&transport.result, Err(source::SourceError::Busy))
             && self.current_cover_url(book_id).as_deref() != Some(context.url.as_str())
         {
             self.defer_current_cover(book_id);
             return Ok(());
         }
+        let CoverTransport { result, credits } = transport;
         match result {
             Ok(bytes) => {
-                let Some(key) = sleep_screen::thumbnail_key(book_id, &context.url) else {
-                    return Ok(());
-                };
-                match self.cache.put_cover(&key, &bytes, 400, 560) {
-                    Ok(path) => {
-                        self.store
-                            .delete_setting(&format!("cover.failed:{book_id}"))?;
-                        if !self.prepare_downloaded_sleep_cover(book_id, &context.url, &bytes) {
-                            self.store.set_setting(
-                                &format!("cover.failed:{book_id}"),
-                                &Utc::now().timestamp(),
-                            )?;
-                        }
-                        if self.visible_cover_ids().iter().any(|id| id == book_id) {
-                            self.cover_ui_changes.insert(book_id.to_owned(), path);
-                        }
-                    }
+                match self.queue_downloaded_cover(
+                    request,
+                    context.account_epoch,
+                    book_id,
+                    &context.url,
+                    bytes,
+                    credits,
+                ) {
+                    Ok(true) => {}
+                    Ok(false) => self.defer_current_cover(book_id),
                     Err(_) => {
+                        self.note_cover_source_failure(book_id);
                         self.store.set_setting(
                             &format!("cover.failed:{book_id}"),
                             &Utc::now().timestamp(),
@@ -1774,6 +1801,7 @@ impl App {
                 self.defer_current_cover(book_id);
             }
             Err(_) => {
+                self.note_cover_source_failure(book_id);
                 self.store
                     .set_setting(&format!("cover.failed:{book_id}"), &Utc::now().timestamp())?;
             }
@@ -1784,10 +1812,9 @@ impl App {
     fn updated_cover_tile(
         &self,
         mut tile: BookTile,
-        changes: &BTreeMap<String, PathBuf>,
+        changes: &BTreeMap<String, slint::Image>,
     ) -> Option<BookTile> {
-        let path = changes.get(tile.id.as_str())?;
-        tile.cover = slint::Image::load_from_path(path).ok()?;
+        tile.cover = changes.get(tile.id.as_str())?.clone();
         tile.has_cover = true;
         Some(tile)
     }
@@ -1795,10 +1822,9 @@ impl App {
     fn updated_search_cover(
         &self,
         mut row: SearchResult,
-        changes: &BTreeMap<String, PathBuf>,
+        changes: &BTreeMap<String, slint::Image>,
     ) -> Option<SearchResult> {
-        let path = changes.get(row.id.as_str())?;
-        row.cover = slint::Image::load_from_path(path).ok()?;
+        row.cover = changes.get(row.id.as_str())?.clone();
         Some(row)
     }
 
@@ -2755,6 +2781,7 @@ mod tests {
                 },
             })?);
             assert!(!app.pending_covers.contains(image_key));
+            app.drain_cover_preparation_for_test()?;
             assert!(app.pending_article_images.contains(image_key));
             assert_eq!(app.article.image_work.accepts("busy-image", 47), Some(0));
             assert!(app.article.loaded_images.is_empty());
@@ -2845,6 +2872,7 @@ mod tests {
             let mut png = std::io::Cursor::new(Vec::new());
             image::DynamicImage::new_rgb8(2, 2).write_to(&mut png, image::ImageFormat::Png)?;
             app.cover_result(199, "visible-0", Ok(png.into_inner()))?;
+            app.drain_cover_preparation_for_test()?;
             app.render()?;
             assert!(
                 app.cache

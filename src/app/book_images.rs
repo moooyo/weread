@@ -2,6 +2,7 @@ use super::*;
 use crate::book_assets::ChapterManifest;
 use crate::reader::layout_budget::{LayoutLease, LayoutVec};
 use crate::reader::{AdmittedLayout, IMAGE_CAPTION_HEIGHT, InlineImage, Layout, LayoutBudget};
+use anyhow::{Context, ensure};
 
 const PLACEHOLDER_WIDTH: f32 = 480.0;
 const PLACEHOLDER_HEIGHT: f32 = 240.0;
@@ -195,7 +196,7 @@ impl App {
         let hardware = effective == crate::preferences::ImageDithering::Hardware;
         let mut fallback = LayoutVec::with_capacity(budget, if hardware { count } else { 0 })?;
         let (viewport, scale) = self.image_viewport();
-        let mut raster = super::image_raster::RasterBudget::new(viewport)?;
+        let _raster = super::image_raster::RasterBudget::new(viewport)?;
         let mut regions = Vec::new();
         let mut clean = true;
         let mut identity = sha2::Sha256::new();
@@ -203,7 +204,20 @@ impl App {
         identity.update((self.reader.book_id.len() as u64).to_be_bytes());
         identity.update(self.reader.book_id.as_bytes());
         identity.update(self.reader.chapter_index.to_be_bytes());
+        identity.update(self.jobs.account_epoch().to_be_bytes());
+        identity.update(viewport.0.to_be_bytes());
+        identity.update(viewport.1.to_be_bytes());
+        identity.update(scale.to_bits().to_be_bytes());
+        identity.update(requested.as_str().as_bytes());
+        identity.update(
+            self.reader
+                .paginator
+                .as_ref()
+                .map_or(0, |paginator| paginator.current_index())
+                .to_be_bytes(),
+        );
         let Some(snapshot) = snapshot else {
+            self.image_processing.preparation.borrow_mut().cancel();
             let rows = self.admitted_view_model(images, budget)?;
             return self.prepared_reader_scene(
                 rows.clone(),
@@ -215,6 +229,82 @@ impl App {
                 budget,
             );
         };
+        identity.update(snapshot.manifest.chapter_uid.as_bytes());
+        identity.update(snapshot.manifest.text_sha256.as_bytes());
+        let request_metadata = snapshot.paths.iter().flatten().try_fold(
+            count
+                .checked_mul(
+                    std::mem::size_of::<super::image_raster::PictureRequest>()
+                        + std::mem::size_of::<super::image_raster::PreparedPixels>(),
+                )
+                .context("Reader image request metadata overflow")?,
+            |used, path| {
+                used.checked_add(path.capacity())
+                    .context("Reader image path overflow")
+            },
+        )?;
+        budget.preflight(request_metadata, 0)?;
+        let mut requests = Vec::with_capacity(count);
+        if let Some(page) = page {
+            for placed in &page.images {
+                let Some((index, image)) = snapshot
+                    .manifest
+                    .images
+                    .iter()
+                    .enumerate()
+                    .find(|(_, image)| image.id == placed.id && image.anchor.is_some())
+                else {
+                    continue;
+                };
+                if !valid_placement(placed.y, placed.width, placed.height) {
+                    continue;
+                }
+                let row = ReaderImage {
+                    y: placed.y,
+                    width: placed.width,
+                    height: placed.height,
+                    ..Default::default()
+                };
+                let (frame, clip) = self.reader_image_box(&row);
+                identity.update((image.id.len() as u64).to_be_bytes());
+                identity.update(image.id.as_bytes());
+                identity.update(image.asset_id.as_deref().unwrap_or("").as_bytes());
+                for value in [
+                    frame.0, frame.1, frame.2, frame.3, clip.0, clip.1, clip.2, clip.3,
+                ] {
+                    identity.update(value.to_bits().to_be_bytes());
+                }
+                if let Some(path) = snapshot.paths[index].as_ref() {
+                    let target = (
+                        (frame.2 * scale).round().max(1.0) as u32,
+                        (frame.3 * scale).round().max(1.0) as u32,
+                    );
+                    let encoded_path = path.as_os_str().as_encoded_bytes();
+                    budget.work(encoded_path.len())?;
+                    identity.update((encoded_path.len() as u64).to_be_bytes());
+                    identity.update(encoded_path);
+                    requests.push(super::image_raster::PictureRequest {
+                        path: path.clone(),
+                        frame: target,
+                        fit: super::image_raster::PictureFit::Contain,
+                        method: requested,
+                    });
+                } else {
+                    identity.update(0_u64.to_be_bytes());
+                }
+            }
+        }
+        let identity = hex::encode(identity.finalize());
+        let request_count = requests.len();
+        let prepared =
+            self.request_image_scene_pixels(identity.clone(), viewport, requests, budget)?;
+        ensure!(
+            prepared
+                .as_ref()
+                .is_none_or(|pictures| pictures.len() == request_count),
+            "Reader image preparation result is not aligned"
+        );
+        let mut prepared_index = 0;
         if let Some(page) = self
             .reader
             .paginator
@@ -241,30 +331,22 @@ impl App {
                     ..Default::default()
                 };
                 let (frame, clip) = self.reader_image_box(&row);
-                let target = (
-                    (frame.2 * scale).round().max(1.0) as u32,
-                    (frame.3 * scale).round().max(1.0) as u32,
-                );
-                let picture = snapshot.paths[index]
-                    .as_ref()
-                    .map(|path| {
-                        super::image_raster::prepare_picture(
-                            path,
-                            target,
-                            super::image_raster::PictureFit::Contain,
-                            effective,
-                            &mut raster,
-                        )
-                    })
-                    .transpose()?;
+                let picture = if snapshot.paths[index].is_some() {
+                    let picture = prepared
+                        .as_ref()
+                        .and_then(|pictures| pictures.get(prepared_index))
+                        .cloned()
+                        .map(super::image_raster::PreparedPixels::into_picture);
+                    prepared_index += 1;
+                    picture
+                } else {
+                    None
+                };
                 let mut fallback_picture = slint::Image::default();
                 if let Some(picture) = picture {
                     row.loaded = true;
                     row.picture = picture.primary;
                     fallback_picture = picture.software;
-                    identity.update(image.asset_id.as_deref().unwrap_or("").as_bytes());
-                    identity.update(picture.dimensions.0.to_be_bytes());
-                    identity.update(picture.dimensions.1.to_be_bytes());
                     if hardware {
                         let ratio = (frame.2 / f64::from(picture.dimensions.0))
                             .min(frame.3 / f64::from(picture.dimensions.1));
@@ -290,6 +372,8 @@ impl App {
                         }
                     }
                 }
+                row.preparing =
+                    !row.loaded && snapshot.paths[index].is_some() && self.image_preparation_busy();
                 let (id, mut owner) = self.admitted_shared_string(&image.id, budget)?;
                 let (caption, next) = self.admitted_shared_string(&image.caption, budget)?;
                 owner.merge(next);
@@ -317,15 +401,8 @@ impl App {
         } else {
             primary
         };
-        identity.update(effective.as_str().as_bytes());
         self.prepared_reader_scene(
-            primary,
-            software,
-            requested,
-            effective,
-            regions,
-            hex::encode(identity.finalize()),
-            budget,
+            primary, software, requested, effective, regions, identity, budget,
         )
     }
 
@@ -347,6 +424,11 @@ impl App {
             return Ok(());
         };
         if snapshot.paths[index].is_some() {
+            // A cached image can now have an unloaded row while its final
+            // pixels are being prepared. A tap does not require a new download.
+            if self.image_preparation_busy() {
+                return Ok(());
+            }
             self.show_toast("operation_failed");
             return Ok(());
         }

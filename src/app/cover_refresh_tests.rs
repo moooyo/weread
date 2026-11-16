@@ -159,6 +159,7 @@ fn deliver_cover(app: &mut App, id: &str) -> Result<()> {
         },
     ))?);
     assert!(!app.pending_covers.contains(id));
+    app.drain_cover_preparation_for_test()?;
     Ok(())
 }
 

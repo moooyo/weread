@@ -4,6 +4,7 @@ use super::*;
 use crate::platform::ImageRegion;
 use crate::preferences::ImageDithering;
 use crate::reader::layout_budget::{LayoutBudget, LayoutLease, LayoutModelRegistration};
+use anyhow::{Context, ensure};
 use sha2::{Digest, Sha256};
 
 pub(super) struct PreparedReaderImages {
@@ -39,6 +40,7 @@ pub(super) struct ImageProcessingState {
     scene: Option<PresentedImageScene>,
     sleep: bool,
     applied: Option<Rc<Vec<ImageRegion>>>,
+    pub(super) preparation: RefCell<super::image_preparation::ImagePreparationState>,
 }
 
 pub(super) fn article_cache_key(article: &str, id: &str, url: &str) -> String {
@@ -97,6 +99,121 @@ pub(super) fn clean_region(
 }
 
 impl App {
+    pub(super) fn poll_image_preparation(&mut self) -> Result<bool> {
+        self.image_processing.preparation.borrow_mut().poll()
+    }
+
+    pub(super) fn cancel_image_preparation(&mut self) {
+        self.image_processing.preparation.borrow_mut().cancel();
+    }
+
+    pub(super) fn pause_image_preparation(&mut self) {
+        self.image_processing
+            .preparation
+            .borrow_mut()
+            .cancel_pending();
+    }
+
+    pub(super) fn image_preparation_busy(&self) -> bool {
+        self.image_processing.preparation.borrow().busy()
+    }
+
+    pub(super) fn record_image_preparation_wake(&self, elapsed: Duration) {
+        self.image_processing
+            .preparation
+            .borrow_mut()
+            .record_wake(elapsed);
+    }
+
+    /// Return counters on demand without exposing source or account identities.
+    pub fn reader_image_preparation_diagnostics(&self) -> serde_json::Value {
+        let preparation = self.image_processing.preparation.borrow();
+        let stats = preparation.stats();
+        serde_json::json!({
+            "busy": preparation.busy(),
+            "ready": preparation.ready(),
+            "restart_needed": preparation.restart_needed(),
+            "workers_started": stats.started,
+            "cache_hits": stats.reused,
+            "completed": stats.completed,
+            "cancelled": stats.cancelled,
+            "stale": stats.stale,
+            "latest_worker_us": stats.latest_worker_us,
+            "latest_wake_ui_us": stats.latest_wake_ui_us,
+            "wake_ui_us_total": stats.wake_ui_us_total,
+            "wake_callbacks": stats.wake_callbacks,
+        })
+    }
+
+    pub(super) fn quiesce_image_preparation(&mut self, timeout: Duration) -> Result<()> {
+        self.image_processing
+            .preparation
+            .borrow_mut()
+            .quiesce(timeout)
+    }
+
+    /// Only candidate paths are queued. Their content-addressed bytes are
+    /// independently read and checked on the worker; current source ownership
+    /// is resolved again by the caller before any ready result is requested.
+    pub(super) fn request_image_scene_pixels(
+        &self,
+        key: String,
+        viewport: (u32, u32),
+        pictures: Vec<super::image_raster::PictureRequest>,
+        budget: &LayoutBudget,
+    ) -> Result<Option<Rc<super::image_preparation::PreparedScenePixels>>> {
+        if pictures.is_empty() {
+            self.image_processing.preparation.borrow_mut().cancel();
+            return Ok(None);
+        }
+        if self.managed_sleep_blocked {
+            return Ok(self
+                .image_processing
+                .preparation
+                .borrow_mut()
+                .ready_while_paused(&key));
+        }
+        let metadata = pictures
+            .capacity()
+            .checked_mul(
+                std::mem::size_of::<super::image_raster::PictureRequest>()
+                    + std::mem::size_of::<super::image_raster::PreparedPixels>(),
+            )
+            .and_then(|bytes| bytes.checked_add(key.capacity().saturating_mul(3)))
+            .and_then(|bytes| {
+                bytes.checked_add(
+                    std::mem::size_of::<super::image_preparation::SceneRequest>()
+                        + std::mem::size_of::<super::image_preparation::PreparedScenePixels>()
+                        + std::mem::size_of::<slint::Weak<AppWindow>>()
+                        + 2 * std::mem::size_of::<usize>(),
+                )
+            })
+            .and_then(|bytes| {
+                pictures.iter().try_fold(bytes, |used, picture| {
+                    used.checked_add(picture.path.capacity())
+                })
+            })
+            .context("image preparation metadata overflow")?;
+        let storage = budget.copy_storage(metadata)?;
+        let registration = self.model_layout.register(storage.bytes())?;
+        let ui = self.ui.clone();
+        self.image_processing.preparation.borrow_mut().request(
+            super::image_preparation::SceneRequest {
+                key,
+                viewport,
+                pictures,
+                storage,
+                registration,
+                notify: Some(Box::new(move || {
+                    let _ = ui.upgrade_in_event_loop(|ui| {
+                        ui.global::<ShellModel>()
+                            .invoke_event("shell.image-preparation-ready".into(), "1".into());
+                    });
+                })),
+            },
+        )
+    }
+
     pub(super) fn image_processing_choices(&self) -> (ImageDithering, ImageDithering) {
         let requested = self.prefs.image_dithering;
         // Hardware describes the prepared Gray8 encoding. Availability belongs
@@ -264,11 +381,12 @@ impl App {
         mut blocks: Vec<ArticleBlock>,
     ) -> Result<(ModelRc<ArticleBlock>, Option<PresentedImageScene>)> {
         if !blocks.iter().any(|row| row.kind == "image" && row.loaded) {
+            self.image_processing.preparation.borrow_mut().cancel();
             return Ok((model(blocks), None));
         }
         let (requested, mut effective) = self.image_processing_choices();
         let (viewport, scale) = self.image_viewport();
-        let mut raster = super::image_raster::RasterBudget::new(viewport)?;
+        let _raster = super::image_raster::RasterBudget::new(viewport)?;
         let (width, height) = self.platform.logical_viewport_size();
         let margin = if self.profile.is_scribe() { 72.0 } else { 32.0 };
         let top = if self.profile.is_scribe() { 80.0 } else { 54.0 };
@@ -316,29 +434,96 @@ impl App {
         let mut offset = 0.0;
         let mut digest = Sha256::new();
         digest.update(self.article.id.as_bytes());
+        digest.update(self.article.account_id.as_bytes());
+        digest.update(self.jobs.account_epoch().to_be_bytes());
+        digest.update((self.article.page as u64).to_be_bytes());
+        digest.update(viewport.0.to_be_bytes());
+        digest.update(viewport.1.to_be_bytes());
+        digest.update(scale.to_bits().to_be_bytes());
+        digest.update(requested.as_str().as_bytes());
+        let request_metadata = self.article.loaded_images.values().try_fold(
+            blocks
+                .len()
+                .checked_mul(
+                    std::mem::size_of::<super::image_raster::PictureRequest>()
+                        + std::mem::size_of::<super::image_raster::PreparedPixels>(),
+                )
+                .context("Article image request metadata overflow")?,
+            |used, path| {
+                used.checked_add(path.capacity())
+                    .context("Article image path overflow")
+            },
+        )?;
+        budget.preflight(request_metadata, 0)?;
+        let mut requests = Vec::with_capacity(blocks.len());
         for block in &mut blocks {
-            let mut software = None;
-            if block.kind == "image" && block.loaded {
-                let path = self.article.loaded_images.get(block.id.as_str());
+            digest.update((block.id.len() as u64).to_be_bytes());
+            digest.update(block.id.as_bytes());
+            digest.update(block.height.to_be_bytes());
+            digest.update(block.frame_height.to_bits().to_be_bytes());
+            if block.kind != "image" || !block.loaded {
+                continue;
+            }
+            let source = self
+                .article
+                .image_work
+                .images()
+                .iter()
+                .find(|image| image.id == block.id.as_str());
+            let current = source
+                .map(|source| article_cache_key(&self.article.id, &source.id, &source.url))
+                .map(|key| self.cache.get(&key))
+                .transpose()?
+                .flatten();
+            let current = current
+                .filter(|path| self.article.loaded_images.get(block.id.as_str()) == Some(path));
+            block.loaded = current.is_some();
+            digest.update([u8::from(block.loaded)]);
+            if let Some(path) = current {
                 let frame = (
                     (clip.2 * scale).round().max(1.0) as u32,
                     (f64::from(block.frame_height) * scale).round().max(1.0) as u32,
                 );
-                if let Some(path) = path {
-                    let picture = super::image_raster::prepare_picture(
-                        path,
-                        frame,
-                        super::image_raster::PictureFit::Cover,
-                        effective,
-                        &mut raster,
-                    )?;
+                let encoded_path = path.as_os_str().as_encoded_bytes();
+                budget.work(encoded_path.len())?;
+                digest.update((encoded_path.len() as u64).to_be_bytes());
+                digest.update(encoded_path);
+                digest.update(frame.0.to_be_bytes());
+                digest.update(frame.1.to_be_bytes());
+                requests.push(super::image_raster::PictureRequest {
+                    path,
+                    frame,
+                    fit: super::image_raster::PictureFit::Cover,
+                    method: requested,
+                });
+            }
+        }
+        let identity = hex::encode(digest.finalize());
+        let request_count = requests.len();
+        let prepared =
+            self.request_image_scene_pixels(identity.clone(), viewport, requests, &budget)?;
+        ensure!(
+            prepared
+                .as_ref()
+                .is_none_or(|pictures| pictures.len() == request_count),
+            "Article image preparation result is not aligned"
+        );
+        let mut prepared_index = 0;
+        for block in &mut blocks {
+            let mut software = None;
+            if block.kind == "image" && block.loaded {
+                let picture = prepared
+                    .as_ref()
+                    .and_then(|pictures| pictures.get(prepared_index))
+                    .cloned()
+                    .map(super::image_raster::PreparedPixels::into_picture);
+                prepared_index += 1;
+                block.loaded = picture.is_some();
+                block.preparing = !block.loaded && self.image_preparation_busy();
+                if let Some(picture) = picture {
                     block.picture = picture.primary;
                     software = Some(picture.software);
                     any = true;
-                    budget.work(path.as_os_str().as_encoded_bytes().len())?;
-                    digest.update(path.as_os_str().as_encoded_bytes());
-                    digest.update(frame.0.to_be_bytes());
-                    digest.update(frame.1.to_be_bytes());
                     if hardware {
                         if let Some(region) = clean_region(
                             (clip.0, top + offset, clip.2, f64::from(block.frame_height)),
@@ -377,7 +562,6 @@ impl App {
         } else {
             primary
         };
-        digest.update(effective.as_str().as_bytes());
         let scene = self.image_scene(
             SceneModels::Article {
                 primary: primary.clone(),
@@ -386,7 +570,7 @@ impl App {
             requested,
             effective,
             regions,
-            hex::encode(digest.finalize()),
+            identity,
             &budget,
         )?;
         Ok((primary, Some(scene)))
@@ -449,6 +633,7 @@ impl App {
     }
 
     pub(super) fn clear_presented_image_processing(&mut self) -> Result<()> {
+        self.cancel_image_preparation();
         if let Some(ui) = self.ui.upgrade() {
             ui.global::<ReaderModel>().set_images(ModelRc::default());
             ui.global::<ArticleModel>().set_blocks(ModelRc::default());

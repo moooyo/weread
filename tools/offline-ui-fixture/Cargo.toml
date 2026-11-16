@@ -6,6 +6,9 @@ publish = false
 
 [workspace]
 
+[features]
+performance-diagnostics = []
+
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }

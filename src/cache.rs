@@ -5,16 +5,66 @@ use std::{
     io::{Cursor, Read, Write},
     path::{Path, PathBuf},
     rc::Rc,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::atomic::{AtomicBool, AtomicU64, Ordering},
     time::{Duration, SystemTime},
 };
 
 use anyhow::{Context, Result, ensure};
+use image::ImageEncoder;
 use rusqlite::{Connection, OptionalExtension, params};
 use sha2::{Digest, Sha256};
 
 static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(0);
 static NEXT_CACHE_ID: AtomicU64 = AtomicU64::new(1);
+
+/// A checked PNG and its matching grayscale pixels, prepared without cache access.
+/// Only the bounded image preparation functions can construct this payload.
+pub struct PreparedPng {
+    encoded: Vec<u8>,
+    grayscale: image::GrayImage,
+}
+
+impl std::fmt::Debug for PreparedPng {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PreparedPng")
+            .field("dimensions", &self.grayscale.dimensions())
+            .field("encoded_bytes", &self.encoded.len())
+            .finish()
+    }
+}
+
+impl PreparedPng {
+    pub(crate) fn gray(&self) -> &image::GrayImage {
+        &self.grayscale
+    }
+
+    pub(crate) fn encoded(&self) -> &[u8] {
+        &self.encoded
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("image preparation was cancelled")]
+pub struct PreparationCancelled;
+
+fn check_preparation_cancelled(cancelled: &AtomicBool) -> Result<()> {
+    ensure!(!cancelled.load(Ordering::Acquire), PreparationCancelled);
+    Ok(())
+}
+
+fn encode_prepared_png(grayscale: image::GrayImage, cancelled: &AtomicBool) -> Result<PreparedPng> {
+    check_preparation_cancelled(cancelled)?;
+    let mut encoded = Vec::new();
+    image::codecs::png::PngEncoder::new(&mut encoded).write_image(
+        grayscale.as_raw(),
+        grayscale.width(),
+        grayscale.height(),
+        image::ExtendedColorType::L8,
+    )?;
+    check_preparation_cancelled(cancelled)?;
+    Ok(PreparedPng { encoded, grayscale })
+}
 
 /// A bounded, single-application-process cache. Payloads use digest-only filenames.
 pub struct FileCache {
@@ -2248,6 +2298,22 @@ impl FileCache {
 
     /// Decode within explicit limits, resize, and quantize to 16 grayscale values.
     pub fn put_cover(&self, key: &str, bytes: &[u8], width: u32, height: u32) -> Result<PathBuf> {
+        let prepared = Self::prepare_cover_png(bytes, width, height)?;
+        self.put_prepared_png(key, &prepared)
+    }
+
+    /// Prepare a cover on a worker without opening or borrowing the cache.
+    pub fn prepare_cover_png(bytes: &[u8], width: u32, height: u32) -> Result<PreparedPng> {
+        Self::prepare_cover_png_cancellable(bytes, width, height, &AtomicBool::new(false))
+    }
+
+    /// Cancellation is checked between codec stages and within bounded output rows.
+    pub fn prepare_cover_png_cancellable(
+        bytes: &[u8],
+        width: u32,
+        height: u32,
+        cancelled: &AtomicBool,
+    ) -> Result<PreparedPng> {
         ensure!(
             width > 0 && height > 0 && width <= 2048 && height <= 2048,
             "invalid thumbnail geometry"
@@ -2256,29 +2322,47 @@ impl FileCache {
             bytes.len() <= 16 * 1024 * 1024,
             "cover download exceeds size limit"
         );
+        check_preparation_cancelled(cancelled)?;
         let mut reader = image::ImageReader::new(Cursor::new(bytes)).with_guessed_format()?;
         let mut limits = image::Limits::default();
         limits.max_image_width = Some(8192);
         limits.max_image_height = Some(8192);
         limits.max_alloc = Some(64 * 1024 * 1024);
         reader.limits(limits);
-        let mut grayscale = reader
-            .decode()
-            .context("decode upstream cover")?
-            .thumbnail(width, height)
-            .to_luma8();
-        for pixel in grayscale.pixels_mut() {
-            pixel[0] = (((pixel[0] as u16 + 8) / 17).min(15) * 17) as u8;
+        let decoded = reader.decode().context("decode upstream cover")?;
+        check_preparation_cancelled(cancelled)?;
+        let thumbnail = decoded.thumbnail(width, height);
+        drop(decoded);
+        check_preparation_cancelled(cancelled)?;
+        let mut grayscale = thumbnail.to_luma8();
+        drop(thumbnail);
+        for row in grayscale.rows_mut() {
+            check_preparation_cancelled(cancelled)?;
+            for pixel in row {
+                pixel[0] = (((pixel[0] as u16 + 8) / 17).min(15) * 17) as u8;
+            }
         }
-        let mut output = Cursor::new(Vec::new());
-        image::DynamicImage::ImageLuma8(grayscale)
-            .write_to(&mut output, image::ImageFormat::Png)?;
-        self.put_with_extension(key, output.get_ref(), "png", None)
+        encode_prepared_png(grayscale, cancelled)
     }
 
     /// Keep canonical eight-bit luminance for later display-specific processing.
     /// Cover thumbnails deliberately retain their independent sixteen-level path.
     pub fn put_gray8(&self, key: &str, bytes: &[u8], width: u32, height: u32) -> Result<PathBuf> {
+        let prepared = Self::prepare_gray8_png(bytes, width, height)?;
+        self.put_prepared_png(key, &prepared)
+    }
+
+    /// Prepare canonical Gray8 pixels on a worker without accessing cache state.
+    pub fn prepare_gray8_png(bytes: &[u8], width: u32, height: u32) -> Result<PreparedPng> {
+        Self::prepare_gray8_png_cancellable(bytes, width, height, &AtomicBool::new(false))
+    }
+
+    pub fn prepare_gray8_png_cancellable(
+        bytes: &[u8],
+        width: u32,
+        height: u32,
+        cancelled: &AtomicBool,
+    ) -> Result<PreparedPng> {
         ensure!(
             width > 0 && height > 0 && width <= 2048 && height <= 2048,
             "invalid canonical image geometry"
@@ -2287,29 +2371,38 @@ impl FileCache {
             bytes.len() <= 16 * 1024 * 1024,
             "canonical image download exceeds size limit"
         );
+        check_preparation_cancelled(cancelled)?;
         let mut reader = image::ImageReader::new(Cursor::new(bytes)).with_guessed_format()?;
         let mut limits = image::Limits::default();
         limits.max_image_width = Some(8192);
         limits.max_image_height = Some(8192);
         limits.max_alloc = Some(64 * 1024 * 1024);
         reader.limits(limits);
-        let mut rgba = reader
-            .decode()
-            .context("decode canonical image")?
-            .thumbnail(width, height)
-            .into_rgba8();
-        for pixel in rgba.pixels_mut() {
-            let alpha = u32::from(pixel[3]);
-            for channel in &mut pixel.0[..3] {
-                *channel = ((u32::from(*channel) * alpha + 255 * (255 - alpha) + 127) / 255) as u8;
+        let decoded = reader.decode().context("decode canonical image")?;
+        check_preparation_cancelled(cancelled)?;
+        let thumbnail = decoded.thumbnail(width, height);
+        drop(decoded);
+        check_preparation_cancelled(cancelled)?;
+        let mut rgba = thumbnail.into_rgba8();
+        for row in rgba.rows_mut() {
+            check_preparation_cancelled(cancelled)?;
+            for pixel in row {
+                let alpha = u32::from(pixel[3]);
+                for channel in &mut pixel.0[..3] {
+                    *channel =
+                        ((u32::from(*channel) * alpha + 255 * (255 - alpha) + 127) / 255) as u8;
+                }
+                pixel[3] = 255;
             }
-            pixel[3] = 255;
         }
+        check_preparation_cancelled(cancelled)?;
         let grayscale = image::DynamicImage::ImageRgba8(rgba).into_luma8();
-        let mut output = Cursor::new(Vec::new());
-        image::DynamicImage::ImageLuma8(grayscale)
-            .write_to(&mut output, image::ImageFormat::Png)?;
-        self.put_with_extension(key, output.get_ref(), "png", None)
+        encode_prepared_png(grayscale, cancelled)
+    }
+
+    /// Commit only a sealed, already encoded preparation; never decode on the owner.
+    pub fn put_prepared_png(&self, key: &str, prepared: &PreparedPng) -> Result<PathBuf> {
+        self.put_with_extension(key, &prepared.encoded, "png", None)
     }
 
     pub fn set_pinned(&self, key: &str, pinned: bool) -> Result<bool> {
@@ -3389,6 +3482,10 @@ mod verification_tests;
 #[cfg(test)]
 #[path = "cache_inventory_tests.rs"]
 mod inventory_tests;
+
+#[cfg(test)]
+#[path = "cache_prepared_png_tests.rs"]
+mod prepared_png_tests;
 
 #[cfg(test)]
 mod tests {

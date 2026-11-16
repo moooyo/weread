@@ -4,6 +4,38 @@ Recorded: 2026-11-03 (Asia/Shanghai).
 
 The date above identifies the original implementation record. Subsequent observations below retain their own artifact boundaries without assigning a new run date. Development continues; acceptance of the latest complete application is not finished.
 
+## Reader image preparation and optional covers
+
+The 2026-11-16 [image-preparation correction](IMAGE_PREPARATION_PERFORMANCE_20261116.md)
+moves image decoding, sizing, and final RGB generation off the UI thread,
+reuses current prepared pixels, and defers optional high-resolution sleep covers
+until four seconds of Reader inactivity. Foreground completion actively wakes
+the UI without resetting that inactivity timer. Source checks, bounded
+cancellation, transport credits, palettes, and the sleep presentation boundary
+remain in force.
+
+The final `test-env` run passed 1,704 library tests and 52 Main tests, with four
+existing benchmarks ignored. Six paired optimized desktop cases passed, with
+identical prepared pictures and Reader bodies at all 66 checkpoints. Same-page
+dispatch medians fell from 42.996–49.717 ms to 5.860–7.024 ms; new-picture model
+readiness remains about 60 ms in the 20 ms polling harness. Additional completion
+publication CPU is counted separately. These are software input-handler and
+model observations, not native driver or optical timings.
+
+General UI has 133 successful unique cases from 115 unchanged original records
+and an 18-case statistics fixture correction. The initial 132/1 report is
+retained; the default maximum statistics bar had coincided with the test's final
+selection on the run date. The original pointer/step actions and pixel threshold
+remain. Image processing passed 22 checks, sleep screens 16, and translations
+493 keys. The ARM release build, four package contracts, all 36 public-member
+identities/modes, and archive CRC passed. Main SHA-256 is
+`13510bd63f87499f82ed15ec3ea4308f8b4f18366ff36bdb5d9add7197c1c3e0`;
+the ZIP is
+`0b92dccefc76e5a0efe62d3f15922ff3c61806f1dc6b8de7c861a58c143f46e7`.
+The feature
+record binds the application, measurement, verifier-only correction, raw reports,
+and source receipts. No new physical Kindle execution is part of this run.
+
 ## Hardware Y4 image processing
 
 The 2026-11-13 [Y4 implementation](HARDWARE_Y4_DITHERING.md) retains canonical

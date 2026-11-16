@@ -125,6 +125,8 @@ fn run_cover_sleep_lifecycle(
         .cache
         .put_cover(&thumbnail_key, encoded.get_ref(), 400, 560)?;
     state.render_reader()?;
+    // Settle foreground pixels and advance only the test's cover idle deadline.
+    state.drain_cover_preparation_for_test()?;
 
     // The current-thread runtime is never driven: public-image work can be
     // admitted and cancelled here without performing a network operation.
@@ -241,6 +243,8 @@ fn run_cover_sleep_lifecycle(
     assert_eq!(resident_buffer_addresses(&state), buffers);
     assert_eq!(state.reader.draft.query, draft);
     assert!(ui.global::<ReaderModel>().get_writing_thought());
+    assert!(state.pending_covers.is_empty());
+    state.drain_cover_preparation_for_test()?;
     assert!(state.pending_covers.contains(&book.id));
 
     state.force_offline = true;

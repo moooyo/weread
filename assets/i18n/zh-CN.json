@@ -490,5 +490,6 @@
   "view_full_introduction": "查看完整简介",
   "no_introduction": "暂无简介",
   "introduction_unavailable": "简介暂不可用",
-  "introduction_preview_hint": "查看完整简介以继续阅读"
+  "introduction_preview_hint": "查看完整简介以继续阅读",
+  "image_preparing": "正在准备图片"
 }

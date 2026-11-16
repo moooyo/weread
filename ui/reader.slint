@@ -38,6 +38,7 @@ export struct ReaderImage {
     id: string,
     picture: image,
     loaded: bool,
+    preparing: bool,
     y: float,
     height: float,
     width: float,
@@ -80,6 +81,7 @@ export struct ArticleBlock {
     meta: string,
     picture: image,
     loaded: bool,
+    preparing: bool,
     height: int,
     frame-height: float,
     caption-height: float,
@@ -1375,11 +1377,12 @@ export component ReaderScreen inherits Rectangle {
                         padding: 16px;
                         alignment: center;
                         spacing: 8px;
-                        Text { text: Strings.load-image; font-family: Theme.ui-font; font-size: 18px; color: image-touch.pressed ? Theme.paper : Theme.ink; horizontal-alignment: center; wrap: word-wrap; }
+                        Text { text: picture.preparing ? Strings.image-preparing : Strings.load-image; font-family: Theme.ui-font; font-size: 18px; color: image-touch.pressed ? Theme.paper : Theme.ink; horizontal-alignment: center; wrap: word-wrap; }
                     }
                     accessible-role: button;
-                    accessible-label: Strings.load-image;
+                    accessible-label: picture.preparing ? Strings.image-preparing : Strings.load-image;
                     image-touch := TouchArea {
+                        enabled: !picture.preparing;
                         pointer-event(event) => { if event.kind == PointerEventKind.down { Theme.refresh("press"); } else if event.kind == PointerEventKind.up { Theme.refresh("release"); } }
                         clicked => { ReaderModel.event("reader.load-image", picture.id); }
                     }
@@ -1580,11 +1583,11 @@ export component ArticleScreen inherits Rectangle {
                     if !block.loaded: VerticalLayout {
                         alignment: center; spacing: 8px;
                         Rectangle { height: Theme.scribe ? 40px : 34px; Icon { x: (parent.width - self.width) / 2; y: 0px; width: Theme.scribe ? 40px : 34px; height: self.width; kind: "picture"; } }
-                        Text { text: Strings.load-image; font-family: Theme.ui-font; font-size: 17px; font-weight: 700; horizontal-alignment: center; }
+                        Text { text: block.preparing ? Strings.image-preparing : Strings.load-image; font-family: Theme.ui-font; font-size: 17px; font-weight: 700; horizontal-alignment: center; }
                         if block.meta != "": Text { text: block.meta; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; horizontal-alignment: center; }
                     }
                     if !block.loaded: DashedOutline { stroke-color: Theme.ink; stroke: 2px; radius: 0px; }
-                    image-touch := SwipeTouchArea { enabled: !block.loaded; tapped => { ArticleModel.event("article.load-image", block.id); } swiped(value) => { ArticleModel.event("article.turn", "" + value); } }
+                    image-touch := SwipeTouchArea { enabled: !block.loaded && !block.preparing; tapped => { ArticleModel.event("article.load-image", block.id); } swiped(value) => { ArticleModel.event("article.turn", "" + value); } }
                 }
                 if block.kind == "image": Text { x: 0px; width: parent.width; y: (block.frame-height + block.caption-gap) * 1px; height: block.caption-height * 1px; text: block.text; font-family: Theme.ui-font; font-size: Theme.scribe ? 15px : 14px; color: Theme.secondary; horizontal-alignment: center; overflow: elide; }
                 if block.kind == "end": ArticleEnding { }

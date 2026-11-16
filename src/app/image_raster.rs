@@ -1,13 +1,15 @@
 //! Bounded, final-size picture preparation independent of display submission.
 
 use std::{
-    fs::File,
+    fs::{Metadata, OpenOptions},
     io::{Cursor, Read},
-    path::Path,
+    path::{Path, PathBuf},
+    sync::atomic::{AtomicBool, Ordering},
 };
 
 use anyhow::{Context, Result, ensure};
 use image::{DynamicImage, GrayImage, imageops::FilterType};
+use sha2::{Digest, Sha256};
 
 use crate::preferences::ImageDithering;
 
@@ -94,6 +96,54 @@ pub(super) struct PreparedPicture {
     pub primary: slint::Image,
     pub software: slint::Image,
     pub dimensions: (u32, u32),
+}
+
+/// A candidate cache object, not retained proof that its bytes are still valid.
+/// The UI verifies the current source again before consuming a ready scene.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct PictureRequest {
+    pub path: PathBuf,
+    pub frame: (u32, u32),
+    pub fit: PictureFit,
+    pub method: ImageDithering,
+}
+
+/// Immutable final-size payloads are shared across the worker/UI boundary.
+/// Slint images are constructed only on the UI thread, without copying pixels.
+#[derive(Clone, Debug)]
+pub(super) struct PreparedPixels {
+    primary: slint::SharedPixelBuffer<slint::Rgb8Pixel>,
+    software: Option<slint::SharedPixelBuffer<slint::Rgb8Pixel>>,
+    pub dimensions: (u32, u32),
+}
+
+impl PreparedPixels {
+    pub(super) fn into_picture(self) -> PreparedPicture {
+        let primary = slint::Image::from_rgb8(self.primary);
+        let software = self
+            .software
+            .map(slint::Image::from_rgb8)
+            .unwrap_or_else(|| primary.clone());
+        PreparedPicture {
+            primary,
+            software,
+            dimensions: self.dimensions,
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn storage_pointer(&self) -> *const u8 {
+        self.primary.as_bytes().as_ptr()
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("image preparation was cancelled")]
+pub(super) struct PreparationCancelled;
+
+fn check_cancelled(cancelled: &AtomicBool) -> Result<()> {
+    ensure!(!cancelled.load(Ordering::Acquire), PreparationCancelled);
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -190,33 +240,67 @@ fn raster_plan(source: (u32, u32), frame: (u32, u32), fit: PictureFit) -> Result
     Ok(plan)
 }
 
-fn encoded_image(path: &Path) -> Result<Vec<u8>> {
-    let file = File::open(path).context("open canonical picture")?;
+fn encoded_image(path: &Path, cancelled: &AtomicBool) -> Result<Vec<u8>> {
+    check_cancelled(cancelled)?;
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    let mut file = options.open(path).context("open canonical picture")?;
+    ensure!(
+        file.metadata()?.is_file(),
+        "canonical picture is not a regular file"
+    );
     let length = file.metadata()?.len();
     limited("encoded bytes", length, MAX_ENCODED_BYTES)?;
     let mut bytes = Vec::new();
     bytes
         .try_reserve_exact(length as usize + 1)
         .context("reserve canonical picture bytes")?;
-    file.take(MAX_ENCODED_BYTES + 1).read_to_end(&mut bytes)?;
+    let mut buffer = [0; 32 * 1024];
+    loop {
+        check_cancelled(cancelled)?;
+        let remaining = (MAX_ENCODED_BYTES + 1).saturating_sub(bytes.len() as u64);
+        if remaining == 0 {
+            break;
+        }
+        let count = match file.read(&mut buffer[..remaining.min(32 * 1024) as usize]) {
+            Ok(count) => count,
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error.into()),
+        };
+        if count == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&buffer[..count]);
+    }
     limited("encoded bytes", bytes.len() as u64, MAX_ENCODED_BYTES)?;
     Ok(bytes)
 }
 
-fn opaque_gray(decoded: DynamicImage) -> GrayImage {
+fn opaque_gray(decoded: DynamicImage, cancelled: &AtomicBool) -> Result<GrayImage> {
+    check_cancelled(cancelled)?;
     match decoded {
-        DynamicImage::ImageLuma8(gray) => gray,
+        DynamicImage::ImageLuma8(gray) => Ok(gray),
         decoded => {
             let mut rgba = decoded.into_rgba8();
-            for pixel in rgba.pixels_mut() {
-                let alpha = u32::from(pixel[3]);
-                for channel in &mut pixel.0[..3] {
-                    *channel =
-                        ((u32::from(*channel) * alpha + 255 * (255 - alpha) + 127) / 255) as u8;
+            let width = rgba.width() as usize;
+            for row in rgba.as_mut().chunks_exact_mut(width * 4) {
+                check_cancelled(cancelled)?;
+                for pixel in row.chunks_exact_mut(4) {
+                    let alpha = u32::from(pixel[3]);
+                    for channel in &mut pixel[..3] {
+                        *channel =
+                            ((u32::from(*channel) * alpha + 255 * (255 - alpha) + 127) / 255) as u8;
+                    }
+                    pixel[3] = 255;
                 }
-                pixel[3] = 255;
             }
-            DynamicImage::ImageRgba8(rgba).into_luma8()
+            check_cancelled(cancelled)?;
+            Ok(DynamicImage::ImageRgba8(rgba).into_luma8())
         }
     }
 }
@@ -224,7 +308,7 @@ fn opaque_gray(decoded: DynamicImage) -> GrayImage {
 fn quantize(value: u8, x: u32, y: u32, software: bool) -> u8 {
     const BAYER: [[i16; 4]; 4] = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
     let bias = if software {
-        BAYER[(y % 4) as usize][(x % 4) as usize] - 8
+        BAYER[(y & 3) as usize][(x & 3) as usize] - 8
     } else {
         0
     };
@@ -232,66 +316,85 @@ fn quantize(value: u8, x: u32, y: u32, software: bool) -> u8 {
     (((value + 8) / 17).min(15) * 17) as u8
 }
 
-fn picture_models(gray: &GrayImage, method: ImageDithering) -> PreparedPicture {
+fn picture_pixels(
+    gray: &GrayImage,
+    method: ImageDithering,
+    cancelled: &AtomicBool,
+) -> Result<PreparedPixels> {
+    check_cancelled(cancelled)?;
     let (width, height) = gray.dimensions();
     let mut primary = slint::SharedPixelBuffer::<slint::Rgb8Pixel>::new(width, height);
     let mut fallback = (method == ImageDithering::Hardware)
         .then(|| slint::SharedPixelBuffer::<slint::Rgb8Pixel>::new(width, height));
-    for (index, (destination, source)) in primary
-        .make_mut_slice()
-        .iter_mut()
-        .zip(gray.pixels())
-        .enumerate()
-    {
-        let x = index as u32 % width;
-        let y = index as u32 / width;
-        let value = match method {
-            ImageDithering::Hardware => source[0],
-            ImageDithering::Software => quantize(source[0], x, y, true),
-            ImageDithering::Off => quantize(source[0], x, y, false),
-        };
-        *destination = slint::Rgb8Pixel {
-            r: value,
-            g: value,
-            b: value,
-        };
-    }
     if let Some(fallback) = fallback.as_mut() {
-        for (index, (destination, source)) in fallback
+        for (y, ((primary, software), source)) in primary
             .make_mut_slice()
-            .iter_mut()
-            .zip(gray.pixels())
+            .chunks_exact_mut(width as usize)
+            .zip(fallback.make_mut_slice().chunks_exact_mut(width as usize))
+            .zip(gray.as_raw().chunks_exact(width as usize))
             .enumerate()
         {
-            let value = quantize(source[0], index as u32 % width, index as u32 / width, true);
-            *destination = slint::Rgb8Pixel {
-                r: value,
-                g: value,
-                b: value,
-            };
+            check_cancelled(cancelled)?;
+            for (x, ((primary, software), source)) in primary
+                .iter_mut()
+                .zip(software.iter_mut())
+                .zip(source.iter().copied())
+                .enumerate()
+            {
+                *primary = slint::Rgb8Pixel {
+                    r: source,
+                    g: source,
+                    b: source,
+                };
+                let value = quantize(source, x as u32, y as u32, true);
+                *software = slint::Rgb8Pixel {
+                    r: value,
+                    g: value,
+                    b: value,
+                };
+            }
+        }
+    } else {
+        let software = method == ImageDithering::Software;
+        for (y, (destination, source)) in primary
+            .make_mut_slice()
+            .chunks_exact_mut(width as usize)
+            .zip(gray.as_raw().chunks_exact(width as usize))
+            .enumerate()
+        {
+            check_cancelled(cancelled)?;
+            for (x, (destination, source)) in destination
+                .iter_mut()
+                .zip(source.iter().copied())
+                .enumerate()
+            {
+                let value = quantize(source, x as u32, y as u32, software);
+                *destination = slint::Rgb8Pixel {
+                    r: value,
+                    g: value,
+                    b: value,
+                };
+            }
         }
     }
-    let primary = slint::Image::from_rgb8(primary);
-    let software = fallback
-        .map(slint::Image::from_rgb8)
-        .unwrap_or_else(|| primary.clone());
-    PreparedPicture {
+    check_cancelled(cancelled)?;
+    Ok(PreparedPixels {
         primary,
-        software,
+        software: fallback,
         dimensions: (width, height),
-    }
+    })
 }
 
-/// Prepare complete pixels before the owner can publish either model.
-pub(super) fn prepare_picture(
-    path: &Path,
+fn prepare_encoded_picture(
+    bytes: &[u8],
     frame: (u32, u32),
     fit: PictureFit,
     method: ImageDithering,
     budget: &mut RasterBudget,
-) -> Result<PreparedPicture> {
-    let bytes = encoded_image(path)?;
-    let mut reader = image::ImageReader::new(Cursor::new(&bytes)).with_guessed_format()?;
+    cancelled: &AtomicBool,
+) -> Result<PreparedPixels> {
+    check_cancelled(cancelled)?;
+    let mut reader = image::ImageReader::new(Cursor::new(bytes)).with_guessed_format()?;
     ensure!(
         reader.format() == Some(image::ImageFormat::Png),
         "canonical picture is not PNG"
@@ -307,9 +410,13 @@ pub(super) fn prepare_picture(
     source_dimensions(source)?;
     let plan = raster_plan(source, frame, fit)?;
     let charge = budget.forecast(plan.output, method)?;
-    let mut reader = image::ImageReader::new(Cursor::new(&bytes)).with_guessed_format()?;
+    check_cancelled(cancelled)?;
+    let mut reader = image::ImageReader::new(Cursor::new(bytes)).with_guessed_format()?;
     reader.limits(limits);
-    let gray = opaque_gray(reader.decode().context("decode canonical picture")?);
+    let gray = opaque_gray(
+        reader.decode().context("decode canonical picture")?,
+        cancelled,
+    )?;
     ensure!(
         gray.dimensions() == source,
         "canonical picture dimensions changed during decode"
@@ -326,10 +433,91 @@ pub(super) fn prepare_picture(
             FilterType::Triangle,
         )
     };
-    let prepared = picture_models(&raster, method);
+    check_cancelled(cancelled)?;
+    let prepared = picture_pixels(&raster, method, cancelled)?;
     budget.pixels = charge.0;
     budget.bytes = charge.1;
     Ok(prepared)
+}
+
+fn same_object(before: &Metadata, after: &Metadata) -> bool {
+    if !before.is_file()
+        || !after.is_file()
+        || before.len() != after.len()
+        || before.modified().ok() != after.modified().ok()
+    {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        before.dev() == after.dev()
+            && before.ino() == after.ino()
+            && before.ctime() == after.ctime()
+            && before.ctime_nsec() == after.ctime_nsec()
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
+}
+
+/// A queued path is untrusted until this worker reads the current immutable
+/// object and checks its content-addressed digest. The UI independently
+/// resolves and verifies current source ownership before reusing its output.
+pub(super) fn prepare_cached_picture(
+    request: &PictureRequest,
+    budget: &mut RasterBudget,
+    cancelled: &AtomicBool,
+) -> Result<PreparedPixels> {
+    check_cancelled(cancelled)?;
+    let filename = request
+        .path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .context("canonical picture filename is unavailable")?;
+    let stem = filename.strip_suffix(".png").unwrap_or("");
+    ensure!(
+        stem.len() == 129
+            && stem.as_bytes()[64] == b'-'
+            && stem.bytes().enumerate().all(|(index, byte)| {
+                index == 64 || byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)
+            }),
+        "canonical picture has no current content-addressed identity"
+    );
+    let before = std::fs::symlink_metadata(&request.path)?;
+    ensure!(before.is_file(), "canonical picture is not a regular file");
+    let bytes = encoded_image(&request.path, cancelled)?;
+    check_cancelled(cancelled)?;
+    ensure!(
+        hex::encode(Sha256::digest(&bytes)) == stem[65..129],
+        "canonical picture content digest changed"
+    );
+    ensure!(
+        same_object(&before, &std::fs::symlink_metadata(&request.path)?),
+        "canonical picture changed while reading"
+    );
+    prepare_encoded_picture(
+        &bytes,
+        request.frame,
+        request.fit,
+        request.method,
+        budget,
+        cancelled,
+    )
+}
+
+#[cfg(test)]
+fn prepare_picture(
+    path: &Path,
+    frame: (u32, u32),
+    fit: PictureFit,
+    method: ImageDithering,
+    budget: &mut RasterBudget,
+) -> Result<PreparedPicture> {
+    let cancelled = AtomicBool::new(false);
+    let bytes = encoded_image(path, &cancelled)?;
+    Ok(prepare_encoded_picture(&bytes, frame, fit, method, budget, &cancelled)?.into_picture())
 }
 
 #[cfg(test)]
@@ -357,6 +545,202 @@ mod tests {
                 pixel[0]
             })
             .collect()
+    }
+
+    fn cached_fixture(bytes: &[u8]) -> Result<(tempfile::TempDir, PathBuf)> {
+        let directory = tempfile::tempdir()?;
+        let name = format!(
+            "{}-{}.png",
+            "a".repeat(64),
+            hex::encode(Sha256::digest(bytes))
+        );
+        let path = directory.path().join(name);
+        std::fs::write(&path, bytes)?;
+        Ok((directory, path))
+    }
+
+    fn encoded_gray(gray: GrayImage) -> Result<Vec<u8>> {
+        let mut bytes = Cursor::new(Vec::new());
+        DynamicImage::ImageLuma8(gray).write_to(&mut bytes, image::ImageFormat::Png)?;
+        Ok(bytes.into_inner())
+    }
+
+    fn legacy_luminances(gray: &GrayImage, method: ImageDithering) -> Vec<u8> {
+        const BAYER: [[i16; 4]; 4] = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
+        gray.as_raw()
+            .iter()
+            .enumerate()
+            .map(|(index, source)| {
+                if method == ImageDithering::Hardware {
+                    *source
+                } else {
+                    let x = index % gray.width() as usize;
+                    let y = index / gray.width() as usize;
+                    let bias = if method == ImageDithering::Software {
+                        BAYER[y % 4][x % 4] - 8
+                    } else {
+                        0
+                    };
+                    let value = (i16::from(*source) + bias).clamp(0, 255) as u16;
+                    (((value + 8) / 17).min(15) * 17) as u8
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn row_preparation_preserves_the_legacy_palette_and_bayer_phase_for_odd_widths() -> Result<()> {
+        for width in [1, 3, 7, 9, 13, 256] {
+            for height in [1, 5, 7] {
+                let gray = GrayImage::from_fn(width, height, |x, y| {
+                    image::Luma([(x.wrapping_mul(31).wrapping_add(y * 47) % 256) as u8])
+                });
+                for method in [
+                    ImageDithering::Off,
+                    ImageDithering::Software,
+                    ImageDithering::Hardware,
+                ] {
+                    let pixels = picture_pixels(&gray, method, &AtomicBool::new(false))?;
+                    let pointer = pixels.storage_pointer();
+                    let cloned = pixels.clone();
+                    assert_eq!(pointer, cloned.storage_pointer());
+                    let picture = cloned.into_picture();
+                    assert_eq!(
+                        luminances(&picture.primary),
+                        legacy_luminances(&gray, method)
+                    );
+                    let fallback = if method == ImageDithering::Hardware {
+                        ImageDithering::Software
+                    } else {
+                        method
+                    };
+                    assert_eq!(
+                        luminances(&picture.software),
+                        legacy_luminances(&gray, fallback)
+                    );
+                    assert_eq!(
+                        picture.primary.to_rgb8().unwrap().as_bytes().as_ptr(),
+                        pointer
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn cached_worker_preparation_keeps_triangle_pixels_and_all_processing_choices() -> Result<()> {
+        let source = GrayImage::from_fn(8, 6, |x, y| image::Luma([(x * 19 + y * 17) as u8]));
+        let expected = image::imageops::resize(&source, 5, 4, FilterType::Triangle);
+        let bytes = encoded_gray(source)?;
+        let (_directory, path) = cached_fixture(&bytes)?;
+        for method in [
+            ImageDithering::Off,
+            ImageDithering::Software,
+            ImageDithering::Hardware,
+        ] {
+            let mut budget = RasterBudget::new((5, 5))?;
+            let picture = prepare_cached_picture(
+                &PictureRequest {
+                    path: path.clone(),
+                    frame: (5, 5),
+                    fit: PictureFit::Contain,
+                    method,
+                },
+                &mut budget,
+                &AtomicBool::new(false),
+            )?
+            .into_picture();
+            assert_eq!(picture.dimensions, (5, 4));
+            assert_eq!(
+                luminances(&picture.primary),
+                legacy_luminances(&expected, method)
+            );
+            let fallback = if method == ImageDithering::Hardware {
+                ImageDithering::Software
+            } else {
+                method
+            };
+            assert_eq!(
+                luminances(&picture.software),
+                legacy_luminances(&expected, fallback)
+            );
+            assert_eq!(budget.pixels, 20);
+            assert_eq!(
+                budget.bytes,
+                20 * RGB_BYTES
+                    * if method == ImageDithering::Hardware {
+                        2
+                    } else {
+                        1
+                    }
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn queued_candidate_is_reverified_instead_of_trusting_its_old_path() -> Result<()> {
+        let original = encoded_gray(GrayImage::from_pixel(2, 2, image::Luma([17])))?;
+        let (_directory, path) = cached_fixture(&original)?;
+        let replacement = encoded_gray(GrayImage::from_pixel(2, 2, image::Luma([238])))?;
+        std::fs::write(&path, replacement)?;
+        let mut budget = RasterBudget::new((2, 2))?;
+        let result = prepare_cached_picture(
+            &PictureRequest {
+                path,
+                frame: (2, 2),
+                fit: PictureFit::Contain,
+                method: ImageDithering::Hardware,
+            },
+            &mut budget,
+            &AtomicBool::new(false),
+        );
+        assert!(result.unwrap_err().to_string().contains("digest changed"));
+        assert_eq!((budget.pixels, budget.bytes), (0, 0));
+        Ok(())
+    }
+
+    #[test]
+    fn cancelled_work_never_opens_its_candidate_or_charges_output() -> Result<()> {
+        let mut budget = RasterBudget::new((2, 2))?;
+        let result = prepare_cached_picture(
+            &PictureRequest {
+                path: PathBuf::from("absent-canonical-picture.png"),
+                frame: (2, 2),
+                fit: PictureFit::Contain,
+                method: ImageDithering::Hardware,
+            },
+            &mut budget,
+            &AtomicBool::new(true),
+        );
+        assert!(result.unwrap_err().is::<PreparationCancelled>());
+        assert_eq!((budget.pixels, budget.bytes), (0, 0));
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_queued_cache_path_cannot_be_replaced_with_a_symlink() -> Result<()> {
+        let bytes = encoded_gray(GrayImage::from_pixel(2, 2, image::Luma([17])))?;
+        let (directory, path) = cached_fixture(&bytes)?;
+        let replacement = directory.path().join("replacement.png");
+        std::fs::rename(&path, &replacement)?;
+        std::os::unix::fs::symlink(&replacement, &path)?;
+        let mut budget = RasterBudget::new((2, 2))?;
+        let result = prepare_cached_picture(
+            &PictureRequest {
+                path,
+                frame: (2, 2),
+                fit: PictureFit::Contain,
+                method: ImageDithering::Hardware,
+            },
+            &mut budget,
+            &AtomicBool::new(false),
+        );
+        assert!(result.unwrap_err().to_string().contains("regular file"));
+        assert_eq!((budget.pixels, budget.bytes), (0, 0));
+        Ok(())
     }
 
     #[test]

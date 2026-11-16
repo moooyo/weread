@@ -233,6 +233,20 @@ fn paint(
     Ok(())
 }
 
+fn finish_reader_image_preparation(state: &mut App) -> Result<()> {
+    // The existing isolated-child deadline also bounds this wait. Sample and
+    // paint the completed workload rather than its new asynchronous placeholder.
+    while state.image_preparation_busy() {
+        if state.poll_image_preparation()? {
+            state.render()?;
+        }
+        if state.image_preparation_busy() {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+    Ok(())
+}
+
 fn navigate_cycle(
     ui: &AppWindow,
     application: &Rc<RefCell<App>>,
@@ -277,6 +291,7 @@ fn navigate_cycle(
                 "Navigation history became unbounded"
             );
             if matches!(state.route, Route::Reader(..)) {
+                finish_reader_image_preparation(&mut state)?;
                 ensure!(
                     state.reader.paginator.is_some() && !state.reader.body.is_empty(),
                     "The resource fixture did not enter a populated Reader"

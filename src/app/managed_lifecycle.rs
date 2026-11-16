@@ -58,6 +58,9 @@ impl App {
     fn prepare_resident_sleep_inner(&mut self) -> Result<()> {
         ensure!(!self.closing.get(), "the application is already closing");
         self.managed_sleep_blocked = true;
+        self.pause_image_preparation();
+        self.cancel_cover_preparation();
+        self.cancel_article_preparation();
         // Native snapshots cannot depend on the application's Y4 update flag.
         // Only already prepared scene models are switched here; no image I/O.
         self.suspend_image_processing_for_sleep()?;
@@ -86,6 +89,7 @@ impl App {
         // A cancelled task retains its stopping guard until it has joined.
         // Include that guard before acknowledging native power ownership.
         self.join_task_wake_guard(task_wake::STOP_TIMEOUT)?;
+        self.quiesce_image_workers(task_wake::STOP_TIMEOUT)?;
 
         self.save_reader_session()?;
         self.save_preferences()?;
