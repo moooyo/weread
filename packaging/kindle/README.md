@@ -33,6 +33,11 @@ Kindle-style reader. The 1024 x 1536 grayscale master is retained with a
 `# Icon: data:image/png;base64,...` metadata, so the existing build and archive
 steps carry the artwork in `documents/weread.sh` without a separate image file.
 
+The catalog candidate reserves line four for `# WeReadCatalogAccess: deferred-v1`.
+It uses the same document path, artwork, and default FBInk behavior. Only a
+compatible, separately qualified shared runtime can act on the marker; the
+application ZIP does not change the shared registration on installation.
+
 Install the updated launcher together with the matching application files.
 SH_Integration reads the icon while indexing the document entry. No runtime
 change, user-book cover replacement, data reset, or current-book sleep-cover

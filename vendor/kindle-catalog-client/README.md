@@ -1,9 +1,9 @@
 # Fixed WeRead catalog client candidate
 
-This component prepares the client side of the proposed shared catalog runtime
+This component prepares the client side of the coordinated shared catalog runtime
 extension. It is not enabled, installed, or part of the ordinary development
-archive yet. The [integration proposal](../../docs/CATALOG_ENTRY_ADAPTER.md)
-tracks the unconfirmed shared protocol and independent device gates.
+archive. The [integration record](../../docs/CATALOG_ENTRY_ADAPTER.md)
+tracks the agreed WeRead interface and pending shared-build and device gates.
 
 `catalog-client.c` is pinned to Aidoku revision
 `78c5b2bc09a469133c886eb0d73aaf9ed63195b2` without functional edits. The local

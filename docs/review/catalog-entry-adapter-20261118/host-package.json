@@ -1,0 +1,30 @@
+{
+  "package_sha256": "75a1fabe2fb9a8e942abceb327b7f36055544c7c4bcedccd3721feaf1d1ae85e",
+  "library_path": "/mnt/us/documents/weread.sh",
+  "thumbnail_sha256": "6495846ff49df3c43c35f27552b02f8a126ffa6c3ab3a9c736cd4cbfcaec7529",
+  "document_bytes": 43102,
+  "changed_line": 4,
+  "common_files_sha256": {
+    "weread/launch.sh": "55b05178ff51053c179dc5439089a15d32ebd6c9f55d3d31515450af24cda731",
+    "weread/app/weread": "d3a6b663d9fbcacc08e88926c46fe8146c0fc979f8767a735020947600a8be62",
+    "weread/app/weread-frame-guard": "689ef367eabe7f780ec51a20a033961badceb6c1ff56524e51cad30a4e44372d",
+    "weread/app/weread-native-query": "149fa95f3c40ff575c23065fa6127597abbd85ab3e90a50cdbba30fb072f0b5f"
+  },
+  "documents_sha256": {
+    "control": "a414b4fcbf9822d409cb1ab48f2c61d98b1c8451569776ea6640cb667af99871",
+    "candidate": "567b7f868243d5c66422c5a306ad50a740a793d8d60ee3dbfcc9efc4a5121f6a"
+  },
+  "archive_members": 38,
+  "changed_members_from_qualified_package": [
+    "documents/weread.sh",
+    "weread/app/README.md",
+    "weread/launch.sh"
+  ],
+  "original_package_sha256": "35a4717daf8620ee37a30d98b8136b2a229c7557cc0fa43fef8d3d1e87c85e80",
+  "crc_and_unix_modes_checked": true,
+  "icon_line_bytes": 42718,
+  "image_byte_identical": true,
+  "shared_installer_in_weread_zip": false,
+  "opt_in_enabled_on_device": false,
+  "device_connected": false
+}

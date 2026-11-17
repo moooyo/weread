@@ -1,0 +1,59 @@
+{
+  "date": "2026-11-18",
+  "timezone": "Asia/Shanghai",
+  "source_base": "ee97decd839b27f820ba2c843f98f76f62d59de5",
+  "verification_environment": "ssh test-env; no Kindle access or registration changes",
+  "checks": [
+    {
+      "name": "Launcher lifecycle",
+      "passed": 236,
+      "elapsed_seconds": 900.171,
+      "source_sha256": "8b1b6cac0127dafc2a9e8427a6acab2ff532a61e96ca156ff7402fa9b12915f6",
+      "record": "Exit status 0 and unittest OK were observed. The complete log was on tmpfs and was not retained across the test host restart. Includes the 13 scoped notification cases."
+    },
+    {
+      "name": "Catalog client",
+      "passed": 19,
+      "elapsed_seconds": 3.782,
+      "log_sha256": "71e0ce9f8aa2501fec93e0d04806b2ca72076ae25b5b16be172b46a7a5725a70",
+      "source_sha256": "2b2a8f24d4316a68aacb814d0d8d674787376e738fd786a4fbb8d52dcdf749ad"
+    },
+    {
+      "name": "Development package and comparison",
+      "passed": 10,
+      "elapsed_seconds": 0.061,
+      "log_sha256": "23e2374498eb53c8b9d6117c2de8ad136eea1ab1f563c80ad0210c715d9c6b00",
+      "source_sha256": "246b2607611efc2d1eb9a0caf46390ac81ab120affc7510fc281684900a25e0c"
+    },
+    {
+      "name": "Offline registration and protected paths",
+      "passed": 20,
+      "elapsed_seconds": 1.701,
+      "log_sha256": "7fb1f3e0b4a32728e4e7229ebb019cca401a2c1e92f2556c7cbf9c12b9f485b3",
+      "source_sha256": "117ab177f05e0539e7110554e6cab02026824a715957b8fe6662487f76f5ebb0"
+    }
+  ],
+  "unique_passing_tests": 285,
+  "package_sha256": "75a1fabe2fb9a8e942abceb327b7f36055544c7c4bcedccd3721feaf1d1ae85e",
+  "local_delivery_round_trip_hash_verified_on_test_env": true,
+  "desktop_fixture": {
+    "seed_sha256": "446e1afb4b17d0110e353004dc34c010dd570d986e87ce1001a7a38ef6ff3847",
+    "warm_correct": 15,
+    "missing_case_correct": 14,
+    "only_rejected_book": "demo-7",
+    "negative_controls_passed": 4,
+    "scope": "Scale-one Scribe desktop Library rendering; not native performance."
+  },
+  "historical_reference": {
+    "owner_source_commit": "e8d06e356a7319eedf47857566afdeb627f2267c",
+    "inventory_sha256": "44fdb334a3893ca374701672ed641fb7ed6860d5fe43b58703d3febdd6ccbfbc",
+    "expected_sha256": "2410e8607840554718526aae946f669890228a6089c7b7a124f3d1b938d8f475",
+    "six_public_hashes_and_registration_match_pinned_owner_record": true,
+    "explicit_absences_reported_by_owner": 3,
+    "observation_from_current_device": false,
+    "not_authority_to_select_a_runtime": true
+  },
+  "device_window_received": false,
+  "shared_extension_qualified_for_weread": false,
+  "device_measurements": null
+}

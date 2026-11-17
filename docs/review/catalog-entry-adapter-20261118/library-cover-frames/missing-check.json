@@ -1,0 +1,231 @@
+{
+  "format": "weread-offline-library-cover-check-v1",
+  "profile": "scribe",
+  "scope": "Desktop rendered pixels only; no native timing, device or network observation.",
+  "reference_transform": "Central 151x210 crop at 1:1 of the 400x560 cached PNG",
+  "interior_xyxy": [
+    5,
+    38,
+    146,
+    197
+  ],
+  "maximum_mae": 5.0,
+  "maximum_fraction_error_gt_24": 0.045,
+  "minimum_mae_margin_over_each_other_book": 2.0,
+  "passed": false,
+  "fixture_receipt_sha256": "6b6f86e535ace6b88e0e8f21b7fe60877f320f77dd054ae3d2b7f04d596be01f",
+  "frame_sha256": "02c3cead34d7d0a7dc0d469cf7939ba49806e0ad3a0c620431cf6486b8b3450a",
+  "metadata_sha256": "0ebfb4611d58cb7d032cb486d19270d12a125d31a6dbc7cd6ff6395b64868f5e",
+  "targets": [
+    {
+      "book_id": "demo-0",
+      "slot_bounds_xyxy": [
+        32,
+        202,
+        183,
+        412
+      ],
+      "mae": 0.0,
+      "fraction_error_gt_24": 0.0,
+      "closest_other_id": "demo-2",
+      "mae_margin": 42.2941,
+      "matched": true
+    },
+    {
+      "book_id": "demo-1",
+      "slot_bounds_xyxy": [
+        211,
+        202,
+        362,
+        412
+      ],
+      "mae": 0.0,
+      "fraction_error_gt_24": 0.0,
+      "closest_other_id": "demo-2",
+      "mae_margin": 42.2941,
+      "matched": true
+    },
+    {
+      "book_id": "demo-2",
+      "slot_bounds_xyxy": [
+        390,
+        202,
+        541,
+        412
+      ],
+      "mae": 0.0,
+      "fraction_error_gt_24": 0.0,
+      "closest_other_id": "demo-0",
+      "mae_margin": 42.2941,
+      "matched": true
+    },
+    {
+      "book_id": "demo-3",
+      "slot_bounds_xyxy": [
+        568,
+        202,
+        719,
+        412
+      ],
+      "mae": 0.0,
+      "fraction_error_gt_24": 0.0,
+      "closest_other_id": "demo-4",
+      "mae_margin": 42.2941,
+      "matched": true
+    },
+    {
+      "book_id": "demo-4",
+      "slot_bounds_xyxy": [
+        747,
+        202,
+        898,
+        412
+      ],
+      "mae": 0.0,
+      "fraction_error_gt_24": 0.0,
+      "closest_other_id": "demo-3",
+      "mae_margin": 42.2941,
+      "matched": true
+    },
+    {
+      "book_id": "demo-5",
+      "slot_bounds_xyxy": [
+        32,
+        482,
+        183,
+        692
+      ],
+      "mae": 0.0,
+      "fraction_error_gt_24": 0.0,
+      "closest_other_id": "demo-3",
+      "mae_margin": 42.2941,
+      "matched": true
+    },
+    {
+      "book_id": "demo-6",
+      "slot_bounds_xyxy": [
+        211,
+        482,
+        362,
+        692
+      ],
+      "mae": 0.0,
+      "fraction_error_gt_24": 0.0,
+      "closest_other_id": "demo-4",
+      "mae_margin": 42.2941,
+      "matched": true
+    },
+    {
+      "book_id": "demo-7",
+      "slot_bounds_xyxy": [
+        390,
+        482,
+        541,
+        692
+      ],
+      "mae": 100.9526,
+      "fraction_error_gt_24": 0.98354,
+      "closest_other_id": "demo-14",
+      "mae_margin": -19.2531,
+      "matched": false
+    },
+    {
+      "book_id": "demo-8",
+      "slot_bounds_xyxy": [
+        568,
+        482,
+        719,
+        692
+      ],
+      "mae": 0.0,
+      "fraction_error_gt_24": 0.0,
+      "closest_other_id": "demo-7",
+      "mae_margin": 42.2941,
+      "matched": true
+    },
+    {
+      "book_id": "demo-9",
+      "slot_bounds_xyxy": [
+        747,
+        482,
+        898,
+        692
+      ],
+      "mae": 0.0,
+      "fraction_error_gt_24": 0.0,
+      "closest_other_id": "demo-7",
+      "mae_margin": 42.2941,
+      "matched": true
+    },
+    {
+      "book_id": "demo-10",
+      "slot_bounds_xyxy": [
+        32,
+        762,
+        183,
+        972
+      ],
+      "mae": 0.0,
+      "fraction_error_gt_24": 0.0,
+      "closest_other_id": "demo-8",
+      "mae_margin": 42.2941,
+      "matched": true
+    },
+    {
+      "book_id": "demo-11",
+      "slot_bounds_xyxy": [
+        211,
+        762,
+        362,
+        972
+      ],
+      "mae": 0.0,
+      "fraction_error_gt_24": 0.0,
+      "closest_other_id": "demo-12",
+      "mae_margin": 42.2941,
+      "matched": true
+    },
+    {
+      "book_id": "demo-12",
+      "slot_bounds_xyxy": [
+        390,
+        762,
+        541,
+        972
+      ],
+      "mae": 0.0,
+      "fraction_error_gt_24": 0.0,
+      "closest_other_id": "demo-11",
+      "mae_margin": 42.2941,
+      "matched": true
+    },
+    {
+      "book_id": "demo-13",
+      "slot_bounds_xyxy": [
+        568,
+        762,
+        719,
+        972
+      ],
+      "mae": 0.0,
+      "fraction_error_gt_24": 0.0,
+      "closest_other_id": "demo-11",
+      "mae_margin": 42.2941,
+      "matched": true
+    },
+    {
+      "book_id": "demo-14",
+      "slot_bounds_xyxy": [
+        747,
+        762,
+        898,
+        972
+      ],
+      "mae": 0.0,
+      "fraction_error_gt_24": 0.0,
+      "closest_other_id": "demo-12",
+      "mae_margin": 42.2941,
+      "matched": true
+    }
+  ]
+}

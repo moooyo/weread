@@ -38,6 +38,11 @@ reported separately. Both variants also pass a same-process physical screen-save
 and scheduled-wake cycle with identical pre-sleep/resumed frames. The operator
 approved main integration on 2026-11-17; the ordinary installation remains unchanged.
 
+The [catalog notification candidate](docs/CATALOG_ENTRY_ADAPTER.md) retains the
+penguin cover and default FBInk behavior. Its application-side changes and paired
+test documents passed host verification. Enabling the entry on Kindle still
+requires a compatible shared runtime from Aidoku and an independent device trial.
+
 The 2026-11-16 [image-preparation work](docs/IMAGE_PREPARATION_PERFORMANCE_20261116.md) moves final Reader/Article picture preparation and cover conversion to bounded workers. Repeated publication reuses current shared pixels, and optional full sleep covers wait for reading inactivity. Current source, palette, resource, and power-event boundaries remain explicit; the feature record separates paired software measurements from device acceptance.
 
 The accepted [Skills setup guidance](docs/LOGIN_UI.md#skills-setup-guidance) adds the official prerequisite and a full-page guide to QR Login. Four numbered rows form one centered group; upper-left Back obtains a fresh challenge, and upper-right X retains ordinary exit. Temporary authentication work is cancelled and fenced while the guide is open. The public QR has transparent light modules and a bounded, replicated alpha raster for precise scaling. Manual credential editing remains absent. [Detail pagination](docs/DETAIL_HUB.md#viewport-capacity-follow-up) now derives bounded capacities from the actual viewport, including 19 catalog rows on the standard Scribe profile. These changes keep the current persistence layout and do not require a data reset.

@@ -6,9 +6,11 @@ from __future__ import annotations
 import base64
 import hashlib
 import importlib.util
+import json
 from pathlib import Path
 import stat
 import subprocess
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -138,6 +140,49 @@ class DevelopmentArchiveTests(unittest.TestCase):
         self.assertTrue(icons[0].startswith(prefix))
         self.assertEqual(base64.b64decode(icons[0][len(prefix):], validate=True),
                          (root / "assets/branding/weread-cover-thumbnail.png").read_bytes())
+
+    def test_packaged_library_opt_in_preserves_the_icon_and_default_fbink(self) -> None:
+        repo = PACKAGE_SCRIPT.parents[1]
+        document = (repo / "packaging/kindle/document-launcher.sh").read_bytes()
+        self.write_staged(LAUNCHER, document)
+        PACKAGE.archive(self.staged, self.output)
+        with zipfile.ZipFile(self.output) as archive:
+            self.assertEqual([name for name in archive.namelist() if name.startswith("documents/")],
+                             ["documents/weread.sh"])
+            packaged = archive.read(LAUNCHER)
+        self.assertLessEqual(len(packaged), 65536)
+        lines = packaged.splitlines()
+        icon = (repo / "assets/branding/weread-cover-thumbnail.png").read_bytes()
+        self.assertEqual(lines[2], b"# Icon: data:image/png;base64," + base64.b64encode(icon))
+        self.assertEqual(lines[3], b"# WeReadCatalogAccess: deferred-v1")
+        self.assertEqual(sum(line.startswith(b"# WeReadCatalogAccess:") for line in lines), 1)
+        self.assertFalse(any(line.startswith((b"# DontUseFBInk", b"# UseHooks")) for line in lines[:6]))
+
+    def test_comparison_changes_only_the_equal_length_fourth_line_and_pins_its_inputs(self) -> None:
+        repo = PACKAGE_SCRIPT.parents[1]
+        document = (repo / "packaging/kindle/document-launcher.sh").read_bytes()
+        self.write_staged(LAUNCHER, document)
+        checksums = PACKAGE.archive(self.staged, self.output)
+        output = self.root / "pair"
+        command = [sys.executable, str(repo / "scripts/prepare-catalog-entry-comparison.py"),
+                   "--package", str(self.output), "--output", str(output), "--package-sha256"]
+        bad = subprocess.run([*command, "0" * 64], capture_output=True, timeout=5)
+        self.assertNotEqual(bad.returncode, 0)
+        self.assertFalse(output.exists())
+        result = subprocess.run([*command, checksums[self.output.name]], capture_output=True, timeout=5)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((output / "candidate" / LAUNCHER).read_bytes(), document)
+        control = (output / "control" / LAUNCHER).read_bytes()
+        self.assertEqual(len(control), len(document))
+        self.assertNotIn(b"# WeReadCatalogAccess:", control)
+        self.assertEqual([i for i, (a, b) in enumerate(zip(control.splitlines(), document.splitlines()), 1)
+                          if a != b], [4])
+        manifest = json.loads((output / "comparison-inputs.json").read_bytes())
+        self.assertEqual(manifest["common_files_sha256"], {
+            name: hashlib.sha256(BUILD_INPUTS[name]).hexdigest()
+            for name in (SUPERVISOR, APPLICATION, FRAME_GUARD, NATIVE_QUERY)})
+        self.assertEqual(manifest["documents_sha256"], {
+            "control": hashlib.sha256(control).hexdigest(), "candidate": hashlib.sha256(document).hexdigest()})
 
     def test_document_selects_library_lifetime_and_forwards_explicit_diagnostics(self) -> None:
         document = PACKAGE_SCRIPT.parents[1] / "packaging/kindle/document-launcher.sh"

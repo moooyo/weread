@@ -5136,7 +5136,7 @@ class LauncherLifecycleTests(unittest.TestCase):
         self.assertEqual(self.trace(), ["stop:statusbar", "start:statusbar", "xrefresh:"])
         self.assertFalse((self.root / "lock").exists())
 
-    def run_library_entry(self, drive):
+    def run_library_entry(self, drive=None):
         document = self.root / "documents" / "weread.sh"
         document.parent.mkdir()
         document.write_bytes((SOURCE.parent / "document-launcher.sh").read_bytes())
@@ -5159,7 +5159,8 @@ class LauncherLifecycleTests(unittest.TestCase):
                 self.assertEqual(os.getsid(worker["pid"]), worker["pid"])
                 self.assertEqual(os.getpgid(worker["pid"]), worker["pid"])
                 self.assertIsNone(entry.poll())
-                drive(entry, worker)
+                if drive is not None:
+                    drive(entry, worker)
                 entry.wait(timeout=16)
                 self.wait_until(lambda: not (self.root / "lock").exists())
                 self.wait_until(lambda: not self.original_process_exists(worker))
@@ -5303,14 +5304,20 @@ class LauncherLifecycleTests(unittest.TestCase):
                 signal.signal(signal.SIGTERM, signal.SIG_IGN)
                 while True:
                     time.sleep(0.05)
-            if behavior == "fail":
-                raise SystemExit(7)
-            if behavior == "overflow":
-                print("NOTIFIED\n" + "x" * 10000)
-            elif behavior == "trailing":
-                print("NOTIFIED\n")
+            replies = {
+                "success": b"NOTIFIED\n", "fail": b"", "reply-then-fail": b"NOTIFIED\n",
+                "empty": b"", "wrong": b"NOTIFIE?\n", "missing-lf": b"NOTIFIED",
+                "trailing": b"NOTIFIED\n\n", "trailing-nul": b"NOTIFIED\n\0",
+                "overflow": b"NOTIFIED\n" + b"x" * 10000,
+            }
+            if behavior == "stream":
+                sys.stdout.buffer.write(b"NOTIFIED\n" + b"x" * (1024 * 1024))
+                sys.stdout.buffer.flush()
+                (root / "catalog-stream-finished").touch()
             else:
-                print("NOTIFIED")
+                sys.stdout.buffer.write(replies[behavior])
+            if behavior in ("fail", "reply-then-fail"):
+                raise SystemExit(7)
         ''').lstrip()
         helper.write_text("#!" + sys.executable + "\n" + body)
         helper.chmod(0o755)
@@ -5356,16 +5363,14 @@ class LauncherLifecycleTests(unittest.TestCase):
 
     def test_catalog_notification_follows_native_restoration_once_and_clears_child_handoff(self):
         self.catalog_notification_fixture()
-        status, _, error = self.run_launcher()
-        self.assertEqual(status, 0, error)
+        self.assertEqual(self.run_library_entry(), 0)
         self.assert_catalog_completed_after_recovery()
         self.assertEqual((self.root / "application-catalog-env").read_text(), ":\n")
 
     def test_catalog_notification_preserves_a_nonzero_application_exit_status(self):
         self.catalog_notification_fixture()
         self.env["TEST_APP_EXIT"] = "7"
-        status, _, error = self.run_launcher()
-        self.assertEqual(status, 7, error)
+        self.assertEqual(self.run_library_entry(), 7)
         self.assert_catalog_completed_after_recovery()
 
     def test_catalog_notification_survives_library_waiter_retirement_and_sleep_wake(self):
@@ -5397,12 +5402,61 @@ class LauncherLifecycleTests(unittest.TestCase):
         self.assertFalse(records[0]["application_record_present"])
         self.assertFalse(records[0]["handoff_leaked"])
         self.assertFalse((self.root / "lock").exists())
-        self.assertNotIn("stop:statusbar", self.trace())
+        self.assertEqual((self.root / "catalog-document.sh").stat().st_mtime, 100)
+        self.assertEqual(self.trace(), [])
+
+    def test_catalog_notification_early_invalid_replies_only_restore_the_document_timestamp(self):
+        self.catalog_notification_fixture()
+        (self.home / "data/device-profile").write_text("unknown\n")
+        document = self.root / "catalog-document.sh"
+        for count, behavior in enumerate(("empty", "wrong", "missing-lf", "trailing", "trailing-nul",
+                                          "stream", "reply-then-fail"), 1):
+            with self.subTest(behavior=behavior):
+                self.env["TEST_CATALOG_BEHAVIOR"] = behavior
+                os.utime(document, (100, 100))
+                result = subprocess.run(["sh", str(self.launcher), "--library"], env=self.env,
+                                        text=True, capture_output=True, timeout=5)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("using standard reindex recovery", result.stderr)
+                self.assertGreater(document.stat().st_mtime, 100)
+                self.assertEqual(len(self.catalog_notifications()), count)
+        self.assertTrue((self.root / "catalog-stream-finished").exists())
+        self.assertFalse((self.root / "lock").exists())
+        self.assertEqual(self.trace(), [])
+
+    def test_catalog_notification_early_lock_failure_preserves_the_other_owner(self):
+        self.catalog_notification_fixture("trailing-nul")
+        unrelated, identity, signals = self.unrelated_power_process()
+        snapshot = self.foreign_display_lock(unrelated.pid)
+        result = subprocess.run(["sh", str(self.launcher), "--library"], env=self.env,
+                                text=True, capture_output=True, timeout=5)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(len(self.catalog_notifications()), 1)
+        self.assertGreater((self.root / "catalog-document.sh").stat().st_mtime, 100)
+        self.assertEqual(self.foreign_display_snapshot(), snapshot)
+        self.assertTrue(self.original_process_exists(identity))
+        self.assertFalse(signals.exists())
+        self.assertEqual(self.trace(), [])
+
+    def test_catalog_notification_ordinary_and_diagnostic_entries_ignore_inherited_handoff(self):
+        self.catalog_notification_fixture()
+        status, _, error = self.run_launcher()
+        self.assertEqual(status, 0, error)
+        self.assertEqual((self.root / "application-catalog-env").read_text(), ":\n")
+        (self.home / "data/device-profile").write_text("unknown\n")
+        for arguments in ((), ("--detached",), ("--detached", "--managed-logs"), ("--library", "extra")):
+            with self.subTest(arguments=arguments):
+                result = subprocess.run(["sh", str(self.launcher), *arguments], env=self.env,
+                                        text=True, capture_output=True, timeout=5)
+                self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(self.catalog_notifications(), [])
+        self.assertNotIn("catalog-scan", self.trace())
+        self.assertEqual((self.root / "catalog-document.sh").stat().st_mtime, 100)
 
     def assert_catalog_standard_recovery(self, behavior):
         self.catalog_notification_fixture(behavior)
-        status, _, error = self.run_launcher()
-        self.assertEqual(status, 0, error)
+        self.assertEqual(self.run_library_entry(), 0)
         records = self.catalog_notifications()
         self.assertEqual(len(records), 1)
         self.assertTrue(records[0]["native_restored"])
@@ -5428,19 +5482,17 @@ class LauncherLifecycleTests(unittest.TestCase):
     def test_catalog_notification_rejects_a_modified_immutable_helper(self):
         helper = self.catalog_notification_fixture()
         helper.write_text(helper.read_text() + "# Changed after the handoff.\n")
-        status, _, error = self.run_launcher()
-        self.assertEqual(status, 0, error)
+        self.assertEqual(self.run_library_entry(), 0)
         self.assertEqual(self.catalog_notifications(), [])
         self.assertEqual(self.trace().count("catalog-scan"), 1)
 
     def test_catalog_notification_is_withheld_when_native_recovery_fails(self):
         self.catalog_notification_fixture()
         self.script(self.bin / "start", 'printf "%s\\n" start-failed >>"$TEST_TRACE"\nexit 7')
-        status, _, error = self.run_launcher()
-        self.assertEqual(status, 1, error)
+        self.assertEqual(self.run_library_entry(), 1)
         self.assertEqual(self.catalog_notifications(), [])
         self.assertNotIn("catalog-scan", self.trace())
-        self.assertIn("native recovery is unconfirmed", error)
+        self.assertIn("native recovery is unconfirmed", (self.home / "data/logs/launcher.log").read_text())
 
     def test_previously_stopped_statusbar_is_left_stopped(self):
         self.env["TEST_STATUSBAR"] = "stop/waiting"

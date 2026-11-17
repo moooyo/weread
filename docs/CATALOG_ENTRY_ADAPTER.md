@@ -1,11 +1,20 @@
-# Native catalog entry integration proposal
+# Native catalog entry integration
 
 Date: 2026-11-18, Asia/Shanghai.
-Status: notification consumer and fixed-entry client prepared. Remote checks
-pass: 233 launcher cases, 19 catalog-client cases, and eight package contracts.
-The ARM client has been built. Shared protocol coordination and physical
-verification remain pending. No new runtime has been
-registered, deployed, or measured by WeRead for this proposal.
+Status: the three projects have coordinated ownership. Aidoku maintains the
+shared runtime; WeRead owns its document, notification consumer, and comparison.
+The host-tested candidate includes the agreed document declaration. The existing
+Aidoku-only runtime does not recognize it. WeRead has neither changed the
+registration nor enabled the feature on the shared Kindle. No device speedup
+is measured here.
+
+On `test-env`, **285 tests passed**: 236 launcher lifecycle, 19 catalog client,
+10 packaging and comparison, and 20 offline protection cases. The 13 notification
+cases are included in the 236, not added again. The launcher suite exited
+successfully before the verification host restarted; its temporary full log
+was lost. Its tested source hashes match the final package and test inputs.
+See [coordinated host verification](review/catalog-entry-adapter-20261118/coordinated-host.json)
+for the results, receipt boundaries, and artifact identities.
 
 ## Accepted baseline and reference
 
@@ -28,7 +37,7 @@ as the registered command.
 
 - The current shared hook and client select only `/mnt/us/documents/Aidoku.sh`.
   A WeRead marker alone cannot enable the existing runtime.
-- The WeRead document is 43,067 bytes because its third line embeds the accepted
+- The unmarked WeRead document is 43,067 bytes because its third line embeds the accepted
   thumbnail. The reference hook reads at most 4,096 header bytes. A bounded
   extension must accommodate this exact metadata without replacing the image.
 - The reference hook requires `# DontUseFBInk`. WeRead retains the original
@@ -42,9 +51,13 @@ as the registered command.
   equivalent 300 ms publication gate to shorten. Existing worker polling is a
   separate potential experiment and is not included in this catalog change.
 
-## Proposed coordination contract
+## Agreed interface and ownership
 
-These are proposed choices until reviewed with the shared-runtime owner.
+Aidoku accepted the WeRead path, marker, default FBInk behavior, and completion
+interface on 2026-11-18. BiliComics also requires default FBInk; its configuration
+is a proposal for its own fixed document, not an enabled participant. The
+compatible shared build, including installation and retirement policy, belongs
+to Aidoku. It must be qualified before the first WeRead device experiment.
 
 1. Maintain one shared dispatcher/hook implementation. Qualify explicit canonical
    entries and their markers; unrelated documents keep their original behavior.
@@ -57,8 +70,9 @@ These are proposed choices until reviewed with the shared-runtime owner.
 3. Use a fixed WeRead catalog client or an equally strict fixed-entry selector.
    No arbitrary document path, URL, service, SQL statement or helper command may
    come from the document or application environment.
-4. Preserve WeRead's large embedded Icon and default FBInk behavior. A WeRead
-   declaration belongs in the first six lines. Header limits must remain finite;
+4. Preserve WeRead's exact third-line embedded Icon and default FBInk behavior.
+   The fourth line is exactly `# WeReadCatalogAccess: deferred-v1`, with this
+   capitalization, at `/mnt/us/documents/weread.sh`. Header limits must remain finite;
    oversized, malformed, missing or ambiguous declarations fall back entirely.
 5. Commit recent access using the qualified native catalog service with quiet
    notification. Delegate exactly one completion to the independent supervisor,
@@ -82,22 +96,24 @@ The prepared ARM client is 12,808 bytes with SHA-256
 It is a separate ARM hard-float glibc executable; the application and existing
 helpers are unchanged. Static ELF inspection confirms its fixed WeRead document
 path and no Aidoku document target. No device performance result is claimed.
-See [remote verification](review/catalog-entry-adapter-20261118/verification.json)
+See the [initial consumer verification](review/catalog-entry-adapter-20261118/verification.json)
 and [pinned client provenance](../vendor/kindle-catalog-client/UPSTREAM_REVISION).
 
 The prepared consumer currently expects `WEREAD_CATALOG_NOTIFY_HELPER` and
 `WEREAD_CATALOG_NOTIFY_SHA256`, an immutable `v1-<sha256>` directory below the
 shared runtime root, and the fixed `weread-catalog-client` basename. The root,
 version directory and client must be root-owned with mode 755; the content hash
-must match the handoff. These choices remain subject to the shared-owner review.
+must match the handoff. The existing Aidoku client and its environment names
+remain separate. WeRead does not ship a shared installer or dispatcher.
 
 The library waiter transfers these values only to its independent supervisor.
 Each process consumes and clears the exported variables before spawning its
 ordinary children. Successful final recovery admits one bounded
 `--notify-protocol` invocation, with successful exit, confirmed helper cleanup,
 and exactly `NOTIFIED` plus one newline required. An unconfirmed native cleanup
-withholds notification. Pre-ownership failures use the validated fixed client's
-own bounded transaction/alarm. Failure uses a standard timestamp/scan recovery
+withholds notification. Pre-ownership failures enforce the same exact reply
+and exit-status contract within the fixed client's own alarm. Ordinary detached
+diagnostics do not consume a Library handoff. Failure uses a standard timestamp/scan recovery
 after native restoration; an early failure only restores the timestamp because
 it owns no private launcher context for a new IPC writer.
 
@@ -105,20 +121,21 @@ The scoped host cases cover successful ordering, nonzero application status,
 waiter retirement across sleep/wake, early configuration failure, explicit
 helper failure, overflow, trailing protocol data, timeout and group retirement,
 helper modification, and failed native restoration. They are Linux process and
-service fixtures, not a physical catalog-service result. No opt-in marker has
-been added to the document, so the current Aidoku-only runtime remains unchanged
-and this prepared consumer has no enabled production catalog path.
+service fixtures, not a physical catalog-service result. The fourth-line marker
+exists in the branch and its host-built comparison inputs only. The installed
+WeRead document and the device registration were not touched.
 
-The WeRead notification consumer and isolated host lifecycle fixtures were
-prepared without holding a device lease. They reuse the supervised native-command
-boundary and retain the accepted cover and all current persistence layouts.
-No Rust rebuild or application-internal performance change was made.
+The WeRead consumer and isolated host fixtures were prepared without holding a
+device lease. The ARM app and the two existing helpers in the candidate package
+are byte-identical to the previous verified package; only the document,
+supervisor and packaged README differ. See the [package and A/B input hashes](review/catalog-entry-adapter-20261118/host-package.json).
 
 Before device use, freeze the shared protocol/version, source and payload hashes,
 remote host checks, public offline fixture, actual indexed-entry instrumentation,
 and protected installation/registration baseline. Use a fresh owner/run/token;
-Aidoku has the operator's highest device priority, and BiliComics currently owns
-the announced validation window. No concurrent device operations are permitted.
+Aidoku has the operator's highest device priority. BiliComics reported releasing
+its window; this does not grant WeRead a window. Coordinate an explicit window
+with Aidoku before acquiring a lease. No concurrent device operations are permitted.
 
 Use a predetermined six-pair AB/BA comparison with the same actual indexed
 WeRead document, application binary, cache snapshot, boot and stabilization
@@ -129,5 +146,50 @@ same-process sleep/wake and the preserved Aidoku/shared baseline. Keep raw token
 catalog IDs, device identifiers, private user data and research archives outside
 the repository. Report failures and unverified gates separately.
 
-Main integration, daily installation, any new shared registration, and numeric
-WeRead benefits remain pending this implementation and independent qualification.
+## Rehearsal and measurement boundaries
+
+`scripts/prepare-catalog-entry-comparison.py` reads a pinned candidate ZIP on
+the verification host. It materializes the same `documents/weread.sh` path in
+separate control/candidate directories, replacing only the opt-in line by an
+equal-length ASCII comment in the control. It refuses a changed Icon or FBInk
+policy and records the common runtime hashes. Neither output installs anything.
+For a device comparison, the build owner must first confirm that the control
+takes the normal path and that the candidate completes the new path. A marker
+alone is not proof that the shared service consumed it.
+
+Use `scripts/check-catalog-guard.py` on independently collected, sanitized
+snapshots. Pin the owner-approved inventory digest outside the observation;
+require the separately frozen version, complete registration projection, and
+all listed Aidoku and BiliComics file hashes or explicit absence records.
+The [historical snapshot](review/catalog-entry-adapter-20261118/historical-protection.json)
+and its [bounded inventory](review/catalog-entry-adapter-20261118/historical-inventory.json)
+are references, not a new WeRead observation or a baseline for a future runtime.
+BiliComics' [pinned restoration record](https://github.com/moooyo/bilicomics/blob/e8d06e356a7319eedf47857566afdeb627f2267c/docs/physical/native-library-entry-20261118/qualification-r2/restoration.json)
+provides six Aidoku files and the decoded registration projection. Its
+[entry report](https://github.com/moooyo/bilicomics/blob/e8d06e356a7319eedf47857566afdeb627f2267c/docs/NATIVE_LIBRARY_ENTRY_20261118.md)
+and the maintainer's handoff identify the absent BiliComics install root and
+both document spellings. Configuration files under that absent root were not
+read or individually hashed. If BiliComics is installed later, freeze the
+public install identities with its owner; never substitute candidate ZIP
+hashes or read operator data to fill a gap. A matching snapshot is not proof
+of who collected it or when. The November 17 runner assumes a legacy command
+and rewrites the document header. Do not reuse it unchanged or restore an old
+registration. The fresh, approved preflight and closeout must agree; a
+mismatch stops the experiment without rewriting either peer's installation.
+
+Measure request-to-first-Library-SEND from the file-open request and the actual
+driver marker using the same uptime clock. Check Library route and view pixels
+in separate qualification runs. The [warm offline Library fixture](review/catalog-entry-adapter-20261118/library-covers.md)
+demonstrates all fifteen visible covers on the production desktop renderer. A
+separate run with one cached image removed rejects just that book. These final
+scale-one renders do not timestamp a physical Kindle frame. Requalify the
+matcher at the real device geometry before reporting an all-covers endpoint.
+Likewise, `--exit-after-ms`, disappearance of the launcher lock, and presence
+of the native Home process do not by themselves measure return to the Library
+view. Record a real exit request and a confirmed Library view on the same clock
+in runs without shutdown screenshots, or explicitly leave that metric unmeasured.
+
+The protected registration identity, peer compatibility, actual device slot,
+six pairs, and sleep/wake qualification remain prerequisites for enabling the
+WeRead path or claiming any speedup. Main integration and daily installation
+are separate from this host candidate.

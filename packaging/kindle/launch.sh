@@ -17,19 +17,23 @@ LOCK_OWNED=0
 MANAGED_LOGS_ACTIVE=0
 MANAGED_LOGS_DISABLED=0
 LAUNCHER_LOG_LIMIT=65536
-CATALOG_NOTIFY_HELPER=${WEREAD_CATALOG_NOTIFY_HELPER:-}
-CATALOG_NOTIFY_SHA256=${WEREAD_CATALOG_NOTIFY_SHA256:-}
+CATALOG_NOTIFY_HELPER=''
+CATALOG_NOTIFY_SHA256=''
 CATALOG_NOTIFY_PENDING=0
-# Only an explicit transfer to the independent worker may inherit this handoff.
+# Direct detached diagnostics must not consume a Library handoff.
+if [ "$#" -eq 1 ]; then
+    case "$1" in
+        --library|--library-catalog-worker)
+            CATALOG_NOTIFY_HELPER=${WEREAD_CATALOG_NOTIFY_HELPER:-}
+            CATALOG_NOTIFY_SHA256=${WEREAD_CATALOG_NOTIFY_SHA256:-}
+            if [ -n "$CATALOG_NOTIFY_HELPER" ] && [ -n "$CATALOG_NOTIFY_SHA256" ]; then
+                CATALOG_NOTIFY_PENDING=1
+            fi
+            if [ "$1" = --library-catalog-worker ]; then set -- --detached --managed-logs; fi
+            ;;
+    esac
+fi
 unset WEREAD_CATALOG_NOTIFY_HELPER WEREAD_CATALOG_NOTIFY_SHA256
-case "${1:-}" in
-    --library|--detached)
-        if [ -n "$CATALOG_NOTIFY_HELPER" ] && [ -n "$CATALOG_NOTIFY_SHA256" ]; then
-            CATALOG_NOTIFY_PENDING=1
-        fi
-        ;;
-    *) CATALOG_NOTIFY_HELPER=''; CATALOG_NOTIFY_SHA256='' ;;
-esac
 
 launcher_log() {
     if [ "$MANAGED_LOGS_ACTIVE" -eq 1 ]; then
@@ -78,6 +82,18 @@ catalog_notify_helper_is_current() {
     [ "${catalog_digest%% *}" = "$CATALOG_NOTIFY_SHA256" ]
 }
 
+early_catalog_notification() {
+    # A failed client appends a byte that cannot complete the expected record.
+    # Inspect one byte beyond the record and drain the pipe until the fixed
+    # client exits under its own alarm. Only ten encoded bytes enter the shell.
+    catalog_reply_bytes=$(
+        { "$CATALOG_NOTIFY_HELPER" --notify-protocol 2>/dev/null || printf '!'; } |
+            { od -An -N10 -v -tx1 && cat >/dev/null; } 2>/dev/null
+    ) || return 1
+    set -- $catalog_reply_bytes
+    [ "$*" = '4e 4f 54 49 46 49 45 44 0a' ]
+}
+
 finish_catalog_notification() {
     [ "$CATALOG_NOTIFY_PENDING" -eq 1 ] || return 0
     CATALOG_NOTIFY_PENDING=0
@@ -90,13 +106,8 @@ finish_catalog_notification() {
                 launcher_log '%s\n' 'weread: Catalog notification completed.'
                 return 0
             fi
-        else
-            # Before native ownership exists, the immutable fixed-entry client
-            # provides its own whole-process alarm and bounded transaction.
-            # Discard output here so an early failure cannot grow a shell value.
-            if "$CATALOG_NOTIFY_HELPER" --notify-protocol >/dev/null 2>&1; then
-                return 0
-            fi
+        elif early_catalog_notification; then
+            return 0
         fi
     fi
     launcher_log '%s\n' 'weread: Catalog notification unavailable; using standard reindex recovery.'
@@ -367,9 +378,15 @@ if [ "${1:-}" != '--detached' ]; then
     fi
     export WEREAD_HOME
     if command -v setsid >/dev/null 2>&1; then
-        WEREAD_CATALOG_NOTIFY_HELPER=$CATALOG_NOTIFY_HELPER WEREAD_CATALOG_NOTIFY_SHA256=$CATALOG_NOTIFY_SHA256 setsid sh "$SCRIPT_PATH" --detached --managed-logs >"$DATA_DIR/logs/last-launch.log" 2>&1 </dev/null &
+        library_session=setsid
     else
-        WEREAD_CATALOG_NOTIFY_HELPER=$CATALOG_NOTIFY_HELPER WEREAD_CATALOG_NOTIFY_SHA256=$CATALOG_NOTIFY_SHA256 nohup sh "$SCRIPT_PATH" --detached --managed-logs >"$DATA_DIR/logs/last-launch.log" 2>&1 </dev/null &
+        library_session=nohup
+    fi
+    if [ "$CATALOG_NOTIFY_PENDING" -eq 1 ]; then
+        WEREAD_CATALOG_NOTIFY_HELPER=$CATALOG_NOTIFY_HELPER WEREAD_CATALOG_NOTIFY_SHA256=$CATALOG_NOTIFY_SHA256 \
+            "$library_session" sh "$SCRIPT_PATH" --library-catalog-worker >"$DATA_DIR/logs/last-launch.log" 2>&1 </dev/null &
+    else
+        "$library_session" sh "$SCRIPT_PATH" --detached --managed-logs >"$DATA_DIR/logs/last-launch.log" 2>&1 </dev/null &
     fi
     LIBRARY_WORKER_PID=$!
     # The independent worker now owns completion, including early startup

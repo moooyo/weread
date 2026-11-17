@@ -1,0 +1,162 @@
+{
+  "excluded_book_ids": [
+    "article:demo-article-0",
+    "article:demo-article-1",
+    "article:demo-article-2"
+  ],
+  "format": "weread-offline-library-covers-v1",
+  "profile": "scribe",
+  "scope": "Offline public demo, default Library cover grid, Scribe profile, page one. No network requests, full sleep covers, display timing, or device measurements.",
+  "targets": [
+    {
+      "book_id": "demo-0",
+      "cache_key": "cover:59d9a624709a8c514370a70abd4570250cffe630fc0dc24b74315966ac8aeb8b",
+      "column": 0,
+      "cover_url": "https://example.invalid/library-covers/demo-0.png",
+      "row": 0,
+      "source_sha256": "5cbe7e1227407a23ba38a750b37faa91648261268f9a87590d80cd53516ee42c",
+      "thumbnail": "demo/covers/6a0f98e58cce41553d48dc74232a239c629b6b631299d9d2ccfd5b6a1622068e-b2144f46247145d7a11ce523aeba1fca716c1cdf90ebaad8536208b80259c1bd.png",
+      "thumbnail_sha256": "b2144f46247145d7a11ce523aeba1fca716c1cdf90ebaad8536208b80259c1bd"
+    },
+    {
+      "book_id": "demo-1",
+      "cache_key": "cover:8f0414c23e6b1f312c3e63fe5d6026516b51cc1010b1debf74b83438edb5f63a",
+      "column": 1,
+      "cover_url": "https://example.invalid/library-covers/demo-1.png",
+      "row": 0,
+      "source_sha256": "3b0103348a3ad322101dc1244bcb0580dd16407cace66f884d58f6b8aa21cc32",
+      "thumbnail": "demo/covers/be66bf628da6cf88c8b0a0aa636267e6bddb137f33288ca629f292504d247cd9-d32092027fd951ccd68529f76ac3dcb90269d87facec9ce48519081f8df6fd13.png",
+      "thumbnail_sha256": "d32092027fd951ccd68529f76ac3dcb90269d87facec9ce48519081f8df6fd13"
+    },
+    {
+      "book_id": "demo-2",
+      "cache_key": "cover:a94152304fe236ac7b96911793fea31e338d30beab920c9f5529ac967abf7a99",
+      "column": 2,
+      "cover_url": "https://example.invalid/library-covers/demo-2.png",
+      "row": 0,
+      "source_sha256": "e05291e2dd970cc8ba87fac42b17e14531c978e4d3afb4f5322b5492f9799c56",
+      "thumbnail": "demo/covers/f49fc85d8bf142883a68a307a05b688eb2125dc804a819867720a7ceff25403a-f9fc4b4122b75d430cacca7a38a9224b6753338192f6c23e99dbe55dab9876ab.png",
+      "thumbnail_sha256": "f9fc4b4122b75d430cacca7a38a9224b6753338192f6c23e99dbe55dab9876ab"
+    },
+    {
+      "book_id": "demo-3",
+      "cache_key": "cover:20fab658d0c241d9111ba5f5c8c0520756eb91c6cf3dd3c4abfb63697daa6a18",
+      "column": 3,
+      "cover_url": "https://example.invalid/library-covers/demo-3.png",
+      "row": 0,
+      "source_sha256": "ed64a789e62daf130ae3c5192a1eb79af29e778f7cdc2ec04bd9a98158d39ea4",
+      "thumbnail": "demo/covers/07c6af7f5dc817aacd49e946d8eb8bfee669073ac1907d81d4956270209f60f2-03e70b3b6f74696ab434dd887059486d15f950455bb9b8fae54ec1059a0d6bb6.png",
+      "thumbnail_sha256": "03e70b3b6f74696ab434dd887059486d15f950455bb9b8fae54ec1059a0d6bb6"
+    },
+    {
+      "book_id": "demo-4",
+      "cache_key": "cover:356396a263bbf0e607fda489ebe8903be317ff04fc4f1e2672269b3fb333abbd",
+      "column": 4,
+      "cover_url": "https://example.invalid/library-covers/demo-4.png",
+      "row": 0,
+      "source_sha256": "b3ce9ada692ed90c174891267068e38af15c4fd0ca55483bd03f92da410884b6",
+      "thumbnail": "demo/covers/2da3cbf664f73c15aa2bcce35e78099d338b81965208068562ff749a63856b85-d896bdc1820f118915a9e91cd0953e00ff2628814370d521c922a9c31a94ed24.png",
+      "thumbnail_sha256": "d896bdc1820f118915a9e91cd0953e00ff2628814370d521c922a9c31a94ed24"
+    },
+    {
+      "book_id": "demo-5",
+      "cache_key": "cover:50e8995026d6f1084dd9a16edbea51da905efd479b7e27a97a10fe19ffe5b708",
+      "column": 0,
+      "cover_url": "https://example.invalid/library-covers/demo-5.png",
+      "row": 1,
+      "source_sha256": "f5ccf877d2e5563ae9e5b7215fc6a0986b66c04f3caa7ce0e3824ce73133b6e2",
+      "thumbnail": "demo/covers/da1b9d37337d393dacfc8f692e89dfa14e532b135df477034c0d901547f10ac6-63e1f034a95c8d061b6751c8dc2089e175283969287a49100b84abfb0517ffde.png",
+      "thumbnail_sha256": "63e1f034a95c8d061b6751c8dc2089e175283969287a49100b84abfb0517ffde"
+    },
+    {
+      "book_id": "demo-6",
+      "cache_key": "cover:a1d87171becafc32ae0f8c9df2e24a52b9e6db1914fec3ca1f00a537c8ab710b",
+      "column": 1,
+      "cover_url": "https://example.invalid/library-covers/demo-6.png",
+      "row": 1,
+      "source_sha256": "cb21bfd14adc4a65f4cf574722f488b4cec7a6b9643d9ab9daeb3f2d7123b6af",
+      "thumbnail": "demo/covers/6a060aedaf056b22b5d5ea2f0cc7f52efb5b486130c8fe3f65fc3a4884476f47-870bbf59c9fa1cfde3173c3895fb402e8fca386cf4d87fd39563418cb0316cd0.png",
+      "thumbnail_sha256": "870bbf59c9fa1cfde3173c3895fb402e8fca386cf4d87fd39563418cb0316cd0"
+    },
+    {
+      "book_id": "demo-7",
+      "cache_key": "cover:2cdc9a5f3a23bca2d4fa3e6b92a67d9214dd498be84dfcc9a9b076f799a15456",
+      "column": 2,
+      "cover_url": "https://example.invalid/library-covers/demo-7.png",
+      "row": 1,
+      "source_sha256": "2151b6faabcf7603401585ad165255134316ced70b62f64b6ceadbd45c8e0307",
+      "thumbnail": "demo/covers/5ac04296e04dde5c3a1ea362572de04f1ba5f53bc9ed4fd86c84b8451de992ad-1adf9da31b590282f55e555f4a4bf020290f3caaf60e1725c13f03008a01a0a5.png",
+      "thumbnail_sha256": "1adf9da31b590282f55e555f4a4bf020290f3caaf60e1725c13f03008a01a0a5"
+    },
+    {
+      "book_id": "demo-8",
+      "cache_key": "cover:b4cad6ee4a2bc4adea37135ca5a7ad42d369443fc36878f42016005a49f02734",
+      "column": 3,
+      "cover_url": "https://example.invalid/library-covers/demo-8.png",
+      "row": 1,
+      "source_sha256": "d9383eee1034e5601aa23e316237607570939a58ca070a28927a67c8262bbb13",
+      "thumbnail": "demo/covers/467279a1d742b5e10677b20ad3d7b08a7f7432cf43fc830e53c6eec89a52ea4a-b77857aea26a1fd1bf9161657f17c3c1c966fa82ec265e66e575ce236cae2e22.png",
+      "thumbnail_sha256": "b77857aea26a1fd1bf9161657f17c3c1c966fa82ec265e66e575ce236cae2e22"
+    },
+    {
+      "book_id": "demo-9",
+      "cache_key": "cover:119aaba545e4b5019a240928b64f2c0836f34a93d758f86a97529db497a8951e",
+      "column": 4,
+      "cover_url": "https://example.invalid/library-covers/demo-9.png",
+      "row": 1,
+      "source_sha256": "f3b2e9f2c09b07f18d69dd49440c07ad9f4b190ee81c452d3efe6b04fe7be76f",
+      "thumbnail": "demo/covers/0dfb9dede51b3381bba55fb40fc8000d66fed44af8db9ead61de431c88d5b26e-15c042892bef862411370af77673d0b0fed02a0a339e014ff24871e5cc70fb53.png",
+      "thumbnail_sha256": "15c042892bef862411370af77673d0b0fed02a0a339e014ff24871e5cc70fb53"
+    },
+    {
+      "book_id": "demo-10",
+      "cache_key": "cover:a5e7405a497d063e10c35e74499659790d645dc0be0e8485743da86e6ecea6eb",
+      "column": 0,
+      "cover_url": "https://example.invalid/library-covers/demo-10.png",
+      "row": 2,
+      "source_sha256": "cecff225153eeba89f2d1209a44b8c6ad1f81d4aaa57d8da077d68ffb9a06947",
+      "thumbnail": "demo/covers/eeb427caa5741988aac641577389ad3c35a12f8c2379beafb968498894fd3213-aef7bdbf64dfa9cb9a9e59e6596954cccf666c5e68a788b14f5c69a7f050bc82.png",
+      "thumbnail_sha256": "aef7bdbf64dfa9cb9a9e59e6596954cccf666c5e68a788b14f5c69a7f050bc82"
+    },
+    {
+      "book_id": "demo-11",
+      "cache_key": "cover:862471013b67974a1ecbf94b4f2983ee59d63e5e8afa7e50863965e33954689f",
+      "column": 1,
+      "cover_url": "https://example.invalid/library-covers/demo-11.png",
+      "row": 2,
+      "source_sha256": "d30e614a577a97dac7ac061dff6bd9ea62ed30ade18d5b5cfc235c41f6988cc1",
+      "thumbnail": "demo/covers/2dec9eb2ed5c01f58e3e629929352e25c182ba5a9533db80d7dc921f72af4f80-ada5448ea0c70998f2d8d3cdd0d111971dba8cb0b0a66e81f6ed051011eee522.png",
+      "thumbnail_sha256": "ada5448ea0c70998f2d8d3cdd0d111971dba8cb0b0a66e81f6ed051011eee522"
+    },
+    {
+      "book_id": "demo-12",
+      "cache_key": "cover:8e57d11313e54984bfeede07f5a3df7c1201714560ca8f493a0ce985a3749b42",
+      "column": 2,
+      "cover_url": "https://example.invalid/library-covers/demo-12.png",
+      "row": 2,
+      "source_sha256": "c8715ca00b30fda1d8d51d4d346e01a45aa06c336f0a29564fcedf254fde44b2",
+      "thumbnail": "demo/covers/2efe86cdfafc6e6b342857bf0bba4535f5c0f2d6ca220c7fe40a3ead06e39f15-ec63df5c5f7c71938f96a45fe1babf39e3d26905a6758a70bd97d6936d426d0e.png",
+      "thumbnail_sha256": "ec63df5c5f7c71938f96a45fe1babf39e3d26905a6758a70bd97d6936d426d0e"
+    },
+    {
+      "book_id": "demo-13",
+      "cache_key": "cover:b5fd620fcbd1ee751df28084c59d2c16a51ff36b84aa544781bbba36f1944f07",
+      "column": 3,
+      "cover_url": "https://example.invalid/library-covers/demo-13.png",
+      "row": 2,
+      "source_sha256": "4bbb84a08846a5588d5839aff75e31c9e05c3ff690f0562e9ba4e865f3532ee6",
+      "thumbnail": "demo/covers/753b3868e88448d4c21c3ffbc75be97d718fd59792fbbeec38a26b78e04ff21e-7ce1b875543100e8d7ea80b5c4b0e5d8d9381557228d1855006df997a6b61300.png",
+      "thumbnail_sha256": "7ce1b875543100e8d7ea80b5c4b0e5d8d9381557228d1855006df997a6b61300"
+    },
+    {
+      "book_id": "demo-14",
+      "cache_key": "cover:1ada108226fea0185d6cd2052342b0f00912aacfb00c0e46e55e3f9a7ad7d68b",
+      "column": 4,
+      "cover_url": "https://example.invalid/library-covers/demo-14.png",
+      "row": 2,
+      "source_sha256": "65ab08935b404d41b0bdc52b688f173ef4529ee140e0c79599898c23173a2274",
+      "thumbnail": "demo/covers/d6e61600c4cb698834f02d3d8bf3fa619327bf9c3c2eb413f1f9bbff10a8788a-27c5f65162caf4fc9820db72c86b05931b225d3e9ceaa91207a7e74e73f2a8db.png",
+      "thumbnail_sha256": "27c5f65162caf4fc9820db72c86b05931b225d3e9ceaa91207a7e74e73f2a8db"
+    }
+  ]
+}

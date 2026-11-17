@@ -1,0 +1,22 @@
+{
+  "route": "library",
+  "profile": "scribe",
+  "backend": "desktop",
+  "design_logical_size": [
+    930,
+    1240
+  ],
+  "logical_size": [
+    930,
+    1240
+  ],
+  "window_size": [
+    930,
+    1240
+  ],
+  "snapshot_size": [
+    930,
+    1240
+  ],
+  "scale_factor": 1.0
+}
