@@ -1,10 +1,11 @@
 # Formal Library entry lifetime
 
-Status: verified candidate on `codex/library-entry-lifetime`. Host, formal-entry
+Status: implementation `1498dd7` merged to main with operator approval on
+2026-11-17. Host, formal-entry
 startup, and scoped physical sleep/wake qualification have passed. First Library
 submission improves from **10.390 to 9.820 seconds** in the six-pair comparison;
-five pairs improve and one is slower. Main integration and daily installation
-have not been performed for this candidate.
+five pairs improve and one is slower. The ordinary device installation remains
+unchanged; source integration does not deploy the package.
 
 ## Scope and implementation
 
@@ -203,7 +204,8 @@ complete hashes, archive membership, source-audit digest, and package checks.
 | Candidate document with accepted penguin metadata | `085efcac8d33` |
 | Development ZIP | `35a4717daf86` |
 
-The code and evidence are retained as a candidate branch for review. Main and
-the ordinary device installation remain at their prior states. Authenticated use, extended deep
+The operator approved main integration on 2026-11-17. Implementation `1498dd7`
+and its evidence are merged to main; the ordinary device installation remains
+unchanged. Authenticated use, extended deep
 sleep, physical touch latency, other model/firmware combinations, and installation
 of the accepted penguin cover remain outside this entry-only comparison.

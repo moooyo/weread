@@ -26,7 +26,7 @@ matched Scribe 2022 / firmware 5.19.5 pairs reduced first Library SEND from
 Host checks and an absent-helper startup passed. Main integration was approved
 on 2026-11-17; the regular device installation remains unchanged.
 
-The [formal Library entry candidate](docs/review/native-library-entry-20261117/README.md)
+The accepted [formal Library entry change](docs/review/native-library-entry-20261117/README.md)
 keeps its existing document active until an independent supervisor finishes
 native restoration. The package now includes a small document wrapper and a
 separate supervisor, while retaining one Library item and the accepted cover.
@@ -35,8 +35,8 @@ Scribe 2022 / firmware 5.19.5 pairs through the real Library document reduce
 median first SEND from 10.390 to 9.820 seconds; five pairs improve and one is
 220 ms slower. Native/software images match, with dynamic status-bar differences
 reported separately. Both variants also pass a same-process physical screen-saver
-and scheduled-wake cycle with identical pre-sleep/resumed frames. This candidate
-is not installed for daily use.
+and scheduled-wake cycle with identical pre-sleep/resumed frames. The operator
+approved main integration on 2026-11-17; the ordinary installation remains unchanged.
 
 The 2026-11-16 [image-preparation work](docs/IMAGE_PREPARATION_PERFORMANCE_20261116.md) moves final Reader/Article picture preparation and cover conversion to bounded workers. Repeated publication reuses current shared pixels, and optional full sleep covers wait for reading inactivity. Current source, palette, resource, and power-event boundaries remain explicit; the feature record separates paired software measurements from device acceptance.
 
