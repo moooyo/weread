@@ -19,6 +19,13 @@ The paired final images were identical. Remote software gates passed; the
 regular device installation was preserved. These are scoped measurements,
 not optical panel-completion timing or a general device-support claim.
 
+The accepted [native-query follow-up](docs/NATIVE_QUERY_PERFORMANCE_20261117.md)
+reuses a bounded read-only firmware session for portrait calibration. Six
+matched Scribe 2022 / firmware 5.19.5 pairs reduced first Library SEND from
+9.430 to 9.090 seconds, with every pair faster and identical final frames.
+Host checks and an absent-helper startup passed. Main integration was approved
+on 2026-11-17; the regular device installation remains unchanged.
+
 The 2026-11-16 [image-preparation work](docs/IMAGE_PREPARATION_PERFORMANCE_20261116.md) moves final Reader/Article picture preparation and cover conversion to bounded workers. Repeated publication reuses current shared pixels, and optional full sleep covers wait for reading inactivity. Current source, palette, resource, and power-event boundaries remain explicit; the feature record separates paired software measurements from device acceptance.
 
 The accepted [Skills setup guidance](docs/LOGIN_UI.md#skills-setup-guidance) adds the official prerequisite and a full-page guide to QR Login. Four numbered rows form one centered group; upper-left Back obtains a fresh challenge, and upper-right X retains ordinary exit. Temporary authentication work is cancelled and fenced while the guide is open. The public QR has transparent light modules and a bounded, replicated alpha raster for precise scaling. Manual credential editing remains absent. [Detail pagination](docs/DETAIL_HUB.md#viewport-capacity-follow-up) now derives bounded capacities from the actual viewport, including 19 catalog rows on the standard Scribe profile. These changes keep the current persistence layout and do not require a data reset.

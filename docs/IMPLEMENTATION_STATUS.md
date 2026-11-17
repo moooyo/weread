@@ -14,8 +14,8 @@ and persistent state are unchanged. Packaging verification is recorded in
 [Kindle packaging](../packaging/kindle/README.md#application-entry-cover);
 installation and physical display acceptance remain open.
 
-The [native-query follow-up](NATIVE_QUERY_PERFORMANCE_20261117.md) is a separate
-implementation candidate on `codex/native-query-followup`. Its clean cache audit
+The [native-query follow-up](NATIVE_QUERY_PERFORMANCE_20261117.md) was approved
+for main integration on 2026-11-17. Its clean cache audit
 reproduced both earlier measured executables byte-for-byte. Host verification
 passed 1,707 library cases with four existing benchmarks ignored, 56 Main cases,
 six C-helper cases, five archive contracts, 215 launcher cases, and one additional
@@ -26,8 +26,9 @@ pairs and an absent-helper case. Software ready improved 8.605 -> 8.230 s and
 first Library SEND 9.430 -> 9.090 s; all six pairs were faster. The final paired
 native/software frames and fallback frames were identical. Native control and
 lighting were restored, ordinary installation/data were preserved, and the
-lease was released. The code remains on the candidate branch; physical
-sleep/wake and general device qualification are separate.
+lease was released. Main integration preserves the measured runtime bytes;
+daily-use deployment, physical sleep/wake, and general device qualification
+are separate.
 
 The 2026-11-17 [startup changes](STARTUP_PERFORMANCE_20261117.md) passed 1,699
 library tests with four existing benchmarks ignored, 55 Main tests, 147 backend

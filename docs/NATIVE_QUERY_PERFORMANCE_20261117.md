@@ -1,11 +1,12 @@
 # Native portrait query transport
 
 Date: 2026-11-17 (Asia/Shanghai).
-Status: implementation candidate with completed host, package, and scoped
+Status: implementation approved for main integration, with completed host, package, and scoped
 physical verification. Six balanced warm A/B pairs on Scribe 2022 / firmware
 5.19.5 reduced first Library SEND from **9.430 s to 9.090 s**, a **340 ms / 3.6%**
 improvement. Every pair favored the candidate. A separate missing-helper launch
-passed. The normal installation was preserved; this branch is not merged.
+passed. The operator approved main integration on 2026-11-17. The normal
+installation remains unchanged; source integration does not deploy the package.
 
 ## Scope and build audit
 
