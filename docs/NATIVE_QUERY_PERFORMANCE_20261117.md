@@ -1,10 +1,11 @@
 # Native portrait query transport
 
 Date: 2026-11-17 (Asia/Shanghai).
-Status: implementation candidate; host verification and packaging passed.
-The physical preflight could not connect to the Kindle over SSH. No candidate
-was uploaded or launched, and the fresh lease was released. Device performance
-and actual firmware-helper qualification remain blocked pending connectivity.
+Status: implementation candidate with completed host, package, and scoped
+physical verification. Six balanced warm A/B pairs on Scribe 2022 / firmware
+5.19.5 reduced first Library SEND from **9.430 s to 9.090 s**, a **340 ms / 3.6%**
+improvement. Every pair favored the candidate. A separate missing-helper launch
+passed. The normal installation was preserved; this branch is not merged.
 
 ## Scope and build audit
 
@@ -70,7 +71,7 @@ All execution runs through `ssh test-env`, with six Cargo jobs. Builds use the
 same thin-LTO, one-codegen-unit release profile as the previous WeRead baseline.
 Firmware access requires a fresh shared lease after the artifacts, fixture,
 and collection tools are ready. The daily installation and private data must
-remain unchanged. Device findings will be recorded independently here.
+remain unchanged. Device findings are recorded independently below.
 
 | Check | Result |
 | --- | --- |
@@ -82,6 +83,10 @@ remain unchanged. Device findings will be recorded independently here.
 | Additional helper resident-wake case | One passed |
 | Formatting and clean ARM build | Passed |
 | Real development archive | 37 explicit members; CRC, modes, image, and runtime bytes passed |
+| Actual firmware helper | Direct calibration succeeded; all candidate cases confirmed the helper path |
+| Native warmups and paired launches | Fourteen successful launches: two warmups and six balanced pairs |
+| Helper deliberately absent | One additional launch succeeded using the complete legacy path |
+| Final native/software captures | Identical across all 1860 x 2480 pixels, including the fallback capture |
 
 The wake fixture initially counted unrelated required power confirmations as
 legacy calibration reads. It was corrected to reject legacy metadata/direction
@@ -91,10 +96,63 @@ an optional ARM floating-point attribute; the actual ELF flags `0x5000400` and
 `/lib/ld-linux-armhf.so.3` interpreter establish the hard-float ABI instead.
 
 The new main executable is 95,183,208 bytes, 14,904 bytes larger than current
-main. The query helper is 4,820 bytes. Actual device loading, six balanced
-warm A/B rounds, native-frame comparisons, and a missing-helper launch are
-prepared but have not run. No WeRead timing benefit is claimed from Aidoku's
-measurements or the host mock tests.
+main. The query helper is 4,820 bytes. WeRead's benefit is measured independently
+from Aidoku and is smaller than the reference project's result.
+
+## Physical measurements
+
+Implementation commit: `06a4f70142ffec74f3defa1d983d1c5d4c3e498c`.
+The baseline is the cleanly reproduced current-main executable above. Both
+variants ran on the same Scribe boot, with the same compiler/release settings,
+the same offline demonstration snapshot restored before each case, and the
+normal Scriptlet FBInk behavior. The launcher timing markers are matched on
+both variants. One warmup per variant is excluded from the six measured pairs.
+
+| Endpoint | Baseline median | Candidate median | Reduction |
+| --- | ---: | ---: | ---: |
+| Software ready | 8.605 s | 8.230 s | 375 ms / 4.4% |
+| First Library SEND receipt | 9.430 s | 9.090 s | 340 ms / 3.6% |
+| Native portrait calibration interval | 665 ms | 360 ms | 305 ms |
+| Native request to application entry | 4.675 s | 4.350 s | 325 ms |
+
+| Round | Order | Baseline SEND | Candidate SEND | Reduction |
+| --- | --- | ---: | ---: | ---: |
+| 1 | AB | 9.660 s | 9.080 s | 580 ms |
+| 2 | BA | 9.400 s | 9.070 s | 330 ms |
+| 3 | AB | 9.460 s | 9.250 s | 210 ms |
+| 4 | BA | 9.240 s | 9.100 s | 140 ms |
+| 5 | AB | 9.340 s | 8.930 s | 410 ms |
+| 6 | BA | 9.560 s | 9.230 s | 330 ms |
+
+All six readiness and first-SEND comparisons improved. Every measured candidate
+confirmed the helper transport and a valid calibration; baseline and the
+separate absent-helper case confirmed the legacy transport. The direct helper
+probe also completed on the actual firmware. Final paired software captures,
+native framebuffer captures, and the absent-helper captures matched pixel for
+pixel. Input selections agreed across all fifteen launches.
+
+The candidate's font validation/registration interval remains about 3.077 s.
+Its 4.350 s pre-exec interval still includes the existing two-second settling
+delay and native Scriptlet/ownership work. These are larger remaining costs;
+this change does not remove their checks or claim their entire duration as
+available savings. Independent stage medians must not be added as one timeline.
+The earlier 9.30 s baseline was a different measurement batch; only the
+matched 9.430-to-9.090 s comparison above supports this round's gain.
+
+Request and collector receipt timestamps use device `/proc/uptime`, at 10 ms
+resolution with ordinary scheduling/pipe delay. Internal intervals use only
+`CLOCK_MONOTONIC`. First SEND is not optical panel completion, physical-tap
+latency, or completion of the full-frame input barrier. This is warm startup
+evidence; physical gestures, sleep/wake, cold boots, other models, and other
+firmware do not gain new qualification from this batch. The helper wake path
+has separate host fixture coverage.
+
+An initial connection attempt timed out before any device command ran; its
+lease was released without upload or launch. After the operator restored
+connectivity, a fresh lease covered the completed continuous batch. Native
+control and lighting were restored, ordinary application/configuration/database
+hashes were unchanged, owned staging and transports were removed, and the exact
+lease was released before host analysis. No daily-use installation was replaced.
 
 ## Evidence and candidate identity
 
@@ -102,6 +160,8 @@ measurements or the host mock tests.
 - [Source/build identity](review/native-query-20261117-4bc333e/candidate-source.json): 533 runtime/build/public-asset files agree with the reviewed checkout after Git text-line-ending normalization; raw tested hashes are retained.
 - [Host verification](review/native-query-20261117-4bc333e/verification.json).
 - [Real package verification](review/native-query-20261117-4bc333e/package-verification.json).
+- [Complete measurements and fallback evidence](review/native-query-20261117-4bc333e/native-query-ab.json).
+- [Candidate demonstration capture](review/native-query-20261117-4bc333e/candidate-library.png).
 
 | Artifact | SHA-256 |
 | --- | --- |
@@ -113,9 +173,9 @@ measurements or the host mock tests.
 
 The named ZIP is `weread-kindle-0.2.0-native-query-20261117.zip`. Its only
 member change after the compiled-package checks is the public packaging README;
-runtime bytes and permissions remain identical. It is an unqualified test
-candidate, not a deployed or published release.
+runtime bytes and permissions remain identical. It is a scoped, verified test
+candidate, not a daily-use installation or published release.
 
-Raw logs, mock inputs, frozen variants, and the prepared six-pair/fallback
+Raw logs, mock inputs, frozen variants, and the six-pair/fallback
 collector remain under `test-env:/root/weread-native-query-20261117-r1/`.
 Private transport configuration and lease tokens are excluded from this record.

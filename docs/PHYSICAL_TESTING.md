@@ -17,6 +17,32 @@ dates remain attached to their own results.
 
 No device address, credential, serial number, private note text, or account content is part of this record. Offline demonstration results do not establish live-account authentication, content entitlements, or upstream writes.
 
+## Native-query candidate comparison (2026-11-17)
+
+The [native-query candidate](NATIVE_QUERY_PERFORMANCE_20261117.md) was compared
+with the cleanly reproduced `4bc333e` baseline on the identified Scribe 2022 /
+firmware 5.19.5. After an initial SSH timeout and released lease, the operator
+restored connectivity. A new lease covered two warmups, six balanced AB/BA
+pairs, and one separate candidate launch with its query helper removed.
+
+All fifteen launches succeeded. Candidate ARM `d3a6b663d9fb`, query helper
+`149fa95f3c40`, launcher `05a3b39d6189`, and unchanged frame guard `689ef367eabe`
+ran from isolated temporary paths. Each regular candidate case confirmed the
+helper path and a valid calibration. The absent-helper case confirmed the
+whole legacy path using the same candidate executable.
+
+Software-ready median changed from 8.605 to 8.230 seconds; first Library SEND
+receipt changed from 9.430 to 9.090 seconds. Every pair favored the candidate.
+Final paired software/native captures and the absent-helper captures matched
+across the entire 1860 x 2480 frame. Input selections were identical. Native
+control and lighting were restored, ordinary installation/configuration/database
+hashes were unchanged, owned staging and transports were closed, and the exact
+lease was released before host analysis.
+
+The normal installation was not replaced. This qualifies the scoped startup
+query and absent-helper path on that device, not physical tap latency, optical
+panel completion, gestures, sleep/wake, cold boots, or additional hardware.
+
 ## Isolated startup comparison (2026-11-17)
 
 The [startup optimization](STARTUP_PERFORMANCE_20261117.md) was compared with

@@ -95,9 +95,10 @@ retains the current framebuffer/sensor ordering, value checks, and existing
 command ownership registry; the helper exposes only power-state and direction
 reads. Complete frames, clean EOF, and successful termination precede publishing
 a sample. Initial unavailability can fall back to the full legacy transaction,
-while a connected bad sample is rejected. Host gates have passed; actual-device
-qualification is pending connectivity. This remains separate from the accepted
-earlier startup measurements and does not change application persistence.
+while a connected bad sample is rejected. Host gates and a scoped Scribe 2022 /
+firmware 5.19.5 startup/fallback comparison have passed. This remains a candidate
+branch, separate from the accepted earlier startup measurements and broader
+device qualification, and does not change application persistence.
 
 Resource admission uses RAII credits retained through active work, queued results, and UI processing: eight metadata credits, two public-image credits within that budget, one login credit, bounded download-fetch credits acquired before chapter-data acquisition or cloning, one ordered download-packet credit, and one independent opportunistic progress credit. Download plans retain only bounded remaining-task metadata. A cached checkpoint sends identity and cursor data under the packet credit; persistence verifies the actual durable task, chapter, full-content ownership, and nonblank text before advancing the cursor. Only the current visible chapter is read when needed. Download preparation remains serial, with its permit held by the actual blocking worker. Busy and cancellation outcomes settle application state immediately without an unlimited control queue or receiver ownership cycle. Account and sleep fences discard actual stale packets rather than releasing credits while their buffers remain alive.
 

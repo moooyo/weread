@@ -38,6 +38,31 @@
   "arm_and_package_checks_passed": true,
   "previous_builds_reproduced_byte_identically": true,
   "physical": {
+    "status": "passed",
+    "model": "Kindle Scribe 2022",
+    "firmware": "5.19.5",
+    "accepted_launches": 15,
+    "warmups": 2,
+    "measured_pairs": 6,
+    "direct_helper_calibration_qualified": true,
+    "candidate_used_helper": true,
+    "missing_helper_launch_passed": true,
+    "every_pair_faster": true,
+    "success": true,
+    "lease_released": true,
+    "native_restored": true,
+    "lighting_restored": true,
+    "same_boot": true,
+    "installed_program_and_data_unchanged": true,
+    "temporary_stage_removed": true
+  },
+  "limits": [
+    "Warm process launches only; no reboot or cache eviction.",
+    "Driver submission timing is not physical-tap latency or optical panel completion.",
+    "Resident wake has host fixture coverage; physical sleep/wake and touch gestures have no new acceptance.",
+    "The normal installation was preserved."
+  ],
+  "initial_preflight": {
     "status": "blocked",
     "reason": "SSH connection timed out before any device command could run.",
     "candidate_uploaded": false,
@@ -45,10 +70,5 @@
     "performance_samples": 0,
     "lease_released": true,
     "normal_installation_changed": false
-  },
-  "limits": [
-    "Mock library tests do not establish firmware ABI qualification.",
-    "No new WeRead performance benefit has been measured.",
-    "The complete A/B and unavailable-helper experiment is prepared and pending connectivity."
-  ]
+  }
 }
