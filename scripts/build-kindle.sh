@@ -27,12 +27,17 @@ cargo zigbuild --locked --release --no-default-features --features kindle --targ
 zig cc -target arm-linux-gnueabihf.2.17 -std=c11 -Wall -Wextra -Werror -O2 -s \
     -idirafter "$X11_HEADER_ROOT" "$REPO_ROOT/packaging/kindle/frame_guard.c" -ldl \
     -o "$CARGO_TARGET_DIR/$TARGET/release/weread-frame-guard"
+zig cc -target arm-linux-gnueabihf.2.4 -mcpu=cortex_a8 -mfpu=vfpv3-d16 -mfloat-abi=hard \
+    -std=c11 -O2 -Wall -Wextra -Werror -fstack-protector-strong -fPIE -pie \
+    -Wl,-z,relro,-z,now -s "$REPO_ROOT/packaging/kindle/native_query.c" -ldl \
+    -o "$CARGO_TARGET_DIR/$TARGET/release/weread-native-query"
 
 mkdir -p "$STAGED_APP/config" "$STAGED_APP/licenses/fonts" "$STAGED_APP/licenses/pinyin" "$STAGED_APP/licenses/backend" "$STAGED_APP/licenses/zip" "$STAGED_APP/licenses/core" "$STAGED_APP/licenses/swash" "$STAGED_APP/licenses/zeno" "$STAGING_ROOT/documents"
 # Remove the retired helper if this build reuses an older staging directory.
 rm -f -- "$STAGED_APP/weread-wifi-helper"
 install -m 755 "$CARGO_TARGET_DIR/$TARGET/release/weread" "$STAGED_APP/weread"
 install -m 755 "$CARGO_TARGET_DIR/$TARGET/release/weread-frame-guard" "$STAGED_APP/weread-frame-guard"
+install -m 755 "$CARGO_TARGET_DIR/$TARGET/release/weread-native-query" "$STAGED_APP/weread-native-query"
 install -m 755 "$REPO_ROOT/packaging/kindle/launch.sh" "$STAGING_ROOT/documents/weread.sh"
 install -m 644 "$REPO_ROOT/packaging/kindle/device-profile.example" "$STAGED_APP/config/device-profile.example"
 install -m 644 "$REPO_ROOT/packaging/kindle/device-allowlist.example" "$STAGED_APP/config/device-allowlist.example"

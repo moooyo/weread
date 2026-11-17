@@ -1,0 +1,54 @@
+{
+  "date": "2026-11-17",
+  "environment": "test-env",
+  "cargo_build_jobs": 6,
+  "checks": {
+    "library": {
+      "passed": 1707,
+      "ignored_existing_benchmarks": 4,
+      "log": "app-tests.log",
+      "log_sha256": "b8b1a374b3a1ea78dff9cbc4159db8487801857150e1d7e18133c51824ecdfa1"
+    },
+    "main": {
+      "passed": 56,
+      "log": "app-tests.log",
+      "log_sha256": "b8b1a374b3a1ea78dff9cbc4159db8487801857150e1d7e18133c51824ecdfa1"
+    },
+    "helper_protocol": {
+      "passed": 6,
+      "log": "query-worker-tests.log",
+      "log_sha256": "e3146d14cede1a336a821dc59cd46c81b9daacb9fe82b7e45b887032ffd663a8"
+    },
+    "package_contracts": {
+      "passed": 5,
+      "log": "package-tests.log",
+      "log_sha256": "1f11b6e880045ee35de832b81b45d06257342e13b5c79bbf0034379d4ca220b9"
+    },
+    "launcher_suite": {
+      "passed": 215,
+      "log": "launcher-tests.log",
+      "log_sha256": "73dd3d6d537ec478e8bd9d3855911641b42b31dd1384bb04358ecebfa6f087c7"
+    },
+    "helper_wake": {
+      "passed": 1,
+      "log": "helper-wake-corrected.log",
+      "log_sha256": "417b13be53bfeb786a49f819b05a2aea49ee701cbcb45cc503b327b14cdcbfa3"
+    }
+  },
+  "arm_and_package_checks_passed": true,
+  "previous_builds_reproduced_byte_identically": true,
+  "physical": {
+    "status": "blocked",
+    "reason": "SSH connection timed out before any device command could run.",
+    "candidate_uploaded": false,
+    "candidate_launched": false,
+    "performance_samples": 0,
+    "lease_released": true,
+    "normal_installation_changed": false
+  },
+  "limits": [
+    "Mock library tests do not establish firmware ABI qualification.",
+    "No new WeRead performance benefit has been measured.",
+    "The complete A/B and unavailable-helper experiment is prepared and pending connectivity."
+  ]
+}

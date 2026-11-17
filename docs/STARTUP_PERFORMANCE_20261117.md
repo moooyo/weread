@@ -187,6 +187,12 @@ Rust sources were formatted remotely and copied back before this comparison.
 The compiler was rustc/cargo 1.99.1 with Zig 0.15.2; this records the experiment,
 not a new dependency or release-version freeze.
 
+A later [build-cache audit](NATIVE_QUERY_PERFORMANCE_20261117.md#scope-and-build-audit)
+explicitly cleaned and rebuilt both main/backend pairs in private cache overlays.
+Both executables reproduced the exact hashes below. The earlier WeRead results
+remain valid; a source manifest alone is not used as proof of cached artifact
+contents.
+
 | Artifact | SHA-256 |
 | --- | --- |
 | Instrumented baseline ARM | `00a763f9372bf0b03650d456959b903cb6ea1241bb5966097a2a3742f7f4be67` |

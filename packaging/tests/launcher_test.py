@@ -1762,6 +1762,123 @@ class LauncherLifecycleTests(unittest.TestCase):
         path = self.root / "portrait-commands"
         return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
+    def native_portrait_helper_fixture(self, status=0, payload="D:1\n"):
+        awesome = self.native_portrait_fixture()
+        self.script(self.home / "app" / "weread-native-query", "exit 0")
+        result = self.root / "native-query-result.json"
+        result.write_text(json.dumps({"status": status, "payload": payload}))
+        self.env["TEST_NATIVE_QUERY_RESULT"] = str(result)
+        app = self.home / "app" / "weread"
+        source = app.read_text()
+        anchor = "probe_arguments = ["
+        self.assertEqual(source.count(anchor), 1)
+        prefix = textwrap.dedent(r'''
+            if "--probe-native-portrait-calibration" in sys.argv[1:]:
+                expected = ["--kindle", "--probe-native-portrait-calibration", "--device", "scribe"]
+                if sys.argv[1:] != expected:
+                    raise SystemExit(74)
+                result = json.loads(Path(os.environ["TEST_NATIVE_QUERY_RESULT"]).read_text())
+                portrait_command("helper", result["payload"])
+                sys.stdout.write(result["payload"])
+                raise SystemExit(result["status"])
+        ''').lstrip()
+        app.write_text(source.replace(anchor, prefix + anchor, 1))
+        return awesome
+
+    def test_native_portrait_helper_publishes_only_the_completed_owned_pair(self):
+        awesome = self.native_portrait_helper_fixture()
+
+        def drive(_):
+            self.wait_for_managed_application()
+            directory = self.root / "lock"
+            base = (directory / "generation").read_text().strip()
+            self.assertEqual((directory / "native-portrait-calibration").read_text().strip(), base + ":D:1")
+            self.assertEqual([row["kind"] for row in self.native_portrait_commands()], ["helper"])
+            self.emit("usbConfigured 1")
+
+        status, _, error = self.run_launcher(drive)
+        self.assertEqual(status, 143, error)
+        self.assert_native_theme_helpers_finished()
+        self.assert_native_theme_restored(awesome)
+
+    def test_native_portrait_unavailable_helper_restarts_a_complete_legacy_sample(self):
+        awesome = self.native_portrait_helper_fixture(status=69)
+
+        def drive(_):
+            self.wait_for_managed_application()
+            directory = self.root / "lock"
+            base = (directory / "generation").read_text().strip()
+            self.assertEqual((directory / "native-portrait-calibration").read_text().strip(), base + ":U:3")
+            self.assertEqual([row["kind"] for row in self.native_portrait_commands()],
+                             ["helper", "power", "metadata", "direction", "metadata", "direction", "power"])
+            self.emit("usbConfigured 1")
+
+        status, _, error = self.run_launcher(drive)
+        self.assertEqual(status, 143, error)
+        self.assert_native_theme_helpers_finished()
+        self.assert_native_theme_restored(awesome)
+
+    def test_native_portrait_connected_helper_failure_does_not_mix_legacy_reads(self):
+        awesome = self.native_portrait_helper_fixture(status=1)
+
+        def drive(_):
+            self.wait_for_managed_application()
+            self.assertFalse((self.root / "lock" / "native-portrait-calibration").exists())
+            self.assertEqual([row["kind"] for row in self.native_portrait_commands()], ["helper"])
+            self.emit("usbConfigured 1")
+
+        status, _, error = self.run_launcher(drive)
+        self.assertEqual(status, 143, error)
+        self.assert_native_theme_helpers_finished()
+        self.assert_native_theme_restored(awesome)
+
+    def test_native_portrait_malformed_completed_helper_keeps_fixed_fallback(self):
+        awesome = self.native_portrait_helper_fixture(payload="D:1\nU:3\n")
+
+        def drive(_):
+            self.wait_for_managed_application()
+            self.assertFalse((self.root / "lock" / "native-portrait-calibration").exists())
+            self.assertEqual([row["kind"] for row in self.native_portrait_commands()], ["helper"])
+            self.emit("usbConfigured 1")
+
+        status, _, error = self.run_launcher(drive)
+        self.assertEqual(status, 143, error)
+        self.assert_native_theme_helpers_finished()
+        self.assert_native_theme_restored(awesome)
+
+    def test_native_portrait_helper_wake_is_fresh_and_does_not_reuse_a_rejected_cycle(self):
+        awesome = self.native_portrait_helper_fixture(payload="U:3\n")
+
+        def drive(_):
+            application = self.wait_for_managed_application()
+            directory = self.root / "lock"
+            initial = (directory / "native-portrait-calibration").read_text()
+            for status, payload in [(0, "D:1\n"), (1, "U:3\n")]:
+                request = self.suspend_managed_application(application)
+                self.wait_until(lambda: self.process_state(awesome.pid) not in (None, "T", "Z", "X"))
+                (self.root / "native-query-result.json").write_text(json.dumps({"status": status, "payload": payload}))
+                self.wake_managed_application(application, request)
+                record = directory / "managed-native-portrait-calibration"
+                if status == 0:
+                    value = request + ":D:1"
+                    self.assertEqual(record.read_text().strip(), value)
+                else:
+                    self.assertFalse(record.exists())
+                self.assertEqual((directory / "native-portrait-calibration").read_text(), initial)
+                self.assertFalse((directory / "managed-native-portrait-calibration.pending").exists())
+            # Wake still requires its independent active-power confirmations.
+            # Only a legacy metadata/direction sample would mix the transports.
+            samples = [row["kind"] for row in self.native_portrait_commands() if row["kind"] != "power"]
+            self.assertEqual(samples, ["helper"] * 3)
+            self.emit("usbConfigured 1")
+
+        status, _, error = self.run_launcher(drive)
+        self.assertEqual(status, 143, error)
+        self.assertEqual(len(self.managed_pids()), 1)
+        self.assertEqual(self.starts(), ["0"])
+        self.assert_native_theme_helpers_finished()
+        self.assert_native_theme_restored(awesome)
+
     def native_portrait_capture_groups(self):
         groups = []
         for entry in self.native_portrait_commands():

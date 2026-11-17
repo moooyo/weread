@@ -150,6 +150,15 @@ struct Arguments {
     #[arg(long, requires = "kindle", hide = true)]
     probe_native_portrait_framebuffer: bool,
 
+    /// Capture the launcher's read-only portrait pair through the optional helper.
+    #[arg(
+        long,
+        requires = "kindle",
+        conflicts_with = "probe_native_portrait_framebuffer",
+        hide = true
+    )]
+    probe_native_portrait_calibration: bool,
+
     /// Store application state here instead of the per-user data directory.
     #[arg(long)]
     data_dir: Option<PathBuf>,
@@ -275,9 +284,60 @@ fn query_native_portrait_probe() -> Result<(bool, u32)> {
     }
 }
 
+fn dispatch_native_calibration_probe(
+    arguments: &Arguments,
+    probe: impl FnOnce() -> Result<Option<String>>,
+) -> Option<Result<Option<String>>> {
+    if !arguments.probe_native_portrait_calibration {
+        return None;
+    }
+    Some((|| {
+        anyhow::ensure!(
+            arguments.kindle,
+            "The native calibration probe requires --kindle"
+        );
+        probe()
+    })())
+}
+
+fn query_native_calibration_probe(profile: DeviceProfile) -> Result<Option<String>> {
+    #[cfg(all(feature = "kindle", target_os = "linux"))]
+    {
+        let helper = std::env::current_exe()?.with_file_name("weread-native-query");
+        Ok(platform::query_native_portrait_calibration(
+            &helper,
+            profile,
+            || {
+                query_native_portrait_probe()
+                    .map_err(|error| platform::PlatformError::Operation(error.to_string()))
+            },
+        )?)
+    }
+    #[cfg(not(all(feature = "kindle", target_os = "linux")))]
+    {
+        let _ = profile;
+        bail!("The native calibration probe requires the native Kindle Linux build");
+    }
+}
+
 fn main() -> std::process::ExitCode {
     startup_mark("main_enter");
     let arguments = Arguments::parse();
+    if let Some(result) = dispatch_native_calibration_probe(&arguments, || {
+        query_native_calibration_probe(arguments.device)
+    }) {
+        return match result {
+            Ok(Some(output)) => {
+                println!("{output}");
+                std::process::ExitCode::SUCCESS
+            }
+            Ok(None) => std::process::ExitCode::from(69),
+            Err(error) => {
+                eprintln!("weread: {error:#}");
+                std::process::ExitCode::FAILURE
+            }
+        };
+    }
     // This hidden launcher probe runs before diagnostics, fonts, state, the
     // startup worker, or any framebuffer mapping and touch acquisition.
     if let Some(result) = dispatch_native_portrait_probe(&arguments, query_native_portrait_probe) {
@@ -317,6 +377,50 @@ fn main() -> std::process::ExitCode {
 #[cfg(test)]
 mod native_portrait_probe_tests {
     use super::*;
+
+    #[test]
+    fn calibration_probe_is_exclusive_and_never_runs_during_ordinary_startup() {
+        let ordinary = Arguments::try_parse_from(["weread"]).unwrap();
+        assert!(
+            dispatch_native_calibration_probe(&ordinary, || panic!("No startup query")).is_none()
+        );
+        assert!(
+            Arguments::try_parse_from(["weread", "--probe-native-portrait-calibration"]).is_err()
+        );
+        assert!(
+            Arguments::try_parse_from([
+                "weread",
+                "--kindle",
+                "--probe-native-portrait-calibration",
+                "--probe-native-portrait-framebuffer"
+            ])
+            .is_err()
+        );
+        let arguments = Arguments::try_parse_from([
+            "weread",
+            "--kindle",
+            "--probe-native-portrait-calibration",
+        ])
+        .unwrap();
+        assert_eq!(
+            dispatch_native_calibration_probe(&arguments, || Ok(None))
+                .unwrap()
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            dispatch_native_calibration_probe(&arguments, || Ok(Some("U:3".into())))
+                .unwrap()
+                .unwrap()
+                .as_deref(),
+            Some("U:3")
+        );
+        assert!(
+            dispatch_native_calibration_probe(&arguments, || bail!("Rejected connected query"))
+                .unwrap()
+                .is_err()
+        );
+    }
 
     #[test]
     fn ordinary_launch_does_not_invoke_the_native_metadata_probe() {

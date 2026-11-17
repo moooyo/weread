@@ -1,0 +1,48 @@
+{
+  "date": "2026-11-17",
+  "members": 37,
+  "crc": true,
+  "allowlist": true,
+  "modes": true,
+  "cover_preserved": true,
+  "main_static_arm": true,
+  "helper_dynamic_arm_hard_float": true,
+  "helper_elf_flags": "0x5000400",
+  "firmware_libraries_bundled": false,
+  "helper_read_only_properties": [
+    "com.lab126.powerd:state",
+    "com.lab126.winmgr:accelerometer"
+  ],
+  "abi_check_correction": "Use ELF hard-float flags and the interpreter; an optional ARM attribute was absent in this stripped C executable.",
+  "artifacts": {
+    "weread": {
+      "sha256": "d3a6b663d9fbcacc08e88926c46fe8146c0fc979f8767a735020947600a8be62",
+      "bytes": 95183208
+    },
+    "weread-native-query": {
+      "sha256": "149fa95f3c40ff575c23065fa6127597abbd85ab3e90a50cdbba30fb072f0b5f",
+      "bytes": 4820
+    },
+    "weread-frame-guard": {
+      "sha256": "689ef367eabe7f780ec51a20a033961badceb6c1ff56524e51cad30a4e44372d",
+      "bytes": 25792
+    },
+    "weread.sh": {
+      "sha256": "05a3b39d61899162658ddf55c7e0251fea8bc2ee6c6b0c4bdeb36f8376520bf3",
+      "bytes": 173819
+    },
+    "weread-kindle-0.2.0-dev.zip": {
+      "sha256": "7b672f2f3042153f36e70977b19d11bfa2a1c8565893d6a0aa3f13d140a1cd60",
+      "bytes": 68394904
+    }
+  },
+  "delivery": {
+    "filename": "weread-kindle-0.2.0-native-query-20261117.zip",
+    "sha256": "03b438838d25b968331d58cddc4673a7e09ce6e933fc22b01bef006b34860326",
+    "bytes": 68395408,
+    "changed_members": [
+      "weread/app/README.md"
+    ],
+    "runtime_bytes_and_modes_unchanged": true
+  }
+}

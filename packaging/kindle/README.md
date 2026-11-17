@@ -12,6 +12,7 @@ The build script stages this layout under `dist/kindle/`:
 documents/weread.sh
 weread/app/weread
 weread/app/weread-frame-guard
+weread/app/weread-native-query
 weread/app/licenses/
 weread/app/THIRD_PARTY_NOTICES.md
 weread/app/README.md
@@ -72,6 +73,15 @@ existing X11 runtime. It does not load glibc libraries into the musl application
 No firmware libraries or loader are redistributed. The removed Wi-Fi helper
 remains outside the product. The independent application and conditional-server
 decisions remain unchanged; the project license is still unselected.
+
+The [native-query candidate](../../docs/NATIVE_QUERY_PERFORMANCE_20261117.md)
+also packages `weread-native-query`, a separate ARM hard-float glibc process.
+It reuses one LIPC handle only for power-state and accelerometer reads during
+the launcher's portrait calibration. The static Rust application keeps the
+framebuffer/sensor ordering, value checks, deadline, and child ownership.
+Complete replies, EOF, and a successful helper exit precede publication.
+An unavailable helper retains the whole legacy transaction; a connected bad
+sample is discarded. Runtime status workers and setters are unchanged.
 
 This helper preserves the displayed reading frame in an owned native window
 during real stock screensaver handoff. Ordinary application night-mode toggles
@@ -206,10 +216,21 @@ These are static source references. This project's launcher has not been accepte
 After staging, `python3 scripts/package-development.py` creates
 `dist/weread-kindle-0.2.0-dev.zip` and a SHA-256 sidecar. This private development
 handoff contains the ARM application, native frame guard, launcher, configuration
-examples, and notices. It is not a published KPM release package. The frame
+examples, native query helper, and notices. It is not a published KPM release package. The frame
 guard is an explicit executable input and digest target; the removed Wi-Fi
 helper is not. The archiver never collects `data/`, runtime state, credentials,
 downloaded books, or private research directories.
+
+The query helper is also a required executable input and checksum target,
+bringing the current development bundle to 37 public members. Its runtime
+absence still permits the bounded legacy query path; a release handoff must
+include the checked helper. Existing 36-member evidence below remains historical.
+
+For source-bound comparisons after copying sources or reusing a target cache,
+clean the application and modified backend packages in an explicitly owned
+cache before the authoritative ARM build. Preserve logs and compare produced
+binaries as well as source manifests. The native-query record documents a
+read-only-cache-overlay audit; another task's cache must not be cleaned.
 
 ## Verification
 

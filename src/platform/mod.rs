@@ -8,7 +8,11 @@ mod startup;
 #[cfg(all(feature = "kindle", target_os = "linux"))]
 mod native;
 #[cfg(all(target_os = "linux", any(feature = "kindle", test)))]
+mod native_calibration;
+#[cfg(all(target_os = "linux", any(feature = "kindle", test)))]
 mod native_command;
+#[cfg(all(target_os = "linux", any(feature = "kindle", test)))]
+pub use native_calibration::query_native_portrait_calibration;
 
 pub use native_portrait::{NativePortraitCalibration, NativePortraitDirection};
 pub use profile::DeviceProfile;

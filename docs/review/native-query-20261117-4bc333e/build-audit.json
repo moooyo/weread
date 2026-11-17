@@ -1,0 +1,31 @@
+{
+  "date": "2026-11-17",
+  "environment": "test-env",
+  "previous_main": "4bc333e9321376a3fda23940368b77a187255b71",
+  "cleaned_packages": [
+    "weread",
+    "slint-backend-kindle"
+  ],
+  "cargo_build_jobs": 6,
+  "cache_isolation": "Private mount namespaces with read-only previous cache lowers and task-owned writable uppers.",
+  "other_task_caches_modified": false,
+  "timing_contract": "WEREAD_STARTUP_TIMING and its markers intentionally exist in both measured source variants; no diagnostic-only source overlay is used.",
+  "result": "Both authoritative rebuilds are byte-identical; the previous WeRead comparison remains valid.",
+  "variants": {
+    "baseline": {
+      "sha256": "00a763f9372bf0b03650d456959b903cb6ea1241bb5966097a2a3742f7f4be67",
+      "bytes": 84930720,
+      "matches_previously_measured_binary": true,
+      "application_and_backend_recompiled": true,
+      "rebuild_log_sha256": "b6545f82c949f0bdde61964367aa51ce6576dff96871ff03010110b900a6a85f"
+    },
+    "candidate": {
+      "sha256": "5271918d104eeb3d8dad630b8bb0cfa33525970201d2b891da6d1fc709fc453f",
+      "bytes": 95168304,
+      "matches_previously_measured_binary": true,
+      "application_and_backend_recompiled": true,
+      "rebuild_log_sha256": "4102535d9eb12c255638ead01120ad836f5d094f78b0da5fc663df061c5f3f77"
+    }
+  },
+  "setup_correction": "A CRLF footer affected the first SHA command after the baseline had built and been preserved. The footer was normalized and the saved artifact hashed; the successful build was not rerun."
+}

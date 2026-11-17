@@ -93,6 +93,16 @@ impl CommandRunner {
         command: &mut Command,
         timeout: Duration,
     ) -> Result<String, PlatformError> {
+        self.run_transaction(command, Stdio::null(), timeout, read_reply)
+    }
+
+    fn run_transaction<T>(
+        &self,
+        command: &mut Command,
+        input: Stdio,
+        timeout: Duration,
+        operation: impl FnOnce(&mut Child, Instant) -> Result<T, PlatformError>,
+    ) -> Result<T, PlatformError> {
         // Reply framing and direct-child completion share one userspace
         // deadline. Kernel spawn/kill operations cannot be preempted by it.
         let deadline = Instant::now()
@@ -104,12 +114,12 @@ impl CommandRunner {
         }
         lease.child = Some(
             command
-                .stdin(Stdio::null())
+                .stdin(input)
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null())
                 .spawn()?,
         );
-        let result = read_reply(lease.child.as_mut().unwrap(), deadline);
+        let result = operation(lease.child.as_mut().unwrap(), deadline);
         let cleanup = lease.finish();
         match (result, cleanup) {
             (result, Ok(())) => result,
@@ -182,6 +192,16 @@ pub(super) fn run_command(program: &Path, arguments: &[&str]) -> Result<String, 
         .run_with_timeout(Command::new(program).args(arguments), OPERATION_TIMEOUT)
 }
 
+/// A framed helper shares the existing slot admission, deadline, and retirement.
+pub(super) fn run_transaction<T>(
+    command: &mut Command,
+    operation: impl FnOnce(&mut Child, Instant) -> Result<T, PlatformError>,
+) -> Result<T, PlatformError> {
+    COMMANDS
+        .get_or_init(CommandRunner::default)
+        .run_transaction(command, Stdio::piped(), OPERATION_TIMEOUT, operation)
+}
+
 pub(super) fn quiesce_commands(timeout: Duration) -> Result<(), PlatformError> {
     match COMMANDS.get() {
         Some(commands) => commands.quiesce(timeout),
@@ -250,7 +270,7 @@ fn read_reply(child: &mut Child, deadline: Instant) -> Result<String, PlatformEr
     }
 }
 
-fn set_nonblocking(descriptor: RawFd) -> io::Result<()> {
+pub(super) fn set_nonblocking(descriptor: RawFd) -> io::Result<()> {
     // SAFETY: this is the owned child stdout descriptor and fcntl takes integer
     // flags. Ownership remains with ChildStdout for every success/error path.
     let flags = unsafe { libc::fcntl(descriptor, libc::F_GETFL) };

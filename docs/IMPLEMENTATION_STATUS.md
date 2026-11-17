@@ -14,6 +14,16 @@ and persistent state are unchanged. Packaging verification is recorded in
 [Kindle packaging](../packaging/kindle/README.md#application-entry-cover);
 installation and physical display acceptance remain open.
 
+The [native-query follow-up](NATIVE_QUERY_PERFORMANCE_20261117.md) is a separate
+implementation candidate on `codex/native-query-followup`. Its clean cache audit
+reproduced both earlier measured executables byte-for-byte. Host verification
+passed 1,707 library cases with four existing benchmarks ignored, 56 Main cases,
+six C-helper cases, five archive contracts, 215 launcher cases, and one additional
+helper-wake case. The new 37-member package retains the penguin cover. Physical
+preflight could not connect over SSH, so no candidate was uploaded or run and
+the lease was released. Firmware-helper qualification and timing remain pending;
+no new performance gain or daily-use deployment is claimed.
+
 The 2026-11-17 [startup changes](STARTUP_PERFORMANCE_20261117.md) passed 1,699
 library tests with four existing benchmarks ignored, 55 Main tests, 147 backend
 tests, 211 launcher fixtures, 133 desktop UI checks, and four package contracts.

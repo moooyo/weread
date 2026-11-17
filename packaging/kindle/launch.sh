@@ -974,11 +974,21 @@ capture_native_epdc_mode() {
 
 capture_native_portrait_calibration() {
     NATIVE_PORTRAIT_CALIBRATION=''
+    native_portrait_helper_complete=0
+    if [ -x "$APP_DIR/weread-native-query" ]; then
+        if native_theme_command "$APP_DIR/weread" --kindle --probe-native-portrait-calibration --device "$PROFILE"; then
+            native_portrait_helper_complete=1
+        elif [ "${NATIVE_COMMAND_EXIT_STATUS:-}" != 69 ] || [ "${NATIVE_COMMAND_FAILURE:-}" != command-exit ]; then
+            # A connected or unconfirmed query cannot be mixed with a legacy sample.
+            launcher_log '%s\n' 'weread: Native portrait helper did not confirm a complete sample; keeping fixed orientation.'
+            return 0
+        fi
+    fi
     # The caller has confirmed a running native window manager and has not
     # stopped it yet. Pair direction and read-only GETVAR in one owned group,
     # with repeated observations and an active-power check on both sides.
     # A rejected optional calibration preserves the existing fixed mapping.
-    if ! native_theme_command sh -c '
+    if [ "$native_portrait_helper_complete" -eq 0 ] && ! native_theme_command sh -c '
         status_file=$1
         application=$2
         profile=$3

@@ -27,7 +27,7 @@ if ($RemoteHost -notmatch '^[A-Za-z0-9_][A-Za-z0-9_.@-]*$') {
 & ssh $RemoteHost "mkdir -p '$RemoteDirectory' '$RemoteTargetDirectory'"
 if ($LASTEXITCODE -ne 0) { throw 'The designated remote verification environment is unavailable.' }
 
-$WereadSources = @('Cargo.toml', 'Cargo.lock', 'build.rs', '.cargo', 'src', 'ui', 'assets', 'vendor', 'scripts', 'packaging', 'tools')
+$WereadSources = @('Cargo.toml', 'Cargo.lock', 'build.rs', 'README.md', 'THIRD_PARTY_NOTICES.md', '.cargo', 'src', 'ui', 'assets', 'vendor', 'scripts', 'packaging', 'tools')
 $WereadTransferPaths = foreach ($WereadSource in $WereadSources) {
     $WereadPath = Join-Path $WereadRepository $WereadSource
     if (Test-Path -LiteralPath $WereadPath) { $WereadPath }
@@ -44,6 +44,8 @@ $WereadRemoteCommands = @(
     'python3 scripts/check-translations.py',
     'cargo test --locked --all-targets',
     'python3 packaging/tests/launcher_test.py',
+    'python3 packaging/tests/native_query_test.py',
+    'python3 packaging/tests/package_development_test.py',
     'cargo build --locked'
 )
 if (-not $SkipUi) {

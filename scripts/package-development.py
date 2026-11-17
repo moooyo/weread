@@ -14,6 +14,7 @@ REQUIRED = (
     "documents/weread.sh",
     "weread/app/weread",
     "weread/app/weread-frame-guard",
+    "weread/app/weread-native-query",
     "weread/app/README.md",
     "weread/app/THIRD_PARTY_NOTICES.md",
     "weread/app/config/device-profile.example",
@@ -25,6 +26,7 @@ EXECUTABLE_INPUTS = frozenset((
     "documents/weread.sh",
     "weread/app/weread",
     "weread/app/weread-frame-guard",
+    "weread/app/weread-native-query",
 ))
 
 
@@ -59,6 +61,7 @@ def archive(staged: Path, output: Path) -> dict[str, str]:
         output.name: hashlib.sha256(output.read_bytes()).hexdigest(),
         "weread/app/weread": hashlib.sha256((staged / "weread/app/weread").read_bytes()).hexdigest(),
         "weread/app/weread-frame-guard": hashlib.sha256((staged / "weread/app/weread-frame-guard").read_bytes()).hexdigest(),
+        "weread/app/weread-native-query": hashlib.sha256((staged / "weread/app/weread-native-query").read_bytes()).hexdigest(),
     }
     output.with_suffix(".sha256").write_text(
         "".join(f"{checksum}  {name}\n" for name, checksum in checksums.items()),
