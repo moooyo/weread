@@ -1,0 +1,62 @@
+{
+  "date": "2026-11-18",
+  "timezone": "Asia/Shanghai",
+  "baseline_commit": "e0fca43e76e6298a2e761092a59dbc171d5f3134",
+  "reference_commit": "78c5b2bc09a469133c886eb0d73aaf9ed63195b2",
+  "environment": "ssh test-env; isolated Linux service/process fixtures",
+  "checks": [
+    {
+      "name": "Launcher lifecycle suite",
+      "passed": 233,
+      "elapsed_seconds": 894.648,
+      "log_sha256": "955de501071924958fece2a1a16963c30ae05551120e5bab16a872968a9b2b84",
+      "included_in_launcher_suite": false
+    },
+    {
+      "name": "Scoped catalog lifecycle cases",
+      "passed": 10,
+      "elapsed_seconds": 23.794,
+      "log_sha256": "fcd9798d77081764237884622ee3cdb8f1dd0dd7f236986d51a60e127f9e4a5f",
+      "included_in_launcher_suite": true
+    },
+    {
+      "name": "Fixed catalog client protocol",
+      "passed": 19,
+      "elapsed_seconds": 3.761,
+      "log_sha256": "9bde54e79530871857f815acac193a841e40f2c7003efaec3144bbad5fd13a03",
+      "included_in_launcher_suite": false
+    },
+    {
+      "name": "Development package contracts",
+      "passed": 8,
+      "elapsed_seconds": 0.01,
+      "log_sha256": "a17913e81321b6c64e49e2a78d2928951319f73ee66d1baf6fd5c0bf14d8ac9e",
+      "included_in_launcher_suite": false
+    }
+  ],
+  "source_sha256": {
+    "packaging/kindle/launch.sh": "ab7d026c22abc84fb7c0bd281cbad55b7c35cdab57e0a86ec748ebf8b59f4f64",
+    "packaging/tests/launcher_test.py": "c82d3748613635fda6f31d74546d987053d3448b85b18948f323113e1eec90fb",
+    "packaging/tests/native_catalog_client_test.py": "2b2a8f24d4316a68aacb814d0d8d674787376e738fd786a4fbb8d52dcdf749ad",
+    "scripts/build-native-catalog-client.sh": "92ee0a9de1858e5ce92240c661630e550b2a935d094d3b3578a90d69c8c163b8",
+    "scripts/verify-remote.ps1": "05f4d48bc8e08c959bc61b2c68231c37de00610b90cb3f66da9184fb122569aa",
+    "vendor/kindle-catalog-client/catalog-client.c": "0a17df30843e820ccf26d8982443c54729ca9a98d9e4404d1d14b37f51f2b800",
+    "vendor/kindle-catalog-client/common.h": "02f2726664665e32c4bec3c1c18997cbb050966ce07882a05598ece3ad2bc7f2"
+  },
+  "client_artifact": {
+    "bytes": 12808,
+    "sha256": "55aeff9a286d8ff6da1ef46fff85e175a7286e4e23c9b7fd616722d899e21cab",
+    "format": "ELF32 ARM EABI5 hard-float PIE",
+    "interpreter": "/lib/ld-linux-armhf.so.3",
+    "fixed_document": "/mnt/us/documents/weread.sh",
+    "aidoku_document_absent": true,
+    "executed_on_device": false
+  },
+  "source_reuse": "Catalog client C source matches the pinned Aidoku source manifest byte-for-byte; the local header binds the WeRead path. No dispatcher, hook or installer was copied.",
+  "local_application_verification": false,
+  "rust_rebuilt": false,
+  "shared_registration_modified": false,
+  "device_lease_acquired": false,
+  "physical_verification": "pending shared protocol coordination",
+  "enabled_production_catalog_path": false
+}

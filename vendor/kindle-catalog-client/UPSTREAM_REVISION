@@ -1,0 +1,10 @@
+Repository: https://github.com/moooyo/aidokuForKindle
+Revision: 78c5b2bc09a469133c886eb0d73aaf9ed63195b2
+Source: src/native_catalog_entry/catalog-client.c
+Source SHA-256: 0a17df30843e820ccf26d8982443c54729ca9a98d9e4404d1d14b37f51f2b800
+Reference tests: packaging/tests/native_catalog_client_test.py
+
+The catalog client source is reused without functional changes. The local
+common.h supplies only its standard includes and a fixed WeRead document path.
+Shared dispatcher, hook, installer, firmware libraries and private research
+artifacts are not copied into this component.

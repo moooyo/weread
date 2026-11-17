@@ -1,6 +1,7 @@
 """Exercise launcher cleanup on Linux with isolated firmware/service fixtures."""
 
 import errno
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -45,6 +46,8 @@ class LauncherLifecycleTests(unittest.TestCase):
             .replace("/var/local/system/userpasswdenabled", str(self.root / "passcode-enabled"))
             .replace("/dev/fb0", "/dev/null")
             .replace("/tmp/weread-launcher.lock", str(self.root / "lock"))
+            .replace("/var/local/kindle-catalog-entry", str(self.root / "catalog"))
+            .replace("/mnt/us/documents/weread.sh", str(self.root / "catalog-document.sh"))
         )
         self.launcher = self.root / "launch.sh"
         self.launcher.write_text(fixture_source)
@@ -5264,6 +5267,180 @@ class LauncherLifecycleTests(unittest.TestCase):
         self.assertTrue(birth.isdigit())
         self.assertFalse(self.original_process_exists({"pid": int(pid), "birth": birth}))
         self.assertFalse((self.root / "lock").exists())
+
+    def catalog_notification_fixture(self, behavior="success"):
+        root = self.root / "catalog"
+        directory = root / ("v1-" + "a" * 64)
+        directory.mkdir(parents=True)
+        root.chmod(0o755)
+        directory.chmod(0o755)
+        helper = directory / "weread-catalog-client"
+        body = textwrap.dedent(r'''
+            import json
+            import os
+            from pathlib import Path
+            import signal
+            import sys
+            import time
+
+            if sys.argv[1:] != ["--notify-protocol"]:
+                raise SystemExit(64)
+            root = Path(os.environ["TEST_CATALOG_ROOT"])
+            trace = Path(os.environ["TEST_TRACE"])
+            events = trace.read_text().splitlines() if trace.exists() else []
+            fields = Path("/proc/self/stat").read_text().rsplit(")", 1)[1].split()
+            record = {
+                "pid": os.getpid(), "birth": fields[19],
+                "native_restored": "start:statusbar" in events and "xrefresh:" in events,
+                "application_record_present": (root / "lock/application-pid").exists(),
+                "handoff_leaked": any(name in os.environ for name in (
+                    "WEREAD_CATALOG_NOTIFY_HELPER", "WEREAD_CATALOG_NOTIFY_SHA256")),
+            }
+            with (root / "catalog-notifications.jsonl").open("a") as output:
+                output.write(json.dumps(record) + "\n")
+            behavior = os.environ["TEST_CATALOG_BEHAVIOR"]
+            if behavior == "hang":
+                signal.signal(signal.SIGTERM, signal.SIG_IGN)
+                while True:
+                    time.sleep(0.05)
+            if behavior == "fail":
+                raise SystemExit(7)
+            if behavior == "overflow":
+                print("NOTIFIED\n" + "x" * 10000)
+            elif behavior == "trailing":
+                print("NOTIFIED\n")
+            else:
+                print("NOTIFIED")
+        ''').lstrip()
+        helper.write_text("#!" + sys.executable + "\n" + body)
+        helper.chmod(0o755)
+        self.env.update(
+            WEREAD_CATALOG_NOTIFY_HELPER=str(helper),
+            WEREAD_CATALOG_NOTIFY_SHA256=hashlib.sha256(helper.read_bytes()).hexdigest(),
+            TEST_CATALOG_ROOT=str(self.root), TEST_CATALOG_BEHAVIOR=behavior,
+        )
+        document = self.root / "catalog-document.sh"
+        document.write_text("#!/bin/sh\n# Synthetic catalog document.\n")
+        os.utime(document, (100, 100))
+        setter = self.bin / "lipc-set-prop"
+        source = setter.read_text()
+        anchor = "#!/bin/sh\nset -eu\n"
+        self.assertTrue(source.startswith(anchor))
+        setter.write_text(source.replace(anchor, anchor +
+            'if [ "$*" = "-i com.lab126.scanner doFullScan 1" ]; then\n'
+            '    printf "%s\\n" catalog-scan >>"$TEST_TRACE"\n'
+            '    exit 0\n'
+            'fi\n', 1))
+        application = self.home / "app" / "weread"
+        source = application.read_text()
+        anchor = 'app_child=""\n'
+        self.assertEqual(source.count(anchor), 1)
+        application.write_text(source.replace(anchor,
+            'printf "%s:%s\\n" "${WEREAD_CATALOG_NOTIFY_HELPER+set}" "${WEREAD_CATALOG_NOTIFY_SHA256+set}" >"$TEST_CATALOG_ROOT/application-catalog-env"\n'
+            + anchor, 1))
+        return helper
+
+    def catalog_notifications(self):
+        path = self.root / "catalog-notifications.jsonl"
+        return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+    def assert_catalog_completed_after_recovery(self):
+        records = self.catalog_notifications()
+        self.assertEqual(len(records), 1)
+        self.assertTrue(records[0]["native_restored"])
+        self.assertFalse(records[0]["application_record_present"])
+        self.assertFalse(records[0]["handoff_leaked"])
+        self.assertNotIn("catalog-scan", self.trace())
+        self.assertEqual((self.root / "catalog-document.sh").stat().st_mtime, 100)
+        self.assertFalse((self.root / "lock").exists())
+
+    def test_catalog_notification_follows_native_restoration_once_and_clears_child_handoff(self):
+        self.catalog_notification_fixture()
+        status, _, error = self.run_launcher()
+        self.assertEqual(status, 0, error)
+        self.assert_catalog_completed_after_recovery()
+        self.assertEqual((self.root / "application-catalog-env").read_text(), ":\n")
+
+    def test_catalog_notification_preserves_a_nonzero_application_exit_status(self):
+        self.catalog_notification_fixture()
+        self.env["TEST_APP_EXIT"] = "7"
+        status, _, error = self.run_launcher()
+        self.assertEqual(status, 7, error)
+        self.assert_catalog_completed_after_recovery()
+
+    def test_catalog_notification_survives_library_waiter_retirement_and_sleep_wake(self):
+        self.catalog_notification_fixture()
+        self.managed_fixture()
+
+        def drive(entry, worker):
+            pid = self.wait_for_managed_application()
+            entry.kill()
+            entry.wait(timeout=3)
+            request = self.suspend_managed_application(pid)
+            self.assertEqual(self.catalog_notifications(), [])
+            self.wake_managed_application(pid, request)
+            self.assertEqual(self.catalog_notifications(), [])
+            os.kill(worker["pid"], signal.SIGTERM)
+
+        self.assertEqual(self.run_library_entry(drive), -signal.SIGKILL)
+        self.assert_catalog_completed_after_recovery()
+
+    def test_catalog_notification_early_configuration_failure_has_no_native_ownership(self):
+        self.catalog_notification_fixture()
+        (self.home / "data/device-profile").write_text("unknown\n")
+        result = subprocess.run(["sh", str(self.launcher), "--library"], env=self.env,
+                                text=True, capture_output=True, timeout=5)
+        self.assertEqual(result.returncode, 1)
+        records = self.catalog_notifications()
+        self.assertEqual(len(records), 1)
+        self.assertFalse(records[0]["native_restored"])
+        self.assertFalse(records[0]["application_record_present"])
+        self.assertFalse(records[0]["handoff_leaked"])
+        self.assertFalse((self.root / "lock").exists())
+        self.assertNotIn("stop:statusbar", self.trace())
+
+    def assert_catalog_standard_recovery(self, behavior):
+        self.catalog_notification_fixture(behavior)
+        status, _, error = self.run_launcher()
+        self.assertEqual(status, 0, error)
+        records = self.catalog_notifications()
+        self.assertEqual(len(records), 1)
+        self.assertTrue(records[0]["native_restored"])
+        self.assertFalse(records[0]["application_record_present"])
+        self.assertFalse(self.original_process_exists(records[0]))
+        self.assertEqual(self.trace().count("catalog-scan"), 1)
+        self.assertGreater(self.trace().index("catalog-scan"), self.trace().index("xrefresh:"))
+        self.assertGreater((self.root / "catalog-document.sh").stat().st_mtime, 100)
+        self.assertFalse((self.root / "lock").exists())
+
+    def test_catalog_notification_failure_uses_bounded_standard_recovery(self):
+        self.assert_catalog_standard_recovery("fail")
+
+    def test_catalog_notification_overflow_uses_bounded_standard_recovery(self):
+        self.assert_catalog_standard_recovery("overflow")
+
+    def test_catalog_notification_rejects_an_extra_protocol_line(self):
+        self.assert_catalog_standard_recovery("trailing")
+
+    def test_catalog_notification_timeout_reaps_its_owned_group_before_recovery(self):
+        self.assert_catalog_standard_recovery("hang")
+
+    def test_catalog_notification_rejects_a_modified_immutable_helper(self):
+        helper = self.catalog_notification_fixture()
+        helper.write_text(helper.read_text() + "# Changed after the handoff.\n")
+        status, _, error = self.run_launcher()
+        self.assertEqual(status, 0, error)
+        self.assertEqual(self.catalog_notifications(), [])
+        self.assertEqual(self.trace().count("catalog-scan"), 1)
+
+    def test_catalog_notification_is_withheld_when_native_recovery_fails(self):
+        self.catalog_notification_fixture()
+        self.script(self.bin / "start", 'printf "%s\\n" start-failed >>"$TEST_TRACE"\nexit 7')
+        status, _, error = self.run_launcher()
+        self.assertEqual(status, 1, error)
+        self.assertEqual(self.catalog_notifications(), [])
+        self.assertNotIn("catalog-scan", self.trace())
+        self.assertIn("native recovery is unconfirmed", error)
 
     def test_previously_stopped_statusbar_is_left_stopped(self):
         self.env["TEST_STATUSBAR"] = "stop/waiting"

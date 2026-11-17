@@ -17,6 +17,19 @@ LOCK_OWNED=0
 MANAGED_LOGS_ACTIVE=0
 MANAGED_LOGS_DISABLED=0
 LAUNCHER_LOG_LIMIT=65536
+CATALOG_NOTIFY_HELPER=${WEREAD_CATALOG_NOTIFY_HELPER:-}
+CATALOG_NOTIFY_SHA256=${WEREAD_CATALOG_NOTIFY_SHA256:-}
+CATALOG_NOTIFY_PENDING=0
+# Only an explicit transfer to the independent worker may inherit this handoff.
+unset WEREAD_CATALOG_NOTIFY_HELPER WEREAD_CATALOG_NOTIFY_SHA256
+case "${1:-}" in
+    --library|--detached)
+        if [ -n "$CATALOG_NOTIFY_HELPER" ] && [ -n "$CATALOG_NOTIFY_SHA256" ]; then
+            CATALOG_NOTIFY_PENDING=1
+        fi
+        ;;
+    *) CATALOG_NOTIFY_HELPER=''; CATALOG_NOTIFY_SHA256='' ;;
+esac
 
 launcher_log() {
     if [ "$MANAGED_LOGS_ACTIVE" -eq 1 ]; then
@@ -44,6 +57,79 @@ fail() {
     launcher_log '%s\n' "weread: $*"
     exit 1
 }
+
+catalog_notify_helper_is_current() {
+    [ "${#CATALOG_NOTIFY_SHA256}" -eq 64 ] || return 1
+    case "$CATALOG_NOTIFY_SHA256" in *[!0-9a-f]*) return 1 ;; esac
+    catalog_directory=${CATALOG_NOTIFY_HELPER%/*}
+    catalog_version=${catalog_directory##*/}
+    [ "${catalog_directory%/*}" = /var/local/kindle-catalog-entry ] || return 1
+    case "$catalog_version" in v1-*) ;; *) return 1 ;; esac
+    catalog_version=${catalog_version#v1-}
+    [ "${#catalog_version}" -eq 64 ] || return 1
+    case "$catalog_version" in *[!0-9a-f]*) return 1 ;; esac
+    [ "${CATALOG_NOTIFY_HELPER##*/}" = weread-catalog-client ] || return 1
+    [ ! -L /var/local/kindle-catalog-entry ] && [ ! -L "$catalog_directory" ] &&
+        [ ! -L "$CATALOG_NOTIFY_HELPER" ] && [ -f "$CATALOG_NOTIFY_HELPER" ] &&
+        [ -x "$CATALOG_NOTIFY_HELPER" ] || return 1
+    catalog_permissions=$(stat -c '%u:%a' /var/local/kindle-catalog-entry "$catalog_directory" "$CATALOG_NOTIFY_HELPER" 2>/dev/null) || return 1
+    [ "$catalog_permissions" = "$(printf '0:755\n0:755\n0:755')" ] || return 1
+    catalog_digest=$(sha256sum "$CATALOG_NOTIFY_HELPER" 2>/dev/null) || return 1
+    [ "${catalog_digest%% *}" = "$CATALOG_NOTIFY_SHA256" ]
+}
+
+finish_catalog_notification() {
+    [ "$CATALOG_NOTIFY_PENDING" -eq 1 ] || return 0
+    CATALOG_NOTIFY_PENDING=0
+    if catalog_notify_helper_is_current; then
+        if [ "$1" = owned ]; then
+            # Nine bytes, one complete record, successful command status and
+            # confirmed group cleanup are all required before accepting this.
+            if owned_native_command 9 "$CATALOG_NOTIFY_HELPER" --notify-protocol &&
+                single_record_matches "$LOCK_DIR/native-theme-output" NOTIFIED; then
+                launcher_log '%s\n' 'weread: Catalog notification completed.'
+                return 0
+            fi
+        else
+            # Before native ownership exists, the immutable fixed-entry client
+            # provides its own whole-process alarm and bounded transaction.
+            # Discard output here so an early failure cannot grow a shell value.
+            if "$CATALOG_NOTIFY_HELPER" --notify-protocol >/dev/null 2>&1; then
+                return 0
+            fi
+        fi
+    fi
+    launcher_log '%s\n' 'weread: Catalog notification unavailable; using standard reindex recovery.'
+    if [ "$1" = owned ]; then
+        # An unconfirmed helper retirement must not admit another IPC writer.
+        [ "$CLEANUP_FAILED" -eq 0 ] || return 0
+        owned_native_command "$NATIVE_QUERY_OUTPUT_LIMIT" sh -c '
+            if [ -f /mnt/us/documents/weread.sh ] && [ ! -L /mnt/us/documents/weread.sh ]; then
+                touch -c /mnt/us/documents/weread.sh || exit 1
+            fi
+            lipc-set-prop -i com.lab126.scanner doFullScan 1
+        ' || :
+    elif [ -f /mnt/us/documents/weread.sh ] && [ ! -L /mnt/us/documents/weread.sh ]; then
+        # The original shared handler retains its normal scan request. An early
+        # failure owns no launcher directory in which to supervise another IPC.
+        touch -c /mnt/us/documents/weread.sh || :
+    fi
+    return 0
+}
+
+if [ "$CATALOG_NOTIFY_PENDING" -eq 1 ]; then
+    catalog_early_exit() {
+        catalog_early_status=$1
+        trap '' HUP INT TERM
+        trap - 0
+        finish_catalog_notification early
+        exit "$catalog_early_status"
+    }
+    trap 'catalog_early_exit "$?"' 0
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+fi
 
 case "$WEREAD_HOME" in
     /*) ;;
@@ -281,11 +367,15 @@ if [ "${1:-}" != '--detached' ]; then
     fi
     export WEREAD_HOME
     if command -v setsid >/dev/null 2>&1; then
-        setsid sh "$SCRIPT_PATH" --detached --managed-logs >"$DATA_DIR/logs/last-launch.log" 2>&1 </dev/null &
+        WEREAD_CATALOG_NOTIFY_HELPER=$CATALOG_NOTIFY_HELPER WEREAD_CATALOG_NOTIFY_SHA256=$CATALOG_NOTIFY_SHA256 setsid sh "$SCRIPT_PATH" --detached --managed-logs >"$DATA_DIR/logs/last-launch.log" 2>&1 </dev/null &
     else
-        nohup sh "$SCRIPT_PATH" --detached --managed-logs >"$DATA_DIR/logs/last-launch.log" 2>&1 </dev/null &
+        WEREAD_CATALOG_NOTIFY_HELPER=$CATALOG_NOTIFY_HELPER WEREAD_CATALOG_NOTIFY_SHA256=$CATALOG_NOTIFY_SHA256 nohup sh "$SCRIPT_PATH" --detached --managed-logs >"$DATA_DIR/logs/last-launch.log" 2>&1 </dev/null &
     fi
     LIBRARY_WORKER_PID=$!
+    # The independent worker now owns completion, including early startup
+    # failure. Retiring this waiting entry must not publish a second notice.
+    CATALOG_NOTIFY_PENDING=0
+    trap - 0
     if [ "${1:-}" = '--library' ]; then
         if read_process_identity "$LIBRARY_WORKER_PID" && [ "$PROCESS_PARENT" = "$$" ]; then
             LIBRARY_WORKER_BIRTH=$PROCESS_BIRTH
@@ -2571,7 +2661,10 @@ cleanup() {
     if [ "$LAUNCH_STARTUP_SIGNAL" -ne 0 ]; then saved_status=$LAUNCH_STARTUP_SIGNAL; fi
     # Failure to acquire the lock owns no records, descriptors, or services.
     # Never use this cleanup path to repair another launcher's private state.
-    if [ "$LOCK_OWNED" -ne 1 ]; then exit "$saved_status"; fi
+    if [ "$LOCK_OWNED" -ne 1 ]; then
+        finish_catalog_notification early
+        exit "$saved_status"
+    fi
     CLEANUP_RUNNING=1
     CLEANUP_FAILED=0
     # Conditional calls suppress POSIX errexit inside a function. These helpers
@@ -2586,6 +2679,12 @@ cleanup() {
         saved_status=$APP_STATUS
     fi
     if ! release_display; then note_cleanup_failure 'native display'; fi
+    if [ "$CLEANUP_FAILED" -eq 0 ]; then
+        finish_catalog_notification owned
+    elif [ "$CATALOG_NOTIFY_PENDING" -eq 1 ]; then
+        CATALOG_NOTIFY_PENDING=0
+        launcher_log '%s\n' 'weread: Catalog notification withheld because native recovery is unconfirmed.'
+    fi
     if [ "$EVENT_FD_OPEN" -eq 1 ]; then
         if { exec 3>&-; }; then
             EVENT_FD_OPEN=0

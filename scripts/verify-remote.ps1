@@ -45,6 +45,7 @@ $WereadRemoteCommands = @(
     'cargo test --locked --all-targets',
     'python3 packaging/tests/launcher_test.py',
     'python3 packaging/tests/native_query_test.py',
+    'python3 packaging/tests/native_catalog_client_test.py',
     'python3 packaging/tests/package_development_test.py',
     'cargo build --locked'
 )
