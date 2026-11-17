@@ -12,6 +12,7 @@ import zipfile
 
 REQUIRED = (
     "documents/weread.sh",
+    "weread/launch.sh",
     "weread/app/weread",
     "weread/app/weread-frame-guard",
     "weread/app/weread-native-query",
@@ -24,6 +25,7 @@ REQUIRED = (
 
 EXECUTABLE_INPUTS = frozenset((
     "documents/weread.sh",
+    "weread/launch.sh",
     "weread/app/weread",
     "weread/app/weread-frame-guard",
     "weread/app/weread-native-query",

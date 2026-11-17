@@ -1,0 +1,199 @@
+[
+  {
+    "run_id": "library-entry-50c5828c",
+    "success": false,
+    "error": "prepare-device failed; inspect private evidence",
+    "inputs_sha256": "a2166fb80fe0dba372b2a9edbaa179c7a4513ebc8ab8a7a7c7ef5432f90a711f",
+    "commands": [
+      {
+        "name": "before",
+        "returncode": 0,
+        "timeout": false
+      },
+      {
+        "name": "original-document",
+        "returncode": 0,
+        "timeout": false
+      },
+      {
+        "name": "catalog-before",
+        "returncode": 0,
+        "timeout": false
+      },
+      {
+        "name": "lighting-before",
+        "returncode": 0,
+        "timeout": false
+      },
+      {
+        "name": "boot-before",
+        "returncode": 0,
+        "timeout": false
+      },
+      {
+        "name": "keep-active",
+        "returncode": 0,
+        "timeout": false
+      },
+      {
+        "name": "upload",
+        "returncode": 0,
+        "timeout": false
+      },
+      {
+        "name": "prepare-device",
+        "returncode": 1,
+        "timeout": false
+      },
+      {
+        "name": "restore-native",
+        "returncode": 0,
+        "timeout": false
+      },
+      {
+        "name": "restore-lighting",
+        "returncode": 0,
+        "timeout": false
+      },
+      {
+        "name": "final-native-state",
+        "returncode": 0,
+        "timeout": false
+      },
+      {
+        "name": "collect-failure",
+        "returncode": 0,
+        "timeout": false
+      },
+      {
+        "name": "remove-owned-stage",
+        "returncode": 0,
+        "timeout": false
+      },
+      {
+        "name": "remove-owned-runtime",
+        "returncode": 0,
+        "timeout": false
+      }
+    ],
+    "closeout": {
+      "lease_released": true,
+      "native_restored": true,
+      "lighting_restored": true,
+      "formal_entry_restored": null,
+      "temporary_stage_removed": true
+    },
+    "primary_samples": 0
+  },
+  {
+    "run_id": "library-entry-4edae423",
+    "success": false,
+    "error": "case-candidate-warmup failed; inspect private evidence",
+    "inputs_sha256": "f962c77fbba7aef83c2408e1be2bbd920411511cf3db209f9da514e0704fd055",
+    "commands": [
+      {
+        "name": "before",
+        "returncode": 0,
+        "timeout": false
+      },
+      {
+        "name": "original-document",
+        "returncode": 0,
+        "timeout": false
+      },
+      {
+        "name": "catalog-before",
+        "returncode": 0,
+        "timeout": false
+      },
+      {
+        "name": "lighting-before",
+        "returncode": 0,
+        "timeout": false
+      },
+      {
+        "name": "boot-before",
+        "returncode": 0,
+        "timeout": false
+      },
+      {
+        "name": "keep-active",
+        "returncode": 0,
+        "timeout": false
+      },
+      {
+        "name": "upload",
+        "returncode": 0,
+        "timeout": false
+      },
+      {
+        "name": "prepare-device",
+        "returncode": 0,
+        "timeout": false
+      },
+      {
+        "name": "upload-formal-entry",
+        "returncode": 0,
+        "timeout": false
+      },
+      {
+        "name": "prepare-formal-entry",
+        "returncode": 0,
+        "timeout": false
+      },
+      {
+        "name": "case-baseline-warmup",
+        "returncode": 0,
+        "timeout": false
+      },
+      {
+        "name": "case-candidate-warmup",
+        "returncode": 255,
+        "timeout": true
+      },
+      {
+        "name": "restore-native",
+        "returncode": 0,
+        "timeout": false
+      },
+      {
+        "name": "restore-formal-entry",
+        "returncode": 0,
+        "timeout": false
+      },
+      {
+        "name": "restore-lighting",
+        "returncode": 0,
+        "timeout": false
+      },
+      {
+        "name": "final-native-state",
+        "returncode": 0,
+        "timeout": false
+      },
+      {
+        "name": "collect-failure",
+        "returncode": 0,
+        "timeout": false
+      },
+      {
+        "name": "remove-owned-stage",
+        "returncode": 0,
+        "timeout": false
+      },
+      {
+        "name": "remove-owned-runtime",
+        "returncode": 0,
+        "timeout": false
+      }
+    ],
+    "closeout": {
+      "lease_released": true,
+      "native_restored": true,
+      "lighting_restored": true,
+      "formal_entry_restored": true,
+      "temporary_stage_removed": true
+    },
+    "primary_samples": 0
+  }
+]

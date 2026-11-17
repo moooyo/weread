@@ -3,10 +3,12 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import importlib.util
 from pathlib import Path
 import stat
+import subprocess
 import tempfile
 import unittest
 import zipfile
@@ -23,9 +25,11 @@ APPLICATION = "weread/app/weread"
 FRAME_GUARD = "weread/app/weread-frame-guard"
 NATIVE_QUERY = "weread/app/weread-native-query"
 LAUNCHER = "documents/weread.sh"
+SUPERVISOR = "weread/launch.sh"
 
 BUILD_INPUTS = {
     LAUNCHER: b"#!/bin/sh\n# Synthetic archive fixture; never executed.\n",
+    SUPERVISOR: b"#!/bin/sh\n# Synthetic supervisor fixture; never executed.\n",
     APPLICATION: b"\x7fELF synthetic static application\x00\x02",
     FRAME_GUARD: b"\x7fELF synthetic independent native frame guard\x00\x01",
     NATIVE_QUERY: b"\x7fELF synthetic read-only native query bridge\x00\x01",
@@ -74,9 +78,10 @@ class DevelopmentArchiveTests(unittest.TestCase):
         with zipfile.ZipFile(self.output) as archive:
             self.assertEqual(archive.read(APPLICATION), BUILD_INPUTS[APPLICATION])
             self.assertEqual(archive.read(LAUNCHER), BUILD_INPUTS[LAUNCHER])
+            self.assertEqual(archive.read(SUPERVISOR), BUILD_INPUTS[SUPERVISOR])
             self.assertEqual(archive.read(FRAME_GUARD), BUILD_INPUTS[FRAME_GUARD])
             self.assertEqual(archive.read(NATIVE_QUERY), BUILD_INPUTS[NATIVE_QUERY])
-            for name in (APPLICATION, FRAME_GUARD, NATIVE_QUERY, LAUNCHER):
+            for name in (APPLICATION, FRAME_GUARD, NATIVE_QUERY, LAUNCHER, SUPERVISOR):
                 with self.subTest(executable=name):
                     information = archive.getinfo(name)
                     archived_mode = information.external_attr >> 16
@@ -114,6 +119,39 @@ class DevelopmentArchiveTests(unittest.TestCase):
             PACKAGE.archive(self.staged, self.output)
         self.assertFalse(self.output.exists())
         self.assertFalse(self.output.with_suffix(".sha256").exists())
+
+    def test_missing_supervisor_refuses_before_creating_archive(self) -> None:
+        (self.staged / SUPERVISOR).unlink()
+        with self.assertRaisesRegex(ValueError, "weread/launch.sh"):
+            PACKAGE.archive(self.staged, self.output)
+        self.assertFalse(self.output.exists())
+
+    def test_document_preserves_the_accepted_embedded_cover_and_title(self) -> None:
+        root = PACKAGE_SCRIPT.parents[1]
+        source = (root / "packaging/kindle/document-launcher.sh").read_bytes()
+        self.assertNotIn(b"\r", source)
+        lines = source.decode("utf-8").splitlines()
+        self.assertEqual(lines[:2], ["#!/bin/sh", "# Name: WeRead for Kindle"])
+        icons = [line for line in lines if line.startswith("# Icon: ")]
+        self.assertEqual(icons, [lines[2]])
+        prefix = "# Icon: data:image/png;base64,"
+        self.assertTrue(icons[0].startswith(prefix))
+        self.assertEqual(base64.b64decode(icons[0][len(prefix):], validate=True),
+                         (root / "assets/branding/weread-cover-thumbnail.png").read_bytes())
+
+    def test_document_selects_library_lifetime_and_forwards_explicit_diagnostics(self) -> None:
+        document = PACKAGE_SCRIPT.parents[1] / "packaging/kindle/document-launcher.sh"
+        home = self.root / "entry-home"
+        home.mkdir()
+        (home / "launch.sh").write_text('#!/bin/sh\nprintf "%s\\n" "$@"\nexit 7\n')
+        for arguments, expected in (([], "--library\n"),
+                                    (["--detached", "--managed-logs"], "--detached\n--managed-logs\n")):
+            with self.subTest(arguments=arguments):
+                result = subprocess.run(["sh", str(document), *arguments],
+                                        env={"WEREAD_HOME": str(home), "PATH": "/usr/bin:/bin"},
+                                        text=True, capture_output=True, timeout=5)
+                self.assertEqual(result.returncode, 7, result.stderr)
+                self.assertEqual(result.stdout, expected)
 
     def test_missing_native_query_refuses_before_creating_archive(self) -> None:
         (self.staged / NATIVE_QUERY).unlink()

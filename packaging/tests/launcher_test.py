@@ -5133,6 +5133,138 @@ class LauncherLifecycleTests(unittest.TestCase):
         self.assertEqual(self.trace(), ["stop:statusbar", "start:statusbar", "xrefresh:"])
         self.assertFalse((self.root / "lock").exists())
 
+    def run_library_entry(self, drive):
+        document = self.root / "documents" / "weread.sh"
+        document.parent.mkdir()
+        document.write_bytes((SOURCE.parent / "document-launcher.sh").read_bytes())
+        supervisor = self.home / "launch.sh"
+        supervisor.write_text(self.launcher.read_text())
+        output_path = self.root / "library-entry.log"
+        worker = None
+        with output_path.open("wb") as output:
+            entry = subprocess.Popen(["sh", str(document)], env=self.env,
+                                     stdout=output, stderr=subprocess.STDOUT,
+                                     start_new_session=True)
+            try:
+                record = self.root / "lock" / "pid"
+                self.wait_until(lambda: record.exists() and record.read_text().strip().isdigit(),
+                                details=lambda: self.fixture_output_tail(output_path))
+                worker = self.observed_identity(int(record.read_text()))
+                self.assertNotEqual(worker["pid"], entry.pid)
+                fields = Path(f"/proc/{worker['pid']}/stat").read_text().rsplit(")", 1)[1].split()
+                self.assertEqual(int(fields[1]), entry.pid)
+                self.assertEqual(os.getsid(worker["pid"]), worker["pid"])
+                self.assertEqual(os.getpgid(worker["pid"]), worker["pid"])
+                self.assertIsNone(entry.poll())
+                drive(entry, worker)
+                entry.wait(timeout=16)
+                self.wait_until(lambda: not (self.root / "lock").exists())
+                self.wait_until(lambda: not self.original_process_exists(worker))
+                self.assertFalse(self.event_group_members(worker["pid"]))
+                return entry.returncode
+            finally:
+                # The worker is in a separate session. Retiring the waiting
+                # entry or its group cannot substitute for owned cleanup.
+                if worker is not None and self.original_process_exists(worker):
+                    os.kill(worker["pid"], signal.SIGCONT)
+                    os.kill(worker["pid"], signal.SIGTERM)
+                    deadline = time.monotonic() + 12
+                    while self.original_process_exists(worker) and time.monotonic() < deadline:
+                        time.sleep(0.02)
+                    if self.original_process_exists(worker):
+                        os.killpg(worker["pid"], signal.SIGKILL)
+                if entry.poll() is None:
+                    entry.kill()
+                entry.wait(timeout=3)
+
+    def test_library_entry_waits_for_native_recovery_and_preserves_worker_status(self):
+        self.env.update(TEST_SLEEP="1", TEST_TERM_EXIT="7")
+
+        def drive(entry, _worker):
+            self.wait_until(lambda: self.starts() == ["0"])
+            self.assertIsNone(entry.poll())
+            application = int((self.root / "lock" / "application-pid").read_text())
+            os.kill(application, signal.SIGTERM)
+
+        self.assertEqual(self.run_library_entry(drive), 7)
+        self.assertEqual(self.trace(), ["stop:statusbar", "start:statusbar", "xrefresh:"])
+
+    def test_library_entry_waits_across_same_process_sleep_and_wake(self):
+        self.managed_fixture()
+
+        def drive(entry, _worker):
+            pid = self.wait_for_managed_application()
+            request = self.suspend_managed_application(pid)
+            self.assertIsNone(entry.poll())
+            self.wake_managed_application(pid, request)
+            self.assertIsNone(entry.poll())
+            entry.terminate()
+
+        self.assertEqual(self.run_library_entry(drive), 143)
+        self.assertEqual(self.starts(), ["0"])
+        self.assertEqual(self.trace().count("xrefresh:"), 2)
+
+    def test_retiring_only_the_library_entry_preserves_independent_recovery(self):
+        self.managed_fixture()
+
+        def drive(entry, worker):
+            pid = self.wait_for_managed_application()
+            entry.kill()
+            entry.wait(timeout=3)
+            self.assertTrue(self.original_process_exists(worker))
+            self.assertNotIn(self.process_state(pid), (None, "Z", "X"))
+            request = self.suspend_managed_application(pid)
+            self.wake_managed_application(pid, request)
+            os.kill(worker["pid"], signal.SIGTERM)
+
+        self.assertEqual(self.run_library_entry(drive), -signal.SIGKILL)
+        self.assertEqual(self.starts(), ["0"])
+        self.assertEqual(self.trace().count("xrefresh:"), 2)
+
+    def assert_library_cancellation(self, number):
+        self.managed_fixture()
+        observed = []
+
+        def drive(entry, _worker):
+            pid = self.wait_for_managed_application()
+            observed.append(pid)
+            self.suspend_managed_application(pid)
+            entry.send_signal(number)
+
+        self.assertEqual(self.run_library_entry(drive), 128 + number)
+        self.assertIsNone(self.process_state(observed[0]))
+        self.assertIn(f"managed:term:{observed[0]}", self.managed_events())
+        # Both the sleep handoff and final native recovery request a repaint.
+        self.assertEqual(self.trace().count("xrefresh:"), 2)
+
+    def test_library_entry_hup_cleans_up_its_stopped_application(self):
+        self.assert_library_cancellation(signal.SIGHUP)
+
+    def test_library_entry_int_cleans_up_its_stopped_application(self):
+        self.assert_library_cancellation(signal.SIGINT)
+
+    def test_library_entry_term_cleans_up_its_stopped_application(self):
+        self.assert_library_cancellation(signal.SIGTERM)
+
+    def test_library_entry_preserves_first_signal_during_worker_registration(self):
+        identity = self.root / "library-worker-identity"
+        self.env["TEST_LIBRARY_IDENTITY"] = str(identity)
+        source = self.launcher.read_text()
+        anchor = '        LIBRARY_REGISTERING=0\n'
+        self.assertEqual(source.count(anchor), 1)
+        source = source.replace(anchor,
+            '        printf "%s:%s\\n" "$LIBRARY_WORKER_PID" "$LIBRARY_WORKER_BIRTH" >"$TEST_LIBRARY_IDENTITY"\n'
+            '        kill -HUP "$$"\n'
+            '        kill -TERM "$$"\n' + anchor, 1)
+        self.launcher.write_text(source)
+        result = subprocess.run(["sh", str(self.launcher), "--library"], env=self.env,
+                                text=True, capture_output=True, timeout=10)
+        self.assertEqual(result.returncode, 129, result.stderr)
+        pid, birth = identity.read_text().strip().split(":")
+        self.assertTrue(birth.isdigit())
+        self.assertFalse(self.original_process_exists({"pid": int(pid), "birth": birth}))
+        self.assertFalse((self.root / "lock").exists())
+
     def test_previously_stopped_statusbar_is_left_stopped(self):
         self.env["TEST_STATUSBAR"] = "stop/waiting"
         status, _, error = self.run_launcher()

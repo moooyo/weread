@@ -17,6 +17,41 @@ dates remain attached to their own results.
 
 No device address, credential, serial number, private note text, or account content is part of this record. Offline demonstration results do not establish live-account authentication, content entitlements, or upstream writes.
 
+## Formal Library entry candidate (2026-11-17)
+
+The [Library lifetime candidate](review/native-library-entry-20261117/README.md)
+uses the real indexed `documents/weread.sh` file-URI dispatch with the unchanged
+shared handler and registration. The document waits for an independent
+supervisor to restore native state before returning to Library. The prior
+detached supervisor is the control; the application and two helpers are the
+exact previously qualified binaries.
+
+Batch `library-entry-8cbce1e6` completes two warmups, six balanced AB/BA pairs,
+and two separate actual-framebuffer qualifications on Scribe 2022 / firmware
+5.19.5. Software-ready median changes from 9.505 to 8.980 seconds and first
+Library SEND from 10.390 to 9.820 seconds. Five pairs improve; the third is
+220 ms slower at SEND and remains in the evidence. Both native qualifications
+match their software snapshots and one another over the complete image. All
+software pairs match below the dynamic status bar. One catalog row, original
+MIME/thumbnail fields, and real recent-access updates are retained.
+
+Separate batch `library-lifecycle-24cb23f3` completes two warmups and one actual
+screen-saver/scheduled-wake cycle per variant. Both retain the same application
+PID/birth and matching sleep/wake/neutral-cover acknowledgements. Each
+pre-sleep/resumed framebuffer is identical over the full 1860 x 2480 image.
+The candidate keeps the shared Scriptlet active through the cycle and returns
+to Library after ordinary exit. The six-second scheduled wake does not establish
+extended deep-suspend or physical-touch acceptance.
+
+Both batches restore the original entry, native control, and lighting, confirm
+ordinary installation/data byte identity, remove their owned staging, and
+release fresh exact leases before host analysis. The candidate supervisor is
+`a619c909c9c7`; its packaged document is `085efcac8d33`. The test envelope preserves
+the installed metadata, which does not yet contain the accepted penguin cover.
+That artwork remains verified as package bytes rather than a new daily-device
+deployment. Preparation/sampling failures and successful pilot evidence are
+preserved separately in the feature record.
+
 ## Native-query candidate comparison (2026-11-17)
 
 The [native-query candidate](NATIVE_QUERY_PERFORMANCE_20261117.md) was compared

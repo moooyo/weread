@@ -10,6 +10,7 @@ The build script stages this layout under `dist/kindle/`:
 
 ```text
 documents/weread.sh
+weread/launch.sh
 weread/app/weread
 weread/app/weread-frame-guard
 weread/app/weread-native-query
@@ -28,7 +29,7 @@ Fonts, icons, the dictionary and interface strings are embedded in the executabl
 The operator accepted the [penguin cover](../../assets/branding/README.md) on
 2026-11-17. Its only lettering is `WeRead`; a winking penguin appears inside a
 Kindle-style reader. The 1024 x 1536 grayscale master is retained with a
-256 x 384 thumbnail. The launcher embeds that thumbnail in its third-line
+256 x 384 thumbnail. The document wrapper embeds that thumbnail in its third-line
 `# Icon: data:image/png;base64,...` metadata, so the existing build and archive
 steps carry the artwork in `documents/weread.sh` without a separate image file.
 
@@ -110,9 +111,16 @@ work. Integrity, account isolation, and ordered durable checkpoints remain
 required. Controlled component benchmarks are not physical Kindle speed claims;
 see [Download performance](../../docs/DOWNLOAD_PERFORMANCE.md).
 
-For daily use on the operator's identified device, install the real ARM executable as `/mnt/us/weread/app/weread` and this launch script as `/mnt/us/documents/weread.sh`. Keep the dependency notices and create the device profile and exact firmware allowlist in `/mnt/us/weread/data/`. The document entry is named **WeRead for Kindle**. This direct installation does not create a KPM package-manager record or publish a release.
+For daily use on the operator's identified device, install the real ARM executable as `/mnt/us/weread/app/weread`, `launch.sh` as `/mnt/us/weread/launch.sh`, and `document-launcher.sh` as `/mnt/us/documents/weread.sh`. Keep the dependency notices and create the device profile and exact firmware allowlist in `/mnt/us/weread/data/`. The document entry is named **WeRead for Kindle**. This direct installation does not create a KPM package-manager record or publish a release.
 
-Start the document entry with the default home directory. For an SSH launch, use `WEREAD_HOME=/mnt/us/weread DISPLAY=:0.0 sh /mnt/us/documents/weread.sh`. The script detaches itself and starts the application with only the native backend, profile, and data-directory arguments. No smoke wrapper, watchdog, `--demo`, `--offline`, scripted actions, capture, or exit deadline is used.
+Start the document entry with the default home directory. It selects `launch.sh --library`, which waits for its independent supervisor to restore native state and exit before returning to Library. The waiting entry owns neither display/input resources nor the launcher lock. Catchable HUP, INT, and TERM request cleanup from its directly spawned, birth-verified supervisor. Retiring only the entry leaves that independent supervisor responsible for sleep, wake, and recovery.
+
+For a detached SSH or external launcher invocation, use `WEREAD_HOME=/mnt/us/weread DISPLAY=:0.0 sh /mnt/us/weread/launch.sh`. Explicit document arguments are forwarded, including `--detached` for existing supervised diagnostics. Normal application launches use only the native backend, profile, and data-directory arguments. No smoke wrapper, watchdog, `--demo`, `--offline`, scripted actions, capture, or exit deadline is used. Update both shell files together; the bundle still creates one Library item and retains its title, cover, MIME association, scanner, and recent-access behavior.
+
+The [formal Library entry record](../../docs/review/native-library-entry-20261117/README.md)
+tracks the candidate's independent host/device checks, unchanged binary
+identities, measured startup behavior, and remaining acceptance gates. A
+candidate package or source commit does not update the ordinary installation.
 
 A fresh private-trial data directory initially opens QR Login. First configure Skills on the official `https://weread.qq.com/r/weread-skills` page using the same account and generate its API Key, then scan the application's Login QR. The full-page setup guide has four centered instruction rows and a public QR for that page. Its upper-left Back obtains a fresh Login QR, while the upper-right X exits the application. No manual API Key entry on the Kindle is required. Four-digit verification remains available when requested. Later ordinary starts use Library when a session or local books exist; existing import and local reading remain. [Login UI](../../docs/LOGIN_UI.md#skills-setup-guidance) records the selected host and software checks and the new ARM `4c4df58d13cd`; ARM `4c4df58d13cd` was later installed normally on Scribe 2022 / firmware 5.19.5 with existing data preserved, its ordinary startup verified, and native ownership restored after managed exit for the shared-device handoff. Functional scanning and Reader acceptance remain separate. The preceding ARM `8da54b9b111d` deployment preserved existing Scribe data and ended with native restoration and lease release. Managed sleep recovery retains the previous Reader position.
 

@@ -1,0 +1,242 @@
+{
+  "run_id": "library-entry-b95f5725",
+  "date": "2026-11-17",
+  "scope": "Actual indexed /mnt/us/documents/weread.sh through native file-URI dispatch. A common instrumentation envelope preserves installed metadata and routes the previous detached supervisor and candidate Library-wait supervisor. Unchanged shared handler/registration. Same qualified ELF/helpers and restored public offline demo snapshot. Balanced AB/BA with eight seconds of native stabilization outside the measured interval. No network, private library, reboot, cache eviction, or optical-completion claim.",
+  "device": "Kindle Scribe 2022",
+  "firmware": "5.19.5",
+  "clock_contract": "External /proc/uptime receipt timestamps (10 ms resolution); internal CLOCK_MONOTONIC differences only.",
+  "variants": {
+    "baseline": {
+      "application_sha256": "d3a6b663d9fbcacc08e88926c46fe8146c0fc979f8767a735020947600a8be62",
+      "native_query_sha256": "149fa95f3c40ff575c23065fa6127597abbd85ab3e90a50cdbba30fb072f0b5f",
+      "frame_guard_sha256": "689ef367eabe7f780ec51a20a033961badceb6c1ff56524e51cad30a4e44372d",
+      "launcher_source_sha256": "05a3b39d61899162658ddf55c7e0251fea8bc2ee6c6b0c4bdeb36f8376520bf3",
+      "instrumented_launcher_sha256": "c69514c805f50edce0bca10fc6e3d47ace313090a7b639e83a6ae51f0c036246"
+    },
+    "candidate": {
+      "application_sha256": "d3a6b663d9fbcacc08e88926c46fe8146c0fc979f8767a735020947600a8be62",
+      "native_query_sha256": "149fa95f3c40ff575c23065fa6127597abbd85ab3e90a50cdbba30fb072f0b5f",
+      "frame_guard_sha256": "689ef367eabe7f780ec51a20a033961badceb6c1ff56524e51cad30a4e44372d",
+      "launcher_source_sha256": "a619c909c9c7dc7ace0dcfcc4963da00f86dc21c2003415bba1a4a054e47373c",
+      "instrumented_launcher_sha256": "f66838f3ef235914c548bf5dd88b398977d1f25ea88ac2af667839e4429eb288"
+    }
+  },
+  "cases": [
+    {
+      "case": "baseline-warmup",
+      "variant": "baseline",
+      "primary": false,
+      "metrics": {
+        "software_ready_ms": 11600.0,
+        "first_frame_send_ms": 12530.0,
+        "pre_exec_ms": 6050.0,
+        "document_dispatch_ms": 1400.0,
+        "portrait_calibration_ms": 280.0,
+        "fonts_registration_ms": 4577.911,
+        "application_attach_ms": 164.984,
+        "event_loop_to_send_ms": 933.539
+      },
+      "catalog_row_count": 1,
+      "mime_unchanged": true,
+      "thumbnail_field_unchanged": true,
+      "catalog_last_access": "1794923338",
+      "catalog_modification_time": "1794923333",
+      "document_mtime_before": 1794923324,
+      "document_mtime_after": 1794923333
+    },
+    {
+      "case": "candidate-warmup",
+      "variant": "candidate",
+      "primary": false,
+      "metrics": {
+        "software_ready_ms": 8240.0,
+        "first_frame_send_ms": 9130.0,
+        "pre_exec_ms": 4200.0,
+        "document_dispatch_ms": 360.0,
+        "portrait_calibration_ms": 300.0,
+        "fonts_registration_ms": 3179.224,
+        "application_attach_ms": 153.918,
+        "event_loop_to_send_ms": 885.794
+      },
+      "catalog_row_count": 1,
+      "mime_unchanged": true,
+      "thumbnail_field_unchanged": true,
+      "catalog_last_access": "1794923358",
+      "catalog_modification_time": "1794923358",
+      "document_mtime_before": 1794923333,
+      "document_mtime_after": 1794923358
+    },
+    {
+      "case": "baseline-01",
+      "variant": "baseline",
+      "primary": true,
+      "metrics": {
+        "software_ready_ms": 8750.0,
+        "first_frame_send_ms": 9600.0,
+        "pre_exec_ms": 4880.0,
+        "document_dispatch_ms": 370.0,
+        "portrait_calibration_ms": 400.0,
+        "fonts_registration_ms": 3067.847,
+        "application_attach_ms": 128.922,
+        "event_loop_to_send_ms": 846.631
+      },
+      "catalog_row_count": 1,
+      "mime_unchanged": true,
+      "thumbnail_field_unchanged": true,
+      "catalog_last_access": "1794923382",
+      "catalog_modification_time": "1794923381",
+      "document_mtime_before": 1794923358,
+      "document_mtime_after": 1794923381
+    },
+    {
+      "case": "candidate-01",
+      "variant": "candidate",
+      "primary": true,
+      "metrics": {
+        "software_ready_ms": 8110.0,
+        "first_frame_send_ms": 8950.0,
+        "pre_exec_ms": 4210.0,
+        "document_dispatch_ms": 390.0,
+        "portrait_calibration_ms": 300.0,
+        "fonts_registration_ms": 3062.267,
+        "application_attach_ms": 132.675,
+        "event_loop_to_send_ms": 846.565
+      },
+      "catalog_row_count": 1,
+      "mime_unchanged": true,
+      "thumbnail_field_unchanged": true,
+      "catalog_last_access": "1794923405",
+      "catalog_modification_time": "1794923404",
+      "document_mtime_before": 1794923381,
+      "document_mtime_after": 1794923404
+    },
+    {
+      "case": "baseline-qualify",
+      "variant": "baseline",
+      "primary": false,
+      "metrics": {
+        "software_ready_ms": 8650.0,
+        "first_frame_send_ms": 9580.0,
+        "pre_exec_ms": 4730.0,
+        "document_dispatch_ms": 400.0,
+        "portrait_calibration_ms": 410.0,
+        "fonts_registration_ms": 3113.118,
+        "application_attach_ms": 137.159,
+        "event_loop_to_send_ms": 927.058
+      },
+      "catalog_row_count": 1,
+      "mime_unchanged": true,
+      "thumbnail_field_unchanged": true,
+      "catalog_last_access": "1794923428",
+      "catalog_modification_time": "1794923428",
+      "document_mtime_before": 1794923404,
+      "document_mtime_after": 1794923428,
+      "native_vs_software": {
+        "size": [
+          1860,
+          2480
+        ],
+        "whole_frame_changed_pixels": 0,
+        "below_status_bar_changed_pixels": 0,
+        "maximum_channel_difference": 0
+      },
+      "framework_during_application": "com.lab126.KPPMainApp"
+    },
+    {
+      "case": "candidate-qualify",
+      "variant": "candidate",
+      "primary": false,
+      "metrics": {
+        "software_ready_ms": 8820.0,
+        "first_frame_send_ms": 9700.0,
+        "pre_exec_ms": 4820.0,
+        "document_dispatch_ms": 400.0,
+        "portrait_calibration_ms": 300.0,
+        "fonts_registration_ms": 3164.046,
+        "application_attach_ms": 151.76,
+        "event_loop_to_send_ms": 875.05
+      },
+      "catalog_row_count": 1,
+      "mime_unchanged": true,
+      "thumbnail_field_unchanged": true,
+      "catalog_last_access": "1794923454",
+      "catalog_modification_time": "1794923454",
+      "document_mtime_before": 1794923428,
+      "document_mtime_after": 1794923454,
+      "native_vs_software": {
+        "size": [
+          1860,
+          2480
+        ],
+        "whole_frame_changed_pixels": 0,
+        "below_status_bar_changed_pixels": 0,
+        "maximum_channel_difference": 0
+      },
+      "framework_during_application": "tech.hackerdude.shell_integration.launcher"
+    }
+  ],
+  "medians": {
+    "baseline": {
+      "software_ready_ms": 8750.0,
+      "first_frame_send_ms": 9600.0,
+      "pre_exec_ms": 4880.0,
+      "document_dispatch_ms": 370.0,
+      "portrait_calibration_ms": 400.0,
+      "fonts_registration_ms": 3067.847,
+      "application_attach_ms": 128.922,
+      "event_loop_to_send_ms": 846.631
+    },
+    "candidate": {
+      "software_ready_ms": 8110.0,
+      "first_frame_send_ms": 8950.0,
+      "pre_exec_ms": 4210.0,
+      "document_dispatch_ms": 390.0,
+      "portrait_calibration_ms": 300.0,
+      "fonts_registration_ms": 3062.267,
+      "application_attach_ms": 132.675,
+      "event_loop_to_send_ms": 846.565
+    }
+  },
+  "pairs": [
+    {
+      "round": 1,
+      "order": [
+        "baseline",
+        "candidate"
+      ],
+      "ready_reduction_ms": 640.0,
+      "send_reduction_ms": 650.0,
+      "final_software_pixels": {
+        "size": [
+          1860,
+          2480
+        ],
+        "whole_frame_changed_pixels": 399,
+        "below_status_bar_changed_pixels": 0,
+        "maximum_channel_difference": 230
+      }
+    }
+  ],
+  "qualifications": {
+    "qualify_native_control_vs_candidate": {
+      "size": [
+        1860,
+        2480
+      ],
+      "whole_frame_changed_pixels": 247,
+      "below_status_bar_changed_pixels": 0,
+      "maximum_channel_difference": 230
+    }
+  },
+  "closeout": {
+    "lease_released": true,
+    "native_restored": true,
+    "lighting_restored": true,
+    "formal_entry_restored": true,
+    "installed_program_and_user_data_unchanged": true,
+    "same_boot": true,
+    "temporary_stage_removed": true,
+    "installed_document_metadata_preserved": true,
+    "installed_metadata_uses_accepted_penguin": false
+  }
+}

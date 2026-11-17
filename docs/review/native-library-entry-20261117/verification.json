@@ -1,0 +1,36 @@
+{
+  "environment": "ssh test-env (Linux host fixtures)",
+  "local_application_verification": false,
+  "checks": [
+    {
+      "name": "Launcher lifecycle suite",
+      "passed": 223,
+      "elapsed_seconds": 878.882,
+      "log_sha256": "35a5503ef923285867535be3f21f81946e7ee7aa3aba446eaec771d15c65fbef"
+    },
+    {
+      "name": "Development package contracts",
+      "passed": 8,
+      "elapsed_seconds": 0.01,
+      "log_sha256": "a17913e81321b6c64e49e2a78d2928951319f73ee66d1baf6fd5c0bf14d8ac9e"
+    },
+    {
+      "name": "POSIX shell syntax",
+      "passed": 3,
+      "files": [
+        "packaging/kindle/launch.sh",
+        "packaging/kindle/document-launcher.sh",
+        "scripts/build-kindle.sh"
+      ]
+    }
+  ],
+  "source_sha256": {
+    "packaging/kindle/launch.sh": "a619c909c9c7dc7ace0dcfcc4963da00f86dc21c2003415bba1a4a054e47373c",
+    "packaging/kindle/document-launcher.sh": "085efcac8d339ee764ea76585376287ca958ada8ec6c6b8ac77c502ccc6f7918",
+    "packaging/tests/launcher_test.py": "335ee150b7c7431cce30ebf2747cd4c27bd645f0adb1d5f03d7726862a4c418e",
+    "packaging/tests/package_development_test.py": "2f8cebd25636b22b909b53cfe0aedcbef9cd282eae5093237f9fec3f458eb5aa",
+    "scripts/build-kindle.sh": "2355acd6df1a8a435789fe16007ee3e4a3c742a5171f9a6e5c8d290e156bd861",
+    "scripts/package-development.py": "d6233c6c686da75bb4093860d31f23711c859d79e83fbc35f1dba1ddd44f7975"
+  },
+  "scope": "Shell process ownership, registration signal latching, independent Library entry recovery, retained existing sleep and native-state fences, and explicit archive/metadata contracts. No Rust or helper rebuild needed for unchanged compiled inputs."
+}

@@ -23,10 +23,10 @@ artwork does not select a project license or imply endorsement by Amazon.
 
 ## Launcher integration
 
-`packaging/kindle/launch.sh` embeds the thumbnail as a single, unwrapped
+`packaging/kindle/document-launcher.sh` embeds the thumbnail as a single, unwrapped
 `# Icon: data:image/png;base64,...` header on its third line. The development
 builder copies that script to `documents/weread.sh`; the archive already
-includes it as an explicit executable input. No external image path or runtime
+includes it and `weread/launch.sh` as explicit executable inputs. No external image path or runtime
 image-generation dependency is required on the device.
 
 The reviewed SH_Integration parser reads only the first six lines, accepts the

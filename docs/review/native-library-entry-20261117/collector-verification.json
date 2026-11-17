@@ -1,0 +1,16 @@
+{
+  "scope": "Remote synthetic timing collector with no live application or launcher ownership record; accepted driver marker and clean EOF required. These are not performance samples.",
+  "collector_sha256": "7fe974cbaf2e444297e0ee7f7c5290d6d1009bb86e5efbf231e7cfebdca53bc8",
+  "cases": [
+    {
+      "case": "first-marker-without-owned-record",
+      "passed": true,
+      "returncode": 0
+    },
+    {
+      "case": "eof-without-driver-marker",
+      "passed": true,
+      "returncode": 1
+    }
+  ]
+}
