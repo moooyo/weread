@@ -24,7 +24,8 @@ if ($RemoteHost -notmatch '^[A-Za-z0-9_][A-Za-z0-9_.@-]*$') {
     throw 'The remote host must be an SSH alias or a simple hostname.'
 }
 
-& ssh $RemoteHost "mkdir -p '$RemoteDirectory' '$RemoteTargetDirectory'"
+$WereadGuardReference = 'docs/review/catalog-entry-adapter-20261118'
+& ssh $RemoteHost "mkdir -p '$RemoteDirectory/$WereadGuardReference' '$RemoteTargetDirectory'"
 if ($LASTEXITCODE -ne 0) { throw 'The designated remote verification environment is unavailable.' }
 
 $WereadSources = @('Cargo.toml', 'Cargo.lock', 'build.rs', 'README.md', 'THIRD_PARTY_NOTICES.md', '.cargo', 'src', 'ui', 'assets', 'vendor', 'scripts', 'packaging', 'tools')
@@ -34,6 +35,12 @@ $WereadTransferPaths = foreach ($WereadSource in $WereadSources) {
 }
 & scp -r @WereadTransferPaths "${RemoteHost}:${RemoteDirectory}/"
 if ($LASTEXITCODE -ne 0) { throw 'Source transfer failed.' }
+
+$WereadGuardInputs = foreach ($WereadGuardFile in @('historical-protection.json', 'post-deployment-inventory.json', 'post-deployment-protection.json')) {
+    Join-Path $WereadRepository "$WereadGuardReference/$WereadGuardFile"
+}
+& scp @WereadGuardInputs "${RemoteHost}:${RemoteDirectory}/${WereadGuardReference}/"
+if ($LASTEXITCODE -ne 0) { throw 'Catalog protection reference transfer failed.' }
 
 $WereadRemoteCommands = @(
     'set -eu',

@@ -8,7 +8,7 @@ Aidoku-only runtime does not recognize it. WeRead has neither changed the
 registration nor enabled the feature on the shared Kindle. No device speedup
 is measured here.
 
-On `test-env`, **285 tests passed**: 236 launcher lifecycle, 19 catalog client,
+For the coordinated candidate, **285 tests passed** on `test-env`: 236 launcher lifecycle, 19 catalog client,
 10 packaging and comparison, and 20 offline protection cases. The 13 notification
 cases are included in the 236, not added again. The launcher suite exited
 successfully before the verification host restarted; its temporary full log
@@ -33,6 +33,16 @@ A future leased preflight must capture the then-current qualified version.
 Old test harnesses must not select or restore the original shared executable
 as the registered command.
 
+Aidoku subsequently deployed application `9d92dc4cd01005a6ba2f48fe61786e5df5570c43feb5709fe3159bb164807d0f`
+in transaction `promote-f2889bdb575f`. Its deployment receipt and ARM identity
+agree: `/mnt/us/aidoku/app/aidoku` was the only changed program member. The
+shared registration, Aidoku launcher, entry, cover, and helper remain protected.
+The installed-smoke result and released lease are Aidoku's evidence; WeRead did
+not inspect the Kindle. This update did not enable the WeRead marker or grant a
+device window. The previous `62de2771...` executable must not be restored.
+The updated offline guard passed 22 cases, including rejection of the old
+snapshot. The application and candidate package were not rebuilt for this update.
+
 ## Verified source differences
 
 - The current shared hook and client select only `/mnt/us/documents/Aidoku.sh`.
@@ -50,6 +60,15 @@ as the registered command.
   regular tick and maps `CoversLoaded` directly to a UI refresh. There is no
   equivalent 300 ms publication gate to shorten. Existing worker polling is a
   separate potential experiment and is not included in this catalog change.
+- The [public image adapter](../src/source/client.rs) returns bounded encoded
+  bytes. On an ordinary Library miss, [`prepare_cover_png_cancellable`](../src/cache.rs)
+  decodes the original once to produce the thumbnail; the [worker](../src/app/sleep_screen.rs)
+  publishes the resulting pixels without decoding its new PNG. A warm hit can
+  decode the cached thumbnail, not the original. Aidoku's cold-cover gain does
+  not transfer to this path. When the current Reader book also needs a larger
+  sleep image, a separate `SleepOriginal` job can decode the source again for
+  that different size. Any proposal to share that work needs its own latency,
+  memory, cancellation and sleep/wake measurements; no change was made here.
 
 ## Agreed interface and ownership
 
@@ -161,6 +180,25 @@ Use `scripts/check-catalog-guard.py` on independently collected, sanitized
 snapshots. Pin the owner-approved inventory digest outside the observation;
 require the separately frozen version, complete registration projection, and
 all listed Aidoku and BiliComics file hashes or explicit absence records.
+
+For the reported `promote-f2889bdb575f` installation, check a separately
+collected observation before the first device write and again after restoring
+WeRead's own state. The same read-only comparison is used at both boundaries:
+
+```sh
+python3 scripts/check-catalog-guard.py --aidoku-handoff --observed "$observation"
+```
+
+`--aidoku-handoff` pins the [post-deployment inventory](review/catalog-entry-adapter-20261118/post-deployment-inventory.json)
+and [expected file hashes](review/catalog-entry-adapter-20261118/post-deployment-protection.json).
+The [verification record](review/catalog-entry-adapter-20261118/peer-handoff-verification.json)
+identifies the exact owner evidence. Only the Aidoku application hash changed;
+BiliComics' previous absences are carried forward as expectations, not recent
+observations. The old snapshot is rejected under this profile. A mismatch stops
+the batch; do not make a check pass by copying back an old peer binary, reverting
+the registration, or adopting the observed hashes. If an owner changes their
+installation or qualifies a shared extension, freeze that separate handoff first.
+
 The [historical snapshot](review/catalog-entry-adapter-20261118/historical-protection.json)
 and its [bounded inventory](review/catalog-entry-adapter-20261118/historical-inventory.json)
 are references, not a new WeRead observation or a baseline for a future runtime.

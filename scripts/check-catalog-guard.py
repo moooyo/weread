@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Compare two previously collected catalog protection snapshots offline.
 
+Use --aidoku-handoff for the owner-reported deployment baseline shipped with
+this checkout. It is an expectation for preflight and closeout, never a device
+observation or an instruction to restore a file. To compare a different
+explicitly frozen pair, supply --inventory, --inventory-sha256 and --expected.
+
 Freeze an inventory from both owners before the observation. It contains the
 SHA-256 of the exact expected snapshot file and each owner's approved paths:
   {"expected_sha256": "...", "aidoku": {"program": [...], "entry": [...]},
@@ -51,6 +56,9 @@ SHA256 = re.compile(r"[0-9a-f]{64}")
 EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
 PUBLIC_PATH = re.compile(r"(?:/[A-Za-z0-9_.+ -]+)+")
 MAX_BYTES = 1024 * 1024
+HANDOFF_DIR = Path(__file__).resolve().parents[1] / "docs/review/catalog-entry-adapter-20261118"
+# Owner's promotion receipt promote-f2889bdb575f. The inventory pins the expected snapshot.
+HANDOFF_INVENTORY_SHA256 = "d9e493d5f9f81d22552fca875817e7ba1841703a50cc047113dabaaf9bfea4c7"
 
 
 class Target(NamedTuple):
@@ -221,12 +229,23 @@ def compare(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--inventory", required=True, type=Path, help="previously approved joint inventory")
-    parser.add_argument("--inventory-sha256", required=True, help="previously recorded SHA-256 of its exact bytes")
-    parser.add_argument("--expected", required=True, type=Path, help="separately frozen expected snapshot")
+    scope = parser.add_mutually_exclusive_group(required=True)
+    scope.add_argument("--aidoku-handoff", action="store_true", help="use the pinned owner deployment reference")
+    scope.add_argument("--inventory", type=Path, help="previously approved joint inventory")
+    parser.add_argument("--inventory-sha256", help="independently recorded SHA-256 of an explicit inventory")
+    parser.add_argument("--expected", type=Path, help="separately frozen snapshot for an explicit inventory")
     parser.add_argument("--observed", required=True, type=Path, help="independently collected observation")
+    args = parser.parse_args()
+    if args.aidoku_handoff:
+        if args.expected is not None or args.inventory_sha256 is not None:
+            parser.error("--aidoku-handoff cannot override the pinned reference")
+        args.inventory = HANDOFF_DIR / "post-deployment-inventory.json"
+        args.inventory_sha256 = HANDOFF_INVENTORY_SHA256
+        args.expected = HANDOFF_DIR / "post-deployment-protection.json"
+    elif args.expected is None or args.inventory_sha256 is None:
+        parser.error("--inventory requires --inventory-sha256 and --expected")
     try:
-        problems, count, absent = compare(parser.parse_args())
+        problems, count, absent = compare(args)
     except ValueError as error:
         print(error, file=sys.stderr)
         return 2

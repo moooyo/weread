@@ -94,6 +94,21 @@ class CatalogGuardTests(unittest.TestCase):
         self.run_guard(0, "7 protected paths match the frozen evidence", "0 explicitly absent")
         self.assertEqual({path: path.read_bytes() for path in self.root.iterdir()}, before)
 
+    def test_owner_handoff_rejects_the_superseded_installed_application(self):
+        old = SCRIPT.parents[1] / "docs/review/catalog-entry-adapter-20261118/historical-protection.json"
+        result = subprocess.run([sys.executable, str(SCRIPT), "--aidoku-handoff", "--observed", str(old)],
+                                capture_output=True, text=True, timeout=5)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(result.stderr.splitlines(), ["changed aidoku program: /mnt/us/aidoku/app/aidoku"])
+
+    def test_owner_handoff_forbids_replacing_its_pinned_inputs(self):
+        for flag, value in (("--inventory", self.inventory), ("--expected", self.expected),
+                            ("--inventory-sha256", self.pin)):
+            with self.subTest(flag=flag):
+                result = subprocess.run([sys.executable, str(SCRIPT), "--aidoku-handoff", flag, str(value),
+                                         "--observed", str(self.observed)], capture_output=True, timeout=5)
+                self.assertEqual(result.returncode, 2)
+
     def test_all_changed_missing_and_unexpected_files_are_reported(self):
         files = self.baseline["files"]
         files["/fixture/aidoku/program"] = sha(b"different program")

@@ -1,0 +1,48 @@
+{
+  "scope": "Offline verification of the owner-reported deployment baseline; no device access or restoration performed.",
+  "date": "2026-11-18",
+  "timezone": "Asia/Shanghai",
+  "owner_evidence": {
+    "run_id": "promote-f2889bdb575f",
+    "deployment_path": "docs/review/startup-next-20261118/evidence/deployment.json",
+    "deployment_receipt_sha256": "01055e85bebbcb5559bb09472d5b4419fdefe856ef5174f152674227dfc2f7c9",
+    "build_identity_path": "docs/review/startup-next-20261118/status-trial/arm-identity.json",
+    "build_identity_receipt_sha256": "33901b42067ac80c381b6db6cc912cc331e1e57b206c65e310fcfbb0cdd24bd8",
+    "previous_application_sha256": "62de2771891b5bf8f720572c4544a3a732d619fa95131111cb00bccb6e0bc612",
+    "installed_application_sha256": "9d92dc4cd01005a6ba2f48fe61786e5df5570c43feb5709fe3159bb164807d0f",
+    "verified_program_member": "aidoku/app/aidoku",
+    "original_registration_preserved": true,
+    "deployment_lease_released": true
+  },
+  "reference": {
+    "historical_expected_sha256": "2410e8607840554718526aae946f669890228a6089c7b7a124f3d1b938d8f475",
+    "post_deployment_expected_sha256": "c04f56eaa347375467b322b444005f40ba7942301c97769bbc0dacd6c48e1d07",
+    "inventory_sha256": "d9e493d5f9f81d22552fca875817e7ba1841703a50cc047113dabaaf9bfea4c7",
+    "protected_paths": 9,
+    "changed_expected_paths": [
+      "/mnt/us/aidoku/app/aidoku"
+    ],
+    "carried_forward_bilicomics_absences": 3
+  },
+  "test_env": {
+    "guard_suite_passed": 22,
+    "elapsed_seconds": 1.771,
+    "guard_suite_log_sha256": "47a3828e7ef9f865866c26f06b241262afdb2fc42477da97af0dd0f3e5d217e1",
+    "guard_source_sha256": "764bdee72c140a59d8c6f1e2e3b6677a849e9c63b5ab7637c139c45378913c63",
+    "comparison_cases": [
+      {
+        "input": "reconstructed matching expectations (synthetic)",
+        "exit_code": 0,
+        "independent_device_observation": false
+      },
+      {
+        "input": "archived pre-deployment expectations",
+        "exit_code": 1,
+        "independent_device_observation": false
+      }
+    ]
+  },
+  "weread_runtime_changed": false,
+  "shared_runtime_supports_weread_marker": false,
+  "device_measurements": null
+}

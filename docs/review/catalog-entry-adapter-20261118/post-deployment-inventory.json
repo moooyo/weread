@@ -1,0 +1,20 @@
+{
+  "expected_sha256": "c04f56eaa347375467b322b444005f40ba7942301c97769bbc0dacd6c48e1d07",
+  "aidoku": {
+    "program": [
+      "/mnt/us/aidoku/launch.sh",
+      "/mnt/us/aidoku/app/aidoku",
+      "/mnt/us/aidoku/app/aidoku-native-query",
+      "/var/local/kindle-catalog-entry/v1-2db100d0bcb60a76571cd8de96bed7ea6c016e6ab73e388a885f692955cacd86/aidoku-library-dispatch"
+    ],
+    "entry": ["/mnt/us/documents/Aidoku.sh"],
+    "asset": ["/mnt/us/aidoku/assets/aidoku-cover-v2.png"]
+  },
+  "bilicomics": {
+    "program": [{"path": "/mnt/us/bilicomics", "state": "absent"}],
+    "entry": [
+      {"path": "/mnt/us/documents/bilicomics.sh", "state": "absent"},
+      {"path": "/mnt/us/documents/BiliComics.sh", "state": "absent"}
+    ]
+  }
+}
