@@ -38,10 +38,10 @@ reported separately. Both variants also pass a same-process physical screen-save
 and scheduled-wake cycle with identical pre-sleep/resumed frames. The operator
 approved main integration on 2026-11-17; the ordinary installation remains unchanged.
 
-The [catalog notification candidate](docs/CATALOG_ENTRY_ADAPTER.md) retains the
-penguin cover and default FBInk behavior. Its application-side changes and paired
-test documents passed host verification. Enabling the entry on Kindle still
-requires a compatible shared runtime from Aidoku and an independent device trial.
+The [catalog notification adapter](docs/CATALOG_ENTRY_ADAPTER.md) was merged to
+`main` on 2026-11-19. It retains the penguin cover and default FBInk behavior.
+The WeRead package does not install or replace the shared runtime. Device
+acceptance still requires a compatible runtime from Aidoku and a WeRead trial.
 
 The 2026-11-16 [image-preparation work](docs/IMAGE_PREPARATION_PERFORMANCE_20261116.md) moves final Reader/Article picture preparation and cover conversion to bounded workers. Repeated publication reuses current shared pixels, and optional full sleep covers wait for reading inactivity. Current source, palette, resource, and power-event boundaries remain explicit; the feature record separates paired software measurements from device acceptance.
 

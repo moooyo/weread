@@ -1,12 +1,15 @@
 # Native catalog entry integration
 
-Date: 2026-11-18, Asia/Shanghai.
-Status: the three projects have coordinated ownership. Aidoku maintains the
-shared runtime; WeRead owns its document, notification consumer, and comparison.
-The host-tested candidate includes the agreed document declaration. The existing
-Aidoku-only runtime does not recognize it. WeRead has neither changed the
-registration nor enabled the feature on the shared Kindle. No device speedup
-is measured here.
+WeRead merged its application-side changes through `26f80ab` to `main` on
+2026-11-19 (Asia/Shanghai). Aidoku maintains the shared runtime; WeRead owns
+its document, notification consumer, and comparison. The development package
+contains the agreed document declaration but does not register a shared runtime.
+This source integration did not deploy to Kindle. WeRead device qualification
+and any performance claim remain pending.
+
+At integration, `test-env` passed all 64 cases rerun against `26f80ab`: 13
+launcher notification cases, 19 client cases, 10 package and comparison cases,
+and 22 offline protection cases. The earlier, broader run is recorded below.
 
 For the coordinated candidate, **285 tests passed** on `test-env`: 236 launcher lifecycle, 19 catalog client,
 10 packaging and comparison, and 20 offline protection cases. The 13 notification
@@ -141,8 +144,8 @@ waiter retirement across sleep/wake, early configuration failure, explicit
 helper failure, overflow, trailing protocol data, timeout and group retirement,
 helper modification, and failed native restoration. They are Linux process and
 service fixtures, not a physical catalog-service result. The fourth-line marker
-exists in the branch and its host-built comparison inputs only. The installed
-WeRead document and the device registration were not touched.
+is in the packaged document on `main`. The installed WeRead document and the
+device registration were not changed by the merge.
 
 The WeRead consumer and isolated host fixtures were prepared without holding a
 device lease. The ARM app and the two existing helpers in the candidate package
@@ -229,5 +232,4 @@ in runs without shutdown screenshots, or explicitly leave that metric unmeasured
 
 The protected registration identity, peer compatibility, actual device slot,
 six pairs, and sleep/wake qualification remain prerequisites for enabling the
-WeRead path or claiming any speedup. Main integration and daily installation
-are separate from this host candidate.
+WeRead path on the shared device or claiming any speedup.
