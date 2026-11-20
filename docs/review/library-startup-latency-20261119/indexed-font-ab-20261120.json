@@ -1,0 +1,49 @@
+{
+  "device": "Kindle Scribe 2022",
+  "firmware": "5.19.5",
+  "product_commit": "7b41404e0b1cab8a83a537f8262220c24762b396",
+  "control_features": ["kindle"],
+  "candidate_features": ["kindle", "bundled-font-preflight"],
+  "endpoint": "Temporary indexed WeRead document: device-local monotonic timestamp just before exec of the native file-open request to first_application_frame_send. Programmatic request, not touch or completed ink.",
+  "fixture": "Same restored 15-cover public offline Library; one boot, warm OS caches, new process and independent restored data for each launch.",
+  "sample_columns": ["case", "request_to_send_ms", "window_to_fonts_ms", "splash_orientation_ms", "event_loop_orientation_ms"],
+  "all_orientation_outcomes": "timeout",
+  "excluded_warmups": [
+    ["A0", 10006.382078, 3088.797001, 507.372231, 508.756539],
+    ["B0", 6750.898308, 37.514692, 507.123077, 505.577385]
+  ],
+  "measured_in_order": [
+    ["A1", 10074.545924, 3172.279077, 507.663385, 505.503077],
+    ["B1", 6940.447924, 37.611077, 507.602539, 510.228769],
+    ["B2", 6917.544846, 38.871154, 506.133154, 506.082230],
+    ["A2", 9788.014231, 3082.386001, 506.183616, 506.240461],
+    ["A3", 9876.315001, 3126.921385, 507.691461, 507.099000],
+    ["B3", 6772.974539, 39.108846, 508.423615, 506.041923],
+    ["B4", 6773.051462, 38.107384, 508.766692, 507.024692],
+    ["A4", 10052.026462, 3154.013923, 506.772154, 510.253231],
+    ["A5", 10099.657539, 3088.553692, 509.547230, 504.777154],
+    ["B5", 6948.590231, 39.586000, 507.442693, 511.745462],
+    ["B6", 6775.469769, 37.854000, 506.620462, 506.043461],
+    ["A6", 9872.766231, 3105.622846, 506.031769, 503.806077]
+  ],
+  "measured_medians_ms": {"baseline": 9964.1707315, "candidate": 6846.5073075, "within_pair_saving": 3118.719231},
+  "release_gate": {"pairs_faster": 6, "pairs_measured": 6, "required_faster_pairs": 5},
+  "pixels": {
+    "qualification_cases": ["A-library", "B-library", "A-reader", "B-reader"],
+    "size": [1860, 2480],
+    "excluded_rows_at_each_edge": 72,
+    "software_and_scanout_body_mae_each": 0.0,
+    "a_b_software_and_scanout_body_mae_each": 0.0,
+    "measured_thumb_mae_to_library_each": 0.0,
+    "measured_thumb_mae_to_reader_each": 56.756944
+  },
+  "closeout": {"temporary_document_removed": true, "remaining_test_rows": 0, "owned_stage_removed": true, "native_and_protection_checks_passed": true, "released_at_utc": "2026-11-20T09:29:44.704896+00:00"},
+  "production_retest": {
+    "installed_arm_bytes": 95137176,
+    "features": ["kindle", "bundled-font-preflight"],
+    "passed": true,
+    "data_reset": false,
+    "observations": ["production_uri", "one_catalog_row", "approved_profile", "normal_args", "state_open", "live_after_four_seconds", "display_and_input_open", "native_restored"],
+    "released_at_utc": "2026-11-20T09:32:29.147249+00:00"
+  }
+}

@@ -1,0 +1,43 @@
+#!/bin/sh
+# Name: WeRead Font Trial
+set -eu
+umask 077
+stage=/mnt/us/.weread-indexed-@LABEL@
+[ "$(cat "$stage/owner")" = @LABEL@ ] && [ -f "$stage/armed" ] || exit 1
+name=$(cat "$stage/armed")
+case "$name" in [AB][0-6]|[AB]-library|[AB]-reader) ;; *) exit 1;; esac
+out=$stage/out/$name
+mkdir "$out/entered" || exit 1
+mv "$stage/armed" "$out/entered/arm" || exit 1
+WEREAD_HOME=$stage/${name%"${name#?}"}
+WEREAD_TRIAL_ROUTE=library
+WEREAD_TRIAL_CAPTURE=''
+WEREAD_TRIAL_DWELL=6000
+case "$name" in
+    *-reader|*-library) WEREAD_TRIAL_ROUTE=${name#*-}; WEREAD_TRIAL_CAPTURE=$out/final.png; WEREAD_TRIAL_DWELL=12000 ;;
+esac
+WEREAD_STARTUP_TIMING=1
+export WEREAD_HOME WEREAD_TRIAL_ROUTE WEREAD_TRIAL_CAPTURE WEREAD_TRIAL_DWELL WEREAD_STARTUP_TIMING
+unset WEREAD_CATALOG_NOTIFY_HELPER WEREAD_CATALOG_NOTIFY_SHA256
+sh "$WEREAD_HOME/launch.sh" --library >"$out/entry.log" 2>&1 </dev/null &
+worker=$!
+birth=$(awk '{print $22}' "/proc/$worker/stat") || exit 1
+printf '%s %s\n' "$worker" "$birth" >"$out/worker"
+(
+    for tick in $(seq 1 65); do
+        [ -d "/proc/$worker" ] && [ "$(awk '{print $22}' "/proc/$worker/stat" 2>/dev/null)" = "$birth" ] || exit 0
+        sleep 1
+    done
+    if tr '\000' '\n' <"/proc/$worker/cmdline" | grep -Fxq "$WEREAD_HOME/launch.sh" &&
+        [ "$(awk '{print $22}' "/proc/$worker/stat")" = "$birth" ]; then
+        printf 'timeout\n' >"$out/guard"
+        kill -TERM "$worker" || :
+    fi
+) </dev/null >"$out/guard.log" 2>&1 &
+guard=$!
+result=0
+wait "$worker" || result=$?
+wait "$guard" || result=1
+printf '%s\n' "$result" >"$out/status.pending"
+mv "$out/status.pending" "$out/status"
+exit "$result"

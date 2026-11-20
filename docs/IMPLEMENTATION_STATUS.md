@@ -6,6 +6,15 @@ The date above belongs to the original implementation record. Later changes and 
 
 The user authorized implementation from the WeRead for Kindle design handoff v0.2. This repository contains an independent Rust and Slint application, desktop verification, a Kindle platform adapter, and a development-bundle builder. Iteration continues and general acceptance remains incomplete. The latest Scribe 2022 / firmware 5.19.5 operator acceptance below is artifact-specific and does not establish a supported model/firmware matrix or untested hardware qualification.
 
+The [November 20 physical font probe](review/library-startup-latency-20261119/physical-20261120.md)
+verified the benefit of build-time outline admission for seven bundled fonts
+in a guarded CPU-only workload. The subsequent [indexed comparison and
+deployment](review/library-startup-latency-20261119/indexed-font-ab-20261120.md)
+passed six warm pairs (9.964 → 6.847 s median to first Library SEND), matched
+Library/Reader pixels, private-data-preserving installation and normal
+file-open/exit checks. The Kindle packaging path enables the feature;
+the default desktop build and full custom-font checks are unchanged.
+
 The operator accepted the [winking-penguin launcher cover](../assets/branding/README.md)
 on 2026-11-17. The source launcher embeds its grayscale thumbnail in the Icon
 metadata, which the existing build and archive flow retain. Only the `WeRead`

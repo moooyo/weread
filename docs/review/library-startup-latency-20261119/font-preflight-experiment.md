@@ -118,6 +118,12 @@ pixel bracket; include the orientation outcomes, Library and Reader pixels,
 and native recovery. Record an actual tap or optical display endpoint only
 when it is independently observed.
 
+The [November 20 worker recovery](rebuilt-worker.md) supersedes the
+connectivity and retained-input assumptions, not the November 19 measurements.
+The [later physical CPU run](physical-20261120.md) measures the seven-face
+admission loop (2,709.496 vs. 3.557 ms median). Its independent installed-entry
+audit did not launch either application or qualify first Library SEND.
+
 ## Implementation and next decisions
 
 The build checks the decompressed bytes against the SHA-256 in the approved

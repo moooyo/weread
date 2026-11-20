@@ -15,6 +15,26 @@ dates remain attached to their own results.
   trials; the latest normal update preserves the existing current-layout data.
 - Scope: supervised device iterations and private daily-trial observations, separate from the Scribe 2022 firmware 5.20.1 VM experiments.
 
+## November 20 font admission and entry audit
+
+The [guarded CPU-only comparison](review/library-startup-latency-20261119/physical-20261120.md)
+on the identified Scribe measured six warm pairs, with median admission of
+2,709.496 ms vs. 3.557 ms. A separate read-only window found one catalog row
+for the real WeRead document and a byte-for-byte match to the November 15
+launcher. Neither run opened the app or measured Library SEND. Native idle
+was confirmed and both leases were released; the daily installation and
+private shelf were left alone.
+
+The [later indexed A/B and deployment](review/library-startup-latency-20261119/indexed-font-ab-20261120.md)
+used an independent indexed entry and a public fixture. All six pairs
+improved request-to-first-Library-SEND (median 9.964 → 6.847 s); both arms'
+Library/Reader bodies matched physical scanout and the temporary row was
+removed. In a separate window the qualified candidate was installed, the
+ordinary entry opened the deployed app with normal arguments and display/
+input descriptors, and native state was restored. The daily installation
+now uses the production wrapper and separate supervisor; no data reset,
+private capture, or optical-completion measurement was performed.
+
 No device address, credential, serial number, private note text, or account content is part of this record. Offline demonstration results do not establish live-account authentication, content entitlements, or upstream writes.
 
 ## Formal Library entry candidate (2026-11-17)

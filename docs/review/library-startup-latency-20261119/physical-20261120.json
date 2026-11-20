@@ -1,0 +1,37 @@
+{
+  "device": "Kindle Scribe 2022",
+  "firmware": "5.19.5",
+  "source_commit": "7b41404e0b1cab8a83a537f8262220c24762b396",
+  "probe_bytes": 64502220,
+  "scope": "One guarded ARM process, monotonic elapsed nanoseconds for admission of the seven bundled faces. No UI, font registration, indexed launch, driver SEND or optical observation.",
+  "timing": {
+    "warmup": {"round": 0, "full_first": true, "full_ns": 3268890846, "receipt_ns": 3550385},
+    "measured": [
+      {"round": 1, "full_first": true,  "full_ns": 2705502384, "receipt_ns": 3592615},
+      {"round": 2, "full_first": false, "full_ns": 2711772462, "receipt_ns": 3556615},
+      {"round": 3, "full_first": true,  "full_ns": 2717518308, "receipt_ns": 3910308},
+      {"round": 4, "full_first": false, "full_ns": 2707219924, "receipt_ns": 3543000},
+      {"round": 5, "full_first": true,  "full_ns": 2699486692, "receipt_ns": 3556769},
+      {"round": 6, "full_first": false, "full_ns": 2716349077, "receipt_ns": 3548693}
+    ],
+    "median_full_ns": 2709496193,
+    "median_receipt_ns": 3556692,
+    "median_paired_saving_ns": 2705946385.5
+  },
+  "cpu_closeout": {
+    "stage_removed": true,
+    "native_idle_before_and_after": true,
+    "released_at_utc": "2026-11-20T08:18:09.287682+00:00"
+  },
+  "independent_read_only_audit": {
+    "document": "regular",
+    "reference": "equal",
+    "reference_commit": "5a66fe7bf8962ee0c950d5bd4af6c0b45e553578",
+    "reference_path": "packaging/kindle/launch.sh",
+    "supervisor": "absent",
+    "application": "regular",
+    "selected_rows": 1,
+    "native_idle_before_and_after": true,
+    "released_at_utc": "2026-11-20T08:21:21.694775+00:00"
+  }
+}

@@ -69,3 +69,23 @@ to its own process, and a guarded child received `SIGKILL` when its verified
 test parent exited. The final ELF rejected a mismatched parent PID with status
 2 before emitting any sample. These do not establish device-kernel support or
 confirm recovery of an interrupted physical run. No QEMU speedup is reported.
+
+## Physical follow-up on November 20
+
+The [Scribe 2022 / 5.19.5 record](../physical-20261120.md) contains the warm
+measurements, cleanup and separate installed-entry audit. Only `--bench-guarded`
+was used for physical timing; this probe is not a request-to-Library timer.
+
+The operator runs `cpu-batch.py` on the **test-env host**, not in the build
+userspace. Prepare the public probe, private runs directory, existing pinned
+SSH configuration and separate owner-approved window before acquiring the
+shared lease. The driver accepts the reviewed `scripts/verification/device_lease.py`
+from [BiliComics](https://github.com/moooyo/bilicomics/blob/3520ef85c980e0a39be9945f8088f3a66db53aeb/scripts/verification/device_lease.py).
+Supply device authentication privately, never as a command argument or log.
+`--inspect-entry` compares a known public document without executing it.
+`--recover` is for an existing owned CPU run only, not permission to remove
+another owner's stage or lock. Read-only preflight refusal is not a sample.
+
+Run `python3 -B test_cpu_batch.py -v` here inside the shared worker userspace
+to rehearse the protocol with synthetic storage, services and a harmless
+stand-in executable. This does not open a device transport or physical lease.

@@ -45,8 +45,15 @@ breaks down those six physical launches and profiles font admission and two
 orientation queries separately on the verification host. It distinguishes
 the 9.820 s request-to-SEND result from an unmeasured daily-build tap-to-ink time.
 The subsequent [controlled font experiment](docs/review/library-startup-latency-20261119/font-preflight-experiment.md)
-moves fixed bundled outline checks to build time behind a default-off feature;
+moves fixed bundled outline checks to build time behind a Cargo feature;
 user-provided fonts retain their full runtime checks.
+On November 20, the [physical font probe and entry audit](docs/review/library-startup-latency-20261119/physical-20261120.md)
+measured median seven-face admission of 2,709.496 vs. 3.557 ms on Scribe 2022 /
+5.19.5. A subsequent [temporary indexed-entry A/B and production retest](docs/review/library-startup-latency-20261119/indexed-font-ab-20261120.md)
+reduced median warm request-to-first-Library-SEND from **9.964 to 6.847 s**
+in six pairs. The Kindle package enables the measured optimization. That
+candidate was installed and the ordinary WeRead Library entry retested
+without resetting private data. This is not a finger-to-ink measurement.
 
 The [catalog notification adapter](docs/CATALOG_ENTRY_ADAPTER.md) was merged to
 `main` on 2026-11-19. It retains the penguin cover and default FBInk behavior.

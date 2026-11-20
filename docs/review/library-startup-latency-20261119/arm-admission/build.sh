@@ -33,4 +33,4 @@ rustc --edition 2024 --target armv7-unknown-linux-musleabihf \
   -C linker-flavor=ld.lld -C linker="$linker" -C strip=symbols \
   -L "dependency=$deps" --extern "anyhow=$anyhow" --extern "owned_ttf_parser=$owned" --extern "libc=$libc" \
   "$probe/probe.rs" -o "$work/arm-font-admission"
-sha256sum "$out/bundled_fonts.rs" "$work/lookup.rs" "$work/arm-font-admission"
+printf 'Built ARM admission probe: %s\n' "$work/arm-font-admission"

@@ -88,6 +88,12 @@ early. Faster helper polling retains the original nominal sleep budgets and owne
 checks. No source adapter, persistence layout, network policy, or ordinary
 startup route changes.
 
+The [November 20 indexed comparison](review/library-startup-latency-20261119/indexed-font-ab-20261120.md)
+qualified build-time outline accounting for the seven immutable fonts in
+Kindle packages. The package builder selects the feature explicitly; it
+does not bypass runtime limits for unrecognized bytes or custom fonts.
+Neither orientation lookup, launch timing policy nor persistence changed.
+
 The accepted [native-query follow-up](NATIVE_QUERY_PERFORMANCE_20261117.md) adds a
 bounded independent firmware-ABI helper for portrait calibration. The static
 musl application does not load system glibc libraries. Its early Rust probe
