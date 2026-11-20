@@ -80,6 +80,18 @@ root/directory/table/record search before visiting it. These results and later
 source corrections retain their boundaries in the
 [resource record](RESOURCE_LEAK_REVIEW.md).
 
+## Experimental bundled preflight
+
+`bundled-font-preflight` is a default-off Cargo feature. On a matching font
+manifest it moves the expensive CFF outline loop for the seven embedded faces
+to the build. The target still checks font headers and metadata, charges its
+own pointer-sized scratch state, and prepares the same metrics and Fontique
+registrations. Only the exact embedded byte slices can use the generated
+charges. If the remaining budget cannot safely accept them, the existing
+parser runs normally, including its partial charges on failure. User fonts
+always take that existing path. The normal Kindle packaging command does not
+enable the experiment. See the [A/B protocol and evidence](review/library-startup-latency-20261119/font-preflight-experiment.md).
+
 ## Reproduction
 
 Preparation was run through `ssh test-env` using Python 3.13.5 and fontTools 4.57.0. No local application validation was run.

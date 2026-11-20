@@ -38,6 +38,14 @@ reported separately. Both variants also pass a same-process physical screen-save
 and scheduled-wake cycle with identical pre-sleep/resumed frames. The operator
 approved main integration on 2026-11-17; the ordinary installation remains unchanged.
 
+The [November 19 startup investigation](docs/review/library-startup-latency-20261119/README.md)
+breaks down those six physical launches and profiles font admission and two
+orientation queries separately on the verification host. It distinguishes
+the 9.820 s request-to-SEND result from an unmeasured daily-build tap-to-ink time.
+The subsequent [controlled font experiment](docs/review/library-startup-latency-20261119/font-preflight-experiment.md)
+moves fixed bundled outline checks to build time behind a default-off feature;
+user-provided fonts retain their full runtime checks.
+
 The [catalog notification adapter](docs/CATALOG_ENTRY_ADAPTER.md) was merged to
 `main` on 2026-11-19. It retains the penguin cover and default FBInk behavior.
 The WeRead package does not install or replace the shared runtime. Device

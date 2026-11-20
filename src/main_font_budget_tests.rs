@@ -798,13 +798,16 @@ fn the_seven_real_bundled_payloads_fit_the_default_envelope_and_prepare_once() {
     );
     for (index, bytes) in payloads.into_iter().enumerate() {
         let previous_work = budget.glyph_work_usage;
-        let prepared = register_bundled_font_data(bytes, &mut budget).unwrap_or_else(|error| {
+        // Keep this test as the full, per-work-category reference in both builds.
+        budget.record_read(bytes.len()).unwrap();
+        let prepared = prepare_font_payload(Arc::new(*bytes), Some(bytes), None, &mut budget).unwrap_or_else(|error| {
             panic!(
                 "Bundled font {index} failed admission: {error:#}; usage: {:?}; categories: {:?}; font_delta: {:?}",
                 budget.usage(), budget.glyph_work_usage,
                 budget.glyph_work_usage.difference(previous_work)
             )
         });
+        publish_font(&prepared, &mut budget);
         let work = budget.glyph_work_usage.difference(previous_work);
         assert_eq!(budget.glyph_work_usage.total(), budget.usage().glyph_work);
         println!(

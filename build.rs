@@ -1,23 +1,54 @@
 use std::{
-    env, fs,
+    env,
+    fmt::Write,
+    fs,
     io::Read,
     path::{Path, PathBuf},
 };
 
-const BUNDLED_FONT_FILES: &[&str] = &[
-    "NotoSansSC-Regular.otf",
-    "NotoSansSC-Medium.otf",
-    "NotoSansSC-Bold.otf",
-    "NotoSerifSC-Light.otf",
-    "NotoSerifSC-Regular.otf",
-    "NotoSerifSC-Medium.otf",
-    "NotoSerifSC-Bold.otf",
+#[cfg(feature = "bundled-font-preflight")]
+#[allow(dead_code)]
+#[path = "src/main_font_budget.rs"]
+mod font_budget;
+#[cfg(feature = "bundled-font-preflight")]
+#[allow(dead_code)]
+#[path = "src/main_glyph_budget.rs"]
+mod glyph_budget;
+#[cfg(feature = "bundled-font-preflight")]
+#[path = "src/main_glyph_cff.rs"]
+mod glyph_cff;
+
+const BUNDLED_FONT_FILES: &[(&str, &str)] = &[
+    ("SANS_REGULAR", "NotoSansSC-Regular.otf"),
+    ("SANS_MEDIUM", "NotoSansSC-Medium.otf"),
+    ("SANS_BOLD", "NotoSansSC-Bold.otf"),
+    ("SERIF_LIGHT", "NotoSerifSC-Light.otf"),
+    ("SERIF_REGULAR", "NotoSerifSC-Regular.otf"),
+    ("SERIF_MEDIUM", "NotoSerifSC-Medium.otf"),
+    ("SERIF_BOLD", "NotoSerifSC-Bold.otf"),
 ];
 
 fn prepare_bundled_fonts(output: &Path) {
     let directory = output.join("fonts");
     fs::create_dir_all(&directory).expect("Create generated font directory");
-    for name in BUNDLED_FONT_FILES {
+    let mut declarations = String::new();
+    #[cfg(feature = "bundled-font-preflight")]
+    let (manifest, mut charges) = {
+        for path in [
+            "assets/fonts/manifest.json",
+            "src/main_font_budget.rs",
+            "src/main_glyph_budget.rs",
+            "src/main_glyph_cff.rs",
+        ] {
+            println!("cargo:rerun-if-changed={path}");
+        }
+        let manifest: serde_json::Value = serde_json::from_slice(
+            &fs::read("assets/fonts/manifest.json").expect("Read the bundled font manifest"),
+        )
+        .expect("Parse the bundled font manifest");
+        (manifest, String::new())
+    };
+    for &(symbol, name) in BUNDLED_FONT_FILES {
         let source = format!("assets/fonts/{name}.gz");
         println!("cargo:rerun-if-changed={source}");
         let compressed = fs::File::open(&source).expect("Read a bundled font source");
@@ -32,9 +63,53 @@ fn prepare_bundled_fonts(output: &Path) {
         );
         let target = directory.join(name);
         if fs::read(&target).ok().as_deref() != Some(bytes.as_slice()) {
-            fs::write(target, bytes).expect("Write a generated font payload");
+            fs::write(&target, &bytes).expect("Write a generated font payload");
+        }
+        // A named array has one storage identity even through const tables in
+        // other codegen units; a promoted include_bytes! slice need not.
+        writeln!(declarations, "static {symbol}_BYTES: [u8; {}] = *include_bytes!(concat!(env!(\"OUT_DIR\"), \"/fonts/{name}\"));\nconst {symbol}: &[u8] = &{symbol}_BYTES;", bytes.len()).unwrap();
+        #[cfg(feature = "bundled-font-preflight")]
+        {
+            use sha2::{Digest, Sha256};
+            println!("cargo:rerun-if-changed={}", target.display());
+            let entry = manifest["fonts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|font| font["decompressed_file"] == name)
+                .expect("Missing bundled font manifest entry");
+            assert_eq!(
+                format!("{:x}", Sha256::digest(&bytes)),
+                entry["decompressed_sha256"].as_str().unwrap(),
+                "Unreviewed bundled font {name}"
+            );
+            assert!(
+                !bytes.starts_with(b"ttcf"),
+                "Expected a standalone bundled CFF font: {name}"
+            );
+            let charge = glyph_budget::admit_font_glyphs_with_cff(
+                &bytes,
+                0,
+                &mut font_budget::FontBudget::default(),
+                None,
+            )
+            .unwrap_or_else(|e| panic!("Bundled glyph preflight failed for {name}: {e}"))
+            .expect("Expected a CFF1 font in the bundled manifest");
+            writeln!(charges, "    ({symbol}, font_budget::CffLoopCharge {{ work: {}, visits: {}, points: {}, memory: {} }}),", charge.work, charge.visits, charge.points, charge.memory).unwrap();
         }
     }
+    #[cfg(feature = "bundled-font-preflight")]
+    write!(
+        declarations,
+        "static BUNDLED_CFF_RECEIPTS: &[(&[u8], font_budget::CffLoopCharge)] = &[\n{charges}];\n"
+    )
+    .unwrap();
+    let generated = output.join("bundled_fonts.rs");
+    if fs::read(&generated).ok().as_deref() != Some(declarations.as_bytes()) {
+        fs::write(&generated, declarations).expect("Write bundled font declarations");
+    }
+    #[cfg(feature = "bundled-font-preflight")]
+    println!("cargo:rerun-if-changed={}", generated.display());
 }
 
 fn main() {

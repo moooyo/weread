@@ -72,3 +72,101 @@ fn static_metrics_preserve_owned_font_advances_kerning_and_fallbacks() {
         );
     }
 }
+
+#[cfg(feature = "bundled-font-preflight")]
+#[test]
+fn bundled_preflight_replays_only_the_exact_static_faces_with_identical_charges() {
+    super::font_budget_tests::initialize_font_test_platform();
+    let mut fast = FontBudget::default();
+    let mut full = FontBudget::default();
+    for &(name, bytes) in FONTS {
+        let charge = bundled_cff_charge(bytes).expect(name);
+        assert!(bundled_cff_charge(&bytes[..bytes.len() - 1]).is_none());
+        let previous = fast.glyph_work_usage.precomputed;
+        let font = register_bundled_font_data(bytes, &mut fast).unwrap();
+        full.record_read(bytes.len()).unwrap();
+        let reference =
+            prepare_font_payload(Arc::new(bytes), Some(bytes), None, &mut full).unwrap();
+        publish_font(&reference, &mut full);
+        assert_eq!(fast.usage(), full.usage(), "{name}");
+        assert_eq!(fast.glyph_work_usage.total(), fast.usage().glyph_work);
+        assert_eq!(fast.glyph_work_usage.precomputed - previous, charge.work);
+        assert_eq!(fast.glyph_graph_nodes, 0);
+        assert!(full.glyph_graph_nodes > 0);
+        assert_eq!(fast.glyph_state_allocations, full.glyph_state_allocations);
+        assert_eq!(font.faces[0].family, reference.faces[0].family);
+        assert_eq!(font.faces[0].weight, reference.faces[0].weight);
+        assert!(std::ptr::eq(font.bytes.as_ref().as_ref(), bytes));
+    }
+    assert_eq!(
+        (
+            fast.shared_registrations,
+            fast.temporary_registrations,
+            fast.metric_copies
+        ),
+        (7, 7, 7)
+    );
+
+    let owned = Arc::new(SANS_REGULAR.to_vec());
+    assert!(bundled_cff_charge(&owned).is_none());
+    let mut custom = FontBudget::default();
+    prepare_font(owned, &mut custom).unwrap();
+    assert!(custom.glyph_graph_nodes > 0);
+    assert_eq!(custom.glyph_work_usage.precomputed, 0);
+}
+
+#[cfg(feature = "bundled-font-preflight")]
+#[test]
+fn bundled_preflight_preserves_insufficient_budget_errors_and_partial_charges() {
+    use font_budget::FontLimits;
+    let mut measured = FontBudget::default();
+    glyph_budget::admit_font_glyphs(SANS_REGULAR, 0, &mut measured).unwrap();
+    let usage = measured.usage();
+    let charge = bundled_cff_charge(SANS_REGULAR).unwrap();
+    for limits in [
+        FontLimits {
+            glyph_work: usage.glyph_work,
+            ..FontLimits::default()
+        },
+        FontLimits {
+            glyph_visits: usage.glyph_visits - 1,
+            ..FontLimits::default()
+        },
+        FontLimits {
+            glyph_points: usage.glyph_points - 1,
+            ..FontLimits::default()
+        },
+        FontLimits {
+            glyph_state_bytes: usage.glyph_state_bytes - 1,
+            ..FontLimits::default()
+        },
+        FontLimits {
+            per_glyph_memory: usage.glyph_memory - 1,
+            ..FontLimits::default()
+        },
+        FontLimits {
+            per_glyph_visits: 1,
+            ..FontLimits::default()
+        },
+        FontLimits {
+            per_glyph_points: 4,
+            ..FontLimits::default()
+        },
+    ] {
+        let mut fast = FontBudget::new(limits);
+        let mut full = FontBudget::new(limits);
+        for budget in [&mut fast, &mut full] {
+            budget.reserve_glyph_work(1).unwrap();
+        }
+        let expected = glyph_budget::admit_font_glyphs(SANS_REGULAR, 0, &mut full).unwrap_err();
+        assert_eq!(
+            glyph_budget::admit_font_glyphs_with_cff(SANS_REGULAR, 0, &mut fast, Some(charge))
+                .unwrap_err(),
+            expected
+        );
+        assert_eq!(fast.usage(), full.usage());
+        assert_eq!(fast.glyph_work_usage, full.glyph_work_usage);
+        assert_eq!(fast.glyph_graph_nodes, full.glyph_graph_nodes);
+        assert_eq!(fast.glyph_work_usage.precomputed, 0);
+    }
+}

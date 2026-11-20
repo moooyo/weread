@@ -320,7 +320,7 @@ impl StartupSplash {
                 "framebuffer dimensions changed after launch approval",
             ));
         }
-        let flipped = crate::platform::launch_render_offset() == 180;
+        let flipped = crate::platform::launch_render_offset("splash") == 180;
         let mut renderer = Renderer::new(framebuffer, images, flipped, dark_mode)?;
         renderer.draw_initial(0);
         let mut splash = Self {

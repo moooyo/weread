@@ -16,6 +16,7 @@ resolver = "3"
 default = ["desktop"]
 desktop = ["slint/backend-winit", "slint/renderer-software"]
 kindle = ["dep:slint-backend-kindle"]
+bundled-font-preflight = ["dep:anyhow", "dep:owned_ttf_parser", "dep:sha2"]
 
 [dependencies]
 anyhow = "1"
@@ -46,8 +47,11 @@ zip = { version = "=4.6.1", path = "vendor/zip", default-features = false, featu
 slint-backend-kindle = { path = "vendor/slint-backend-kindle", optional = true }
 
 [build-dependencies]
+anyhow = { version = "1", optional = true }
 flate2 = "1"
+owned_ttf_parser = { version = "0.25", optional = true }
 serde_json = "1"
+sha2 = { version = "0.10", optional = true }
 slint-build = "=1.17.1"
 
 [dev-dependencies]

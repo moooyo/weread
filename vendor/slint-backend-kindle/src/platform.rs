@@ -304,7 +304,7 @@ impl Platform for KindlePlatform {
         let mut rendered_image_scene = RenderedImageScene::default();
 
         let (panel_width, panel_height) = (frame_buffer.width, frame_buffer.height);
-        let mut portrait = PortraitRuntime::new(launch_render_offset());
+        let mut portrait = PortraitRuntime::new(launch_render_offset("event_loop"));
         let mut input_generation = 1u64;
         portrait.ensure_active(&self.native_orientation, &frame_buffer)?;
         crate::startup_timing::mark("portrait_opened");
@@ -1395,13 +1395,38 @@ impl Drop for KindlePlatform {
 /// held the other way up. Touch input then already arrives flipped, but the
 /// framebuffer does not, so rendering has to compensate by whatever the
 /// framework thinks is up when the app starts.
-pub(crate) fn launch_render_offset() -> u32 {
-    if !has_accelerometer() {
-        return 0;
-    }
-    let mut command = Command::new("lipc-get-prop");
-    command.args(["com.lab126.winmgr", "accelerometer"]);
-    query_render_offset(&mut command, ORIENTATION_TIMEOUT).unwrap_or(0)
+pub(crate) fn launch_render_offset(site: &'static str) -> u32 {
+    observe_render_offset(site, || {
+        if !has_accelerometer() {
+            return Err(OrientationQueryError::Unavailable);
+        }
+        let mut command = Command::new("lipc-get-prop");
+        command.args(["com.lab126.winmgr", "accelerometer"]);
+        query_render_offset(&mut command, ORIENTATION_TIMEOUT)
+    })
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum OrientationQueryError {
+    Unavailable,
+    TimedOut,
+    Failed,
+}
+
+fn observe_render_offset(
+    site: &'static str,
+    query: impl FnOnce() -> Result<u32, OrientationQueryError>,
+) -> u32 {
+    crate::startup_timing::mark_orientation(site, "begin");
+    let result = query();
+    let outcome = match result {
+        Ok(_) => "success",
+        Err(OrientationQueryError::Unavailable) => "unavailable",
+        Err(OrientationQueryError::TimedOut) => "timeout",
+        Err(OrientationQueryError::Failed) => "failed",
+    };
+    crate::startup_timing::mark_orientation(site, outcome);
+    result.unwrap_or(0)
 }
 
 fn parse_render_offset(output: &[u8]) -> Option<u32> {
@@ -1412,31 +1437,40 @@ fn parse_render_offset(output: &[u8]) -> Option<u32> {
     }
 }
 
-fn query_render_offset(command: &mut Command, timeout: Duration) -> Option<u32> {
+fn query_render_offset(
+    command: &mut Command,
+    timeout: Duration,
+) -> Result<u32, OrientationQueryError> {
     // This bounds normal userspace protocol polling; it is not a hard deadline
     // on kernel process operations such as spawn, kill, or child reaping.
-    let deadline = Instant::now().checked_add(timeout)?;
+    let deadline = Instant::now()
+        .checked_add(timeout)
+        .ok_or(OrientationQueryError::Failed)?;
     let mut child = command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .ok()?;
+        .map_err(|error| match error.kind() {
+            io::ErrorKind::NotFound => OrientationQueryError::Unavailable,
+            _ => OrientationQueryError::Failed,
+        })?;
     let result = read_render_offset(&mut child, deadline);
     retire_orientation_child(child);
     result
 }
 
-fn read_render_offset(child: &mut Child, deadline: Instant) -> Option<u32> {
-    let mut stdout = child.stdout.take()?;
-    set_orientation_pipe_nonblocking(stdout.as_raw_fd()).ok()?;
+fn read_render_offset(child: &mut Child, deadline: Instant) -> Result<u32, OrientationQueryError> {
+    let mut stdout = child.stdout.take().ok_or(OrientationQueryError::Failed)?;
+    set_orientation_pipe_nonblocking(stdout.as_raw_fd())
+        .map_err(|_| OrientationQueryError::Failed)?;
     // Reserve one extra byte so an overlong, truncated reply cannot be accepted.
     let mut bytes = [0u8; 17];
     let mut length = 0;
     let mut eof = false;
     loop {
         if Instant::now() >= deadline {
-            return None;
+            return Err(OrientationQueryError::TimedOut);
         }
         if !eof {
             match stdout.read(&mut bytes[length..]) {
@@ -1444,22 +1478,25 @@ fn read_render_offset(child: &mut Child, deadline: Instant) -> Option<u32> {
                 Ok(count) => {
                     length += count;
                     if length == bytes.len() {
-                        return None;
+                        return Err(OrientationQueryError::Failed);
                     }
                 }
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                Err(_) => return None,
+                Err(_) => return Err(OrientationQueryError::Failed),
             }
         }
-        if let Some(status) = child.try_wait().ok()? {
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|_| OrientationQueryError::Failed)?
+        {
             if !status.success() {
-                return None;
+                return Err(OrientationQueryError::Failed);
             }
             // A descendant can inherit stdout after the direct child exits.
             // Require EOF under the same deadline rather than a blocking read.
             if eof {
-                return parse_render_offset(&bytes[..length]);
+                return parse_render_offset(&bytes[..length]).ok_or(OrientationQueryError::Failed);
             }
         }
         let remaining = deadline.saturating_duration_since(Instant::now());
@@ -2100,8 +2137,8 @@ mod active_orientation_runtime_tests {
 #[cfg(test)]
 mod orientation_tests {
     use super::{
-        parse_render_offset, query_render_offset, read_render_offset, retire_orientation_child,
-        set_orientation_pipe_nonblocking,
+        OrientationQueryError, observe_render_offset, parse_render_offset, query_render_offset,
+        read_render_offset, retire_orientation_child, set_orientation_pipe_nonblocking,
     };
     use std::fs;
     use std::os::unix::process::CommandExt;
@@ -2272,19 +2309,92 @@ mod orientation_tests {
     #[test]
     fn child_fixtures_require_success_and_reject_overlong_replies() {
         for (script, expected) in [
-            ("printf 'U\\n'", Some(0)),
-            ("printf 'D\\n'", Some(180)),
-            ("exit 0", None),
-            ("printf D; exit 7", None),
-            ("printf 'D               '", Some(180)),
-            ("printf 'D                '", None),
-            ("printf 'U D'", None),
+            ("printf 'U\\n'", Ok(0)),
+            ("printf 'D\\n'", Ok(180)),
+            ("exit 0", Err(OrientationQueryError::Failed)),
+            ("printf D; exit 7", Err(OrientationQueryError::Failed)),
+            ("printf 'D               '", Ok(180)),
+            (
+                "printf 'D                '",
+                Err(OrientationQueryError::Failed),
+            ),
+            ("printf 'U D'", Err(OrientationQueryError::Failed)),
         ] {
             assert_eq!(
                 query_render_offset(&mut fixture(script), Duration::from_secs(1)),
                 expected,
                 "{script}",
             );
+        }
+    }
+
+    #[test]
+    fn a_missing_orientation_command_is_unavailable_not_a_timeout() {
+        assert_eq!(
+            query_render_offset(
+                &mut Command::new("/dev/null/not-a-program"),
+                Duration::from_secs(1)
+            ),
+            Err(OrientationQueryError::Failed),
+        );
+        let mut missing = Command::new("/proc/self/weread-nonexistent-orientation-command");
+        assert_eq!(
+            query_render_offset(&mut missing, Duration::from_secs(1)),
+            Err(OrientationQueryError::Unavailable),
+        );
+    }
+
+    #[test]
+    fn observing_each_query_preserves_its_offset_or_zero_fallback() {
+        for site in ["splash", "event_loop"] {
+            for (result, expected) in [
+                (Ok(0), 0),
+                (Ok(180), 180),
+                (Err(OrientationQueryError::TimedOut), 0),
+                (Err(OrientationQueryError::Unavailable), 0),
+                (Err(OrientationQueryError::Failed), 0),
+            ] {
+                assert_eq!(observe_render_offset(site, || result), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn orientation_markers_report_each_outcome_only_when_opted_in() {
+        let test = "platform::orientation_tests::observing_each_query_preserves_its_offset_or_zero_fallback";
+        for enabled in [false, true] {
+            let mut command = Command::new(std::env::current_exe().unwrap());
+            command
+                .args(["--exact", test, "--nocapture"])
+                .env_remove("WEREAD_STARTUP_TIMING");
+            if enabled {
+                command.env("WEREAD_STARTUP_TIMING", "1");
+            }
+            let output = command.output().unwrap();
+            assert!(output.status.success());
+            let mut expected = Vec::new();
+            if enabled {
+                for site in ["splash", "event_loop"] {
+                    for outcome in ["success", "success", "timeout", "unavailable", "failed"] {
+                        expected.push(format!("{site}_orientation_begin"));
+                        expected.push(format!("{site}_orientation_{outcome}"));
+                    }
+                }
+            }
+            let stderr = String::from_utf8(output.stderr).unwrap();
+            let stages: Vec<_> = stderr
+                .lines()
+                .map(|line| {
+                    let (timestamp, stage) = line
+                        .strip_prefix("WEREAD_STARTUP ")
+                        .unwrap()
+                        .split_once(' ')
+                        .unwrap();
+                    assert!(timestamp.parse::<f64>().unwrap().is_finite());
+                    stage
+                })
+                .collect();
+            assert_eq!(stages, expected);
         }
     }
 
@@ -2296,7 +2406,7 @@ mod orientation_tests {
                 &mut fixture("printf D; exec sleep 5"),
                 Duration::from_millis(60),
             ),
-            None,
+            Err(OrientationQueryError::TimedOut),
         );
         assert!(started.elapsed() < Duration::from_secs(1));
     }
@@ -2322,7 +2432,7 @@ mod orientation_tests {
         let helper = helper.expect("Observe the owned reply shell");
         assert_eq!(helper.parent, std::process::id());
         assert_eq!(helper.group, expected_group);
-        assert_eq!(result, None);
+        assert_eq!(result, Err(OrientationQueryError::TimedOut));
         assert!(
             shell_exited,
             "The finite descendant retained stdout after shell exit"

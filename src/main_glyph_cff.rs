@@ -1,6 +1,6 @@
 //! Bounded borrowed Type 2 counting for the locked software outline consumer.
 
-use super::font_budget::{FontBudget, FontLimitError, GlyphWorkKind};
+use super::font_budget::{CffLoopCharge, FontBudget, FontLimitError, GlyphWorkKind};
 use super::glyph_budget::{Cursor, add, dword, mul, word};
 
 type Result<T> = std::result::Result<T, FontLimitError>;
@@ -563,7 +563,8 @@ pub(super) fn admit_cff(
     cff2: bool,
     glyphs: usize,
     budget: &mut FontBudget,
-) -> Result<()> {
+    precomputed: Option<CffLoopCharge>,
+) -> Result<CffLoopCharge> {
     if PROGRAM_SCRATCH + 4 * 64 > budget.limits.per_glyph_memory {
         return Err(FontLimitError::GlyphMemory);
     }
@@ -632,6 +633,15 @@ pub(super) fn admit_cff(
     {
         budget.glyph_state_allocations += 1;
     }
+    #[cfg(feature = "bundled-font-preflight")]
+    if let Some(charge) = precomputed
+        && budget.try_apply_cff_loop(charge)
+    {
+        return Ok(charge);
+    }
+    #[cfg(not(feature = "bundled-font-preflight"))]
+    let _ = precomputed;
+    let before = budget.usage();
     for glyph in 0..glyphs {
         let font = select.font(glyph, budget)?;
         let slot = locals.get_mut(font).ok_or(FontLimitError::GlyphProgram)?;
@@ -669,7 +679,14 @@ pub(super) fn admit_cff(
         state.close(budget)?;
         budget.reserve_glyph_summary(state.visits, add(state.points, 4)?, state.memory()?)?;
     }
-    Ok(())
+    let after = budget.usage();
+    Ok(CffLoopCharge {
+        work: after.glyph_work - before.glyph_work,
+        visits: after.glyph_visits - before.glyph_visits,
+        points: after.glyph_points - before.glyph_points,
+        // The build collects one face at a time with a fresh budget.
+        memory: after.glyph_memory,
+    })
 }
 
 struct Program<'a> {

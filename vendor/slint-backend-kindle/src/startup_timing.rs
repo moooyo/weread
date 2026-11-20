@@ -18,9 +18,18 @@ fn enabled() -> bool {
 /// Emit only fixed stage names and a device-local monotonic timestamp.
 /// Disabled ordinary launches perform no clock query or diagnostic write.
 pub fn mark(stage: &'static str) {
-    if !enabled() {
-        return;
+    if enabled() {
+        write_mark(format_args!("{stage}"));
     }
+}
+
+pub(crate) fn mark_orientation(site: &'static str, phase: &'static str) {
+    if enabled() {
+        write_mark(format_args!("{site}_orientation_{phase}"));
+    }
+}
+
+fn write_mark(stage: std::fmt::Arguments<'_>) {
     let mut time = libc::timespec {
         tv_sec: 0,
         tv_nsec: 0,

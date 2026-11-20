@@ -31,8 +31,8 @@ mod glyph_budget;
 #[path = "main_glyph_cff.rs"]
 mod glyph_cff;
 use font_budget::{
-    FontBudget, FontLimitError, MAX_FAMILY_BYTES, MAX_VARIATION_AXES, font_inventory,
-    read_font_payload,
+    CffLoopCharge, FontBudget, FontLimitError, MAX_FAMILY_BYTES, MAX_VARIATION_AXES,
+    font_inventory, read_font_payload,
 };
 
 #[cfg(test)]
@@ -43,16 +43,7 @@ mod font_budget_tests;
 #[path = "main_startup_font_tests.rs"]
 mod startup_font_tests;
 
-const SANS_REGULAR: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/fonts/NotoSansSC-Regular.otf"));
-const SANS_MEDIUM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/fonts/NotoSansSC-Medium.otf"));
-const SANS_BOLD: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/fonts/NotoSansSC-Bold.otf"));
-const SERIF_LIGHT: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/fonts/NotoSerifSC-Light.otf"));
-const SERIF_REGULAR: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/fonts/NotoSerifSC-Regular.otf"));
-const SERIF_MEDIUM: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/fonts/NotoSerifSC-Medium.otf"));
-const SERIF_BOLD: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/fonts/NotoSerifSC-Bold.otf"));
+include!(concat!(env!("OUT_DIR"), "/bundled_fonts.rs"));
 const MAX_FONT_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_FAILURE_RECORDS: usize = 32;
 const MAX_FAILURE_MESSAGE_BYTES: usize = 8 * 1024;
@@ -887,17 +878,38 @@ fn prepare_font(bytes: Arc<Vec<u8>>, budget: &mut FontBudget) -> Result<Prepared
 }
 
 fn prepare_font_after_read(bytes: Arc<Vec<u8>>, budget: &mut FontBudget) -> Result<PreparedFont> {
-    prepare_font_payload(bytes, None, budget)
+    prepare_font_payload(bytes, None, None, budget)
 }
 
 fn prepare_bundled_font(bytes: &'static [u8], budget: &mut FontBudget) -> Result<PreparedFont> {
     budget.record_read(bytes.len())?;
-    prepare_font_payload(Arc::new(bytes), Some(bytes), budget)
+    prepare_font_payload(
+        Arc::new(bytes),
+        Some(bytes),
+        bundled_cff_charge(bytes),
+        budget,
+    )
+}
+
+fn bundled_cff_charge(bytes: &[u8]) -> Option<CffLoopCharge> {
+    #[cfg(feature = "bundled-font-preflight")]
+    {
+        // A filename, equal length or copied font bytes cannot select a proof.
+        BUNDLED_CFF_RECEIPTS
+            .iter()
+            .find_map(|&(source, charge)| std::ptr::eq(source, bytes).then_some(charge))
+    }
+    #[cfg(not(feature = "bundled-font-preflight"))]
+    {
+        let _ = bytes;
+        None
+    }
 }
 
 fn prepare_font_payload(
     bytes: FontBytes,
     static_source: Option<&'static [u8]>,
+    precomputed: Option<CffLoopCharge>,
     budget: &mut FontBudget,
 ) -> Result<PreparedFont> {
     let data = bytes.as_ref().as_ref();
@@ -910,7 +922,13 @@ fn prepare_font_payload(
             .map_err(|error| anyhow!("The font face is invalid: {error}"))?;
         admit_font_axes(data, index as u32)?;
         admit_font_names(data, index as u32, budget)?;
-        glyph_budget::admit_font_glyphs(data, index as u32, budget)?;
+        if index == 0
+            && let Some(charge) = precomputed
+        {
+            glyph_budget::admit_font_glyphs_with_cff(data, 0, budget, Some(charge))?;
+        } else {
+            glyph_budget::admit_font_glyphs(data, index as u32, budget)?;
+        }
     }
     let mut temporary = fontique::Collection::new(fontique::CollectionOptions {
         shared: false,

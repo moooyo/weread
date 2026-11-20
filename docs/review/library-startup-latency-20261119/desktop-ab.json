@@ -1,0 +1,356 @@
+{
+  "date": "2026-11-19",
+  "timezone": "Asia/Shanghai",
+  "scope": "Linux x86_64 desktop Winit software renderer; warm OS page cache after warmups, independent restored app data; not Kindle, touch, driver SEND, optical or all-covers timing.",
+  "source_base": "c810ea556514f648c65872774748a22e2411b40c",
+  "source_manifests_sha256": {
+    "product_567_inputs": "074a9ef7b538ba069b9429633d365e2137ee2081f1c4b911767f6af1a4921dd4",
+    "common_desktop_measurement_567_inputs": "3eeb380c3970f0bf418a31423b929e033a4854fb60551757f657d92abf02c2d4"
+  },
+  "measurement_patches_sha256": {
+    "desktop-timing.patch": "e790d4ced38d0939ef027907b99ac9eaeaefdb623d8e8aec7a93de017a4603ff",
+    "desktop-path-witness.patch": "532a7d338f50c48b0846041e79d18d7641e093430aed7e02721ff37f9d0f3204"
+  },
+  "build": {
+    "toolchain": "rustc/cargo 1.99.1; project release profile: thin LTO, codegen-units=1, stripped",
+    "primary_feature_delta": "bundled-font-preflight only; both use desktop/winit software",
+    "public_seed_sha256": "446e1afb4b17d0110e353004dc34c010dd570d986e87ce1001a7a38ef6ff3847",
+    "executable_sha256": {
+      "baseline": "d9d59c8c661df74575ddadbe6e809c219f8d61e21819e8cb533ff2286dd2d198",
+      "candidate": "e0db47ba2c70b442260b8721025b56e33f55cf663cdaeac0e93f5adb08ef2af1"
+    },
+    "primary_runner_sha256": "e4d5c3e9becc05370fc2074291bbfc932f84951e7d1e0088bce9fbf3781b9078",
+    "cover_checker_sha256": "f8095f181bb821ba0fc0adad16b4feb7ba5c1f51e9fc36b0cdaea420409ee2d6"
+  },
+  "methodology": "One persistent Xvfb. Primary samples do not request captures. Same-host CLOCK_MONOTONIC measured immediately before subprocess.run and in both apps; exec_request includes scheduling. Canonical software_ready is before final desktop sizing/event loop. Font span is window_created to fonts_registered (also includes configure_window).",
+  "clock": "clock_gettime(CLOCK_MONOTONIC)",
+  "profile": "scribe, 930x1240, scale 1, offline public 15-book Library",
+  "warmups": [
+    {
+      "name": "baseline-warmup",
+      "lane": "baseline",
+      "metrics": {
+        "exec_request_to_ready_ms": 443.077727,
+        "main_to_ready_ms": 440.419713,
+        "font_section_ms": 334.694486,
+        "exec_request_to_main_ms": 2.658014
+      }
+    },
+    {
+      "name": "candidate-warmup",
+      "lane": "candidate",
+      "metrics": {
+        "exec_request_to_ready_ms": 151.010281,
+        "main_to_ready_ms": 149.125282,
+        "font_section_ms": 0.756905,
+        "exec_request_to_main_ms": 1.884999
+      }
+    }
+  ],
+  "original_order": [
+    {
+      "name": "baseline-01",
+      "lane": "baseline",
+      "metrics": {
+        "exec_request_to_ready_ms": 520.226327,
+        "main_to_ready_ms": 518.05033,
+        "font_section_ms": 324.729455,
+        "exec_request_to_main_ms": 2.175997
+      }
+    },
+    {
+      "name": "candidate-01",
+      "lane": "candidate",
+      "metrics": {
+        "exec_request_to_ready_ms": 144.917843,
+        "main_to_ready_ms": 142.916625,
+        "font_section_ms": 0.721255,
+        "exec_request_to_main_ms": 2.001218
+      }
+    },
+    {
+      "name": "candidate-02",
+      "lane": "candidate",
+      "metrics": {
+        "exec_request_to_ready_ms": 112.461289,
+        "main_to_ready_ms": 110.044144,
+        "font_section_ms": 0.800156,
+        "exec_request_to_main_ms": 2.417145
+      }
+    },
+    {
+      "name": "baseline-02",
+      "lane": "baseline",
+      "metrics": {
+        "exec_request_to_ready_ms": 460.918198,
+        "main_to_ready_ms": 458.131535,
+        "font_section_ms": 327.148031,
+        "exec_request_to_main_ms": 2.786663
+      }
+    },
+    {
+      "name": "baseline-03",
+      "lane": "baseline",
+      "metrics": {
+        "exec_request_to_ready_ms": 471.964445,
+        "main_to_ready_ms": 470.084647,
+        "font_section_ms": 326.397865,
+        "exec_request_to_main_ms": 1.879798
+      }
+    },
+    {
+      "name": "candidate-03",
+      "lane": "candidate",
+      "metrics": {
+        "exec_request_to_ready_ms": 121.338065,
+        "main_to_ready_ms": 119.467186,
+        "font_section_ms": 0.696255,
+        "exec_request_to_main_ms": 1.870879
+      }
+    },
+    {
+      "name": "candidate-04",
+      "lane": "candidate",
+      "metrics": {
+        "exec_request_to_ready_ms": 155.109837,
+        "main_to_ready_ms": 152.758841,
+        "font_section_ms": 0.694966,
+        "exec_request_to_main_ms": 2.350996
+      }
+    },
+    {
+      "name": "baseline-04",
+      "lane": "baseline",
+      "metrics": {
+        "exec_request_to_ready_ms": 457.811964,
+        "main_to_ready_ms": 455.831186,
+        "font_section_ms": 325.944188,
+        "exec_request_to_main_ms": 1.980778
+      }
+    },
+    {
+      "name": "baseline-05",
+      "lane": "baseline",
+      "metrics": {
+        "exec_request_to_ready_ms": 447.816557,
+        "main_to_ready_ms": 445.970759,
+        "font_section_ms": 323.580237,
+        "exec_request_to_main_ms": 1.845798
+      }
+    },
+    {
+      "name": "candidate-05",
+      "lane": "candidate",
+      "metrics": {
+        "exec_request_to_ready_ms": 113.963354,
+        "main_to_ready_ms": 111.532448,
+        "font_section_ms": 0.720586,
+        "exec_request_to_main_ms": 2.430906
+      }
+    },
+    {
+      "name": "candidate-06",
+      "lane": "candidate",
+      "metrics": {
+        "exec_request_to_ready_ms": 98.429046,
+        "main_to_ready_ms": 96.328469,
+        "font_section_ms": 0.738366,
+        "exec_request_to_main_ms": 2.100577
+      }
+    },
+    {
+      "name": "baseline-06",
+      "lane": "baseline",
+      "metrics": {
+        "exec_request_to_ready_ms": 424.177406,
+        "main_to_ready_ms": 422.212748,
+        "font_section_ms": 323.957191,
+        "exec_request_to_main_ms": 1.964658
+      }
+    }
+  ],
+  "summary_ms": {
+    "exec_request_to_ready_ms": {
+      "baseline_median": 459.36508100000003,
+      "candidate_median": 117.6507095,
+      "baseline_range": [
+        424.177406,
+        520.226327
+      ],
+      "candidate_range": [
+        98.429046,
+        155.109837
+      ],
+      "paired_savings": [
+        375.30848399999996,
+        348.456909,
+        350.62638000000004,
+        302.702127,
+        333.853203,
+        325.74836000000005
+      ],
+      "paired_median": 341.155056,
+      "independent_difference": 341.7143715,
+      "independent_reduction_pct": 74.38840818203158,
+      "candidate_faster_pairs": 6
+    },
+    "main_to_ready_ms": {
+      "baseline_median": 456.9813605,
+      "candidate_median": 115.49981700000001,
+      "baseline_range": [
+        422.212748,
+        518.05033
+      ],
+      "candidate_range": [
+        96.328469,
+        152.758841
+      ],
+      "paired_savings": [
+        375.133705,
+        348.08739099999997,
+        350.61746100000005,
+        303.07234500000004,
+        334.438311,
+        325.884279
+      ],
+      "paired_median": 341.26285099999996,
+      "independent_difference": 341.4815435,
+      "independent_reduction_pct": 74.72548620503308,
+      "candidate_faster_pairs": 6
+    },
+    "font_section_ms": {
+      "baseline_median": 325.3368215,
+      "candidate_median": 0.7209205,
+      "baseline_range": [
+        323.580237,
+        327.148031
+      ],
+      "candidate_range": [
+        0.694966,
+        0.800156
+      ],
+      "paired_savings": [
+        324.0082,
+        326.347875,
+        325.70161,
+        325.249222,
+        322.859651,
+        323.21882500000004
+      ],
+      "paired_median": 324.62871099999995,
+      "independent_difference": 324.615901,
+      "independent_reduction_pct": 99.7784079598872,
+      "candidate_faster_pairs": 6
+    },
+    "exec_request_to_main_ms": {
+      "baseline_median": 1.972718,
+      "candidate_median": 2.2257865,
+      "baseline_range": [
+        1.845798,
+        2.786663
+      ],
+      "candidate_range": [
+        1.870879,
+        2.430906
+      ],
+      "paired_savings": [
+        0.17477900000000002,
+        0.3695179999999998,
+        0.008919000000000121,
+        -0.37021799999999994,
+        -0.5851079999999997,
+        -0.1359189999999999
+      ],
+      "paired_median": -0.06349999999999989,
+      "independent_difference": -0.2530684999999999,
+      "independent_reduction_pct": -12.82841744233083,
+      "candidate_faster_pairs": 3
+    }
+  },
+  "independent_qualifications": {
+    "cff_cli_witness": {
+      "baseline": {
+        "receipt_hits": 0,
+        "full_traversals": 7
+      },
+      "candidate": {
+        "receipt_hits": 7,
+        "full_traversals": 0
+      }
+    },
+    "warm_cover_matches": {
+      "baseline": 15,
+      "candidate": 15
+    },
+    "library_and_reader_pixel_differences": {
+      "library": {
+        "all_pixels_changed": 0,
+        "body_pixels_changed": 0,
+        "excluded_from_body_top_rows": 28,
+        "full_bounds_changed": null,
+        "max_channel_difference": 0,
+        "nonuniform_body": true
+      },
+      "reader": {
+        "all_pixels_changed": 0,
+        "body_pixels_changed": 0,
+        "excluded_from_body_top_rows": 28,
+        "full_bounds_changed": null,
+        "max_channel_difference": 0,
+        "nonuniform_body": true
+      }
+    },
+    "missing_cover_control": {
+      "one_omitted_public_book": "demo-7",
+      "fixture_sha256": "3aa2959796fdf7331e5f663f0e5756794c967b35d9e8870ad622f91578200c70",
+      "golden_sha256": "02c3cead34d7d0a7dc0d469cf7939ba49806e0ad3a0c620431cf6486b8b3450a",
+      "per_variant": {
+        "baseline": {
+          "final_png_sha256": "d1f0c1a410b4b9461cbde54185d5e315885c18e90b53af42c96a0a969e1ff7e9",
+          "normal_artwork_matches": 14,
+          "fallback_pixels_equal_to_reference": true,
+          "bounds_xyxy": [
+            390,
+            482,
+            541,
+            692
+          ]
+        },
+        "candidate": {
+          "final_png_sha256": "d1f0c1a410b4b9461cbde54185d5e315885c18e90b53af42c96a0a969e1ff7e9",
+          "normal_artwork_matches": 14,
+          "fallback_pixels_equal_to_reference": true,
+          "bounds_xyxy": [
+            390,
+            482,
+            541,
+            692
+          ]
+        }
+      },
+      "pixel_differences": {
+        "all_pixels_changed": 0,
+        "body_pixels_changed": 0,
+        "excluded_from_body_top_rows": 28,
+        "full_bounds_changed": null,
+        "max_channel_difference": 0,
+        "nonuniform_body": true
+      }
+    }
+  },
+  "raw_report_sha256": {
+    "main": "e522a342345bd2453eedf6ea2375ec417db35c2a790c2232d150a8c54304f620",
+    "one_missing_cover": "85b26037de2ab5cccdf7b734699cddc5c152c24eafafb364a5c78c2466dde5cf"
+  },
+  "preparation": {
+    "initial_source": "c810ea5 control with a common desktop timestamp hook: successful collector rehearsal only.",
+    "superseded_candidate": "The first feature revision failed a bundled backing-identity test (57/58 main tests). Its release B lane was stopped before the build and had no A/B timing samples. The v1 control is excluded.",
+    "frozen_candidate": "The A/B source uses named static font byte arrays. Both final x86_64 CLI processes independently proved their expected CFF paths before the paired run."
+  },
+  "limits": [
+    "No physical touch, Kindle hardware or emulator was used in this desktop timing cohort.",
+    "Software readiness is before final desktop sizing and event-loop drawing; it is not presentation or all covers arriving.",
+    "The public Library, Reader and one missing-cover cases qualify their final rendered images, not physical network or user-account data.",
+    "The per-face witness runs are separate from the primary timing samples."
+  ]
+}

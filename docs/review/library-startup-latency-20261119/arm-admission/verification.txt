@@ -1,0 +1,15 @@
+face=sans-regular loop_work=28362557 target_state_bytes=4544
+face=serif-regular loop_work=44862478 target_state_bytes=4544
+face=sans-medium loop_work=27937933 target_state_bytes=4544
+face=sans-bold loop_work=27806977 target_state_bytes=4544
+face=serif-light loop_work=45506818 target_state_bytes=4544
+face=serif-medium loop_work=44281262 target_state_bytes=4544
+face=serif-bold loop_work=43202275 target_state_bytes=4544
+edge=work error=GlyphWork same_partial_budget=true
+edge=visits error=GlyphComplexity same_partial_budget=true
+edge=points error=GlyphComplexity same_partial_budget=true
+edge=target-state error=GlyphMemory same_partial_budget=true
+edge=per-glyph-memory error=GlyphMemory same_partial_budget=true
+edge=per-glyph-visits error=GlyphComplexity same_partial_budget=true
+edge=per-glyph-points error=GlyphComplexity same_partial_budget=true
+PASS pointer_bits=32 aggregate=FontUsage { faces: 0, payload_and_metrics: 0, metadata: 0, read_work: 0, name_work: 0, glyph_work: 262710115, glyph_visits: 2959385, glyph_points: 29888387, glyph_state_bytes: 4544, glyph_memory: 79248 }

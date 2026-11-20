@@ -69,6 +69,16 @@ pub(super) struct FontUsage {
     pub glyph_memory: usize,
 }
 
+/// Charges for the CFF glyph loop only. The target still prices and allocates
+/// its own pointer-sized local descriptor state before reaching this loop.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct CffLoopCharge {
+    pub work: usize,
+    pub visits: usize,
+    pub points: usize,
+    pub memory: usize,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum FontLimitError {
     Faces,
@@ -127,6 +137,7 @@ pub(super) struct GlyphWorkUsage {
     pub operand: usize,
     pub output: usize,
     pub general: usize,
+    pub precomputed: usize,
 }
 
 #[cfg(test)]
@@ -141,6 +152,7 @@ impl GlyphWorkUsage {
             self.operand,
             self.output,
             self.general,
+            self.precomputed,
         ]
         .into_iter()
         .try_fold(0usize, usize::checked_add)
@@ -157,6 +169,7 @@ impl GlyphWorkUsage {
             operand: self.operand - previous.operand,
             output: self.output - previous.output,
             general: self.general - previous.general,
+            precomputed: self.precomputed - previous.precomputed,
         }
     }
 }
@@ -375,6 +388,45 @@ impl FontBudget {
         self.usage.glyph_points = points;
         self.usage.glyph_memory = self.usage.glyph_memory.max(memory);
         Ok(())
+    }
+
+    #[cfg(feature = "bundled-font-preflight")]
+    pub fn try_apply_cff_loop(&mut self, charge: CffLoopCharge) -> bool {
+        // The build proved every individual glyph under the default ceilings.
+        // Under tighter ceilings or insufficient remaining aggregate room,
+        // replay the real parser so its error and partial charges stay exact.
+        let defaults = FontLimits::default();
+        if self.limits.per_glyph_visits < defaults.per_glyph_visits
+            || self.limits.per_glyph_points < defaults.per_glyph_points
+            || self.limits.per_glyph_memory < defaults.per_glyph_memory
+        {
+            return false;
+        }
+        let fits = |used: usize, add, limit| used.checked_add(add).filter(|n| *n <= limit);
+        let (Some(work), Some(visits), Some(points)) = (
+            fits(self.usage.glyph_work, charge.work, self.limits.glyph_work),
+            fits(
+                self.usage.glyph_visits,
+                charge.visits,
+                self.limits.glyph_visits,
+            ),
+            fits(
+                self.usage.glyph_points,
+                charge.points,
+                self.limits.glyph_points,
+            ),
+        ) else {
+            return false;
+        };
+        self.usage.glyph_work = work;
+        self.usage.glyph_visits = visits;
+        self.usage.glyph_points = points;
+        self.usage.glyph_memory = self.usage.glyph_memory.max(charge.memory);
+        #[cfg(test)]
+        {
+            self.glyph_work_usage.precomputed += charge.work;
+        }
+        true
     }
 
     pub fn can_read_file(&self, bytes: usize) -> bool {

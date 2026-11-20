@@ -1,6 +1,8 @@
 //! Borrowed outline admission before any font reaches Slint's shared registry.
 
-use super::font_budget::{FontBudget, FontLimitError, GlyphWorkKind, MAX_VARIATION_AXES};
+use super::font_budget::{
+    CffLoopCharge, FontBudget, FontLimitError, GlyphWorkKind, MAX_VARIATION_AXES,
+};
 
 type Result<T> = std::result::Result<T, FontLimitError>;
 
@@ -22,6 +24,15 @@ struct Tables<'a> {
 }
 
 pub(super) fn admit_font_glyphs(bytes: &[u8], index: u32, budget: &mut FontBudget) -> Result<()> {
+    admit_font_glyphs_with_cff(bytes, index, budget, None).map(|_| ())
+}
+
+pub(super) fn admit_font_glyphs_with_cff(
+    bytes: &[u8],
+    index: u32,
+    budget: &mut FontBudget,
+    precomputed: Option<CffLoopCharge>,
+) -> Result<Option<CffLoopCharge>> {
     budget.reserve_glyph_work(32)?;
     let raw =
         owned_ttf_parser::RawFace::parse(bytes, index).map_err(|_| FontLimitError::GlyphProgram)?;
@@ -119,18 +130,25 @@ pub(super) fn admit_font_glyphs(bytes: &[u8], index: u32, budget: &mut FontBudge
         }
         supported = true;
     }
+    let mut cff_charge = None;
     if let Some(cff) = tables.cff {
-        super::glyph_cff::admit_cff(cff, false, glyphs, budget)?;
+        cff_charge = Some(super::glyph_cff::admit_cff(
+            cff,
+            false,
+            glyphs,
+            budget,
+            precomputed,
+        )?);
         supported = true;
     }
     if let Some(cff) = tables.cff2 {
-        super::glyph_cff::admit_cff(cff, true, glyphs, budget)?;
+        super::glyph_cff::admit_cff(cff, true, glyphs, budget, None)?;
         supported = true;
     }
     if !supported {
         return Err(FontLimitError::GlyphFormat);
     }
-    Ok(())
+    Ok(cff_charge)
 }
 
 #[derive(Clone, Copy, Default)]

@@ -269,6 +269,16 @@ and a scoped five-pair Scribe 2022 / firmware 5.19.5 startup comparison.
 `docs/STARTUP_PERFORMANCE_20261117.md` records exact artifacts and limits;
 Aidoku results are not WeRead verification.
 
+The November 19 investigation adds opt-in pairs for the two launch-direction
+queries: `{splash,event_loop}_orientation_begin` followed by the same prefix
+and `success`, `timeout`, `unavailable`, or `failed`. The span includes sensor
+discovery and any child cleanup. Only reaching the userspace polling deadline
+reports `timeout` (including a descendant holding the output pipe); it does
+not identify why the service was late. An absent sensor hint or missing command
+is `unavailable`; bad replies, nonzero exits, and other errors are `failed`.
+No orientation value is logged. The default lookup, timeout, child retirement
+and fallback remain in place. These markers are not a measured device gain.
+
 ## Verification boundary
 
 On 2026-11-12, the complete standalone backend suite passed 95 tests on

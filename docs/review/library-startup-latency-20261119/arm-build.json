@@ -1,0 +1,45 @@
+{
+  "date": "2026-11-19",
+  "timezone": "Asia/Shanghai",
+  "environment": "ssh test-env; cross-build and static ELF inspection only",
+  "source_base": "c810ea556514f648c65872774748a22e2411b40c",
+  "product_inputs": 567,
+  "source_manifest_sha256": "074a9ef7b538ba069b9429633d365e2137ee2081f1c4b911767f6af1a4921dd4",
+  "cargo_lock_sha256": "b53425394c73d452aa55d6661514ee44d482e6586231b299c5f35f5cabe55b95",
+  "build_rs_sha256": "c78f54a25d7e0961fcd8136b857c785b6f8a20b476d0d563167044eaf27e535f",
+  "toolchain": "rustc/cargo 1.99.1; cargo-zigbuild 0.24.0; Zig 0.15.2",
+  "profile": "project release, thin LTO, codegen-units=1, stripped, target armv7-unknown-linux-musleabihf",
+  "method": "Identical frozen product source and target/source paths in private mount namespaces with read-only base cache and private writable overlay. Cargo cleaned weread and slint-backend-kindle for this target before each build. No desktop witness or timing patch in either ARM build.",
+  "binaries": {
+    "baseline": {
+      "features": [
+        "kindle"
+      ],
+      "sha256": "e73f99bdd62c341aed659148695bd8231b78f7a5c09e4bb00016a835dd5b1176",
+      "bytes": 95120368,
+      "architecture": "ELF32 ARM",
+      "elf_flags": "0x5000400, Version5 EABI, hard-float ABI",
+      "has_interpreter": false,
+      "has_dynamic_section": false,
+      "compile_log_sha256": "a83950f85c70f14411d5ebd135c4d14cbcebfeefd25a8be9d0999de8bd4d6056",
+      "readelf_report_sha256": "fbb4abd675d6fac14d54f64868b18efe387772b88d0166fc8a729a240d9bbe99",
+      "main_and_backend_recompiled": true
+    },
+    "candidate": {
+      "features": [
+        "kindle",
+        "bundled-font-preflight"
+      ],
+      "sha256": "af54acc18a6fa1f604b2356f9b4d7220e531fd303b21b0bda769d21a17a306aa",
+      "bytes": 95120920,
+      "architecture": "ELF32 ARM",
+      "elf_flags": "0x5000400, Version5 EABI, hard-float ABI",
+      "has_interpreter": false,
+      "has_dynamic_section": false,
+      "compile_log_sha256": "db9a139ff3f5bf50a35be83e87ad582be27d88df405ebde51274848291902a1c",
+      "readelf_report_sha256": "aa96a820f44823ab925fecd759922a7bc27b12b0a608d40fa0c6f197c8317ec7",
+      "main_and_backend_recompiled": true
+    }
+  },
+  "scope": "Not installed or started on a Kindle by this build job. No claim about physical speed, pixels or lifecycle from these binaries alone."
+}

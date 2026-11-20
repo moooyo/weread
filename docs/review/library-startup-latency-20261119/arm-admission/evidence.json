@@ -1,0 +1,36 @@
+{
+  "date": "2026-11-19",
+  "scope": "Product outline validator and exact static-slice lookup, run as ELF32 ARM under QEMU user mode on test-env. Not a complete Slint process or a physical Kindle timing measurement.",
+  "compiler": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+  "target": "armv7-unknown-linux-musleabihf, static ELF32, EABI5 hard-float, opt-level=3, one codegen unit",
+  "emulator": "qemu-arm -cpu cortex-a8, Debian qemu-user 1:10.0.13+ds-0+deb13u1",
+  "qemu_arm_sha256": "94f4d938a299230026c759b348a5c8f8eaf05969ee5d7a6819598de8c6d342bb",
+  "elf_bytes": 64502284,
+  "elf_sha256": "52362354daf2d5dbdc807449223e8cb969986538f8d8a4fd638e9df107aab1cc",
+  "verify_stdout_sha256": "070f584329ac801964ca9543dceb6281a9acd7f9195fd6ad7aa9e0aa57d88ec3",
+  "feature": "bundled-font-preflight",
+  "input_sha256": {
+    "Cargo.toml": "288fc9d193f8e427c71289b42c471e83a9510be7b1f8af89108ddad1d443cfa1",
+    "Cargo.lock": "b53425394c73d452aa55d6661514ee44d482e6586231b299c5f35f5cabe55b95",
+    "build.rs": "c78f54a25d7e0961fcd8136b857c785b6f8a20b476d0d563167044eaf27e535f",
+    "assets/fonts/manifest.json": "bc4b57948df60ddb9d2b24092c17440f16c24776f3b0e98bfa757e231462c2c7",
+    "src/main.rs": "d7404eca3f9d8c98a7ce2b5ea470a7e2aa51d352533e5708e7cef4e7f9f83725",
+    "src/main_font_budget.rs": "c8e63a9fd72103f42ca5b317f9956902ed92113cf5c40afcd9a389228930f2c6",
+    "src/main_glyph_budget.rs": "323bade0f9de4313d6e8e16e17d6a9de324bad3686e4a5f122d4a2bd13bdaba6",
+    "src/main_glyph_cff.rs": "e8b3761eca0f03303a3ac68de3ea607f2bf9363cdff2f4e75ea71e84cfc474b8",
+    "arm-admission/probe.rs": "6c4ea44dfa60536ba7d78c166d437534096c40dc866ff3c91de3943166c5a26f",
+    "arm-admission/deadline.rs": "cf199e2d4614863c721a0c72377da8b8df101d3d9358f678281cf7f6e8a3ecba",
+    "arm-admission/build.sh": "66138e0976deb9dca0d2fd71276131b1af40a0233d01d508230ba88f43dd73f8",
+    "generated/bundled_fonts.rs": "3cd860668d5965c71327fde3ae88a8efe2a0d02b595155bd6e7e513976f00f12",
+    "extracted/bundled_cff_charge.rs": "a6dd858a239eef0c1031e959ac79d609df6f2c682bdc0a5dc6f64917bc9fb5a5"
+  },
+  "checks": {
+    "fresh_per_face_budget_and_regenerated_charge_matches": 7,
+    "cumulative_budget_matches": 7,
+    "truncated_static_and_owned_equal_bytes_rejected_per_face": 7,
+    "restricted_budget_errors_and_partial_usage_match": 7,
+    "guard_fixtures": ["reject invalid clock", "reject zero interval", "one-second self-SIGKILL", "verified parent-death self-SIGKILL"],
+    "mismatched_guarded_parent_exits_2_without_samples": true,
+    "physical_device_operated_for_this_check": false
+  }
+}
