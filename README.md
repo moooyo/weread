@@ -4,6 +4,8 @@ An independent Rust and Slint reading application for jailbroken Kindle devices.
 
 Implementation started on 2026-11-03 (Asia/Shanghai), following the supplied WeRead for Kindle design handoff v0.2. The application shares its UI and application core between a desktop backend and an isolated Kindle backend. See [implementation status](docs/IMPLEMENTATION_STATUS.md) for completed features, verification evidence, and remaining acceptance gates.
 
+To continue the Library startup experiment, start with the [session handoff](HANDOFF.md).
+
 The accepted [Kindle entry cover](assets/branding/README.md) shows `WeRead` above
 a reader containing a winking penguin. Its grayscale thumbnail is embedded in
 the document launcher's Icon metadata and travels with the development package.
