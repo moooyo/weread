@@ -15,6 +15,10 @@ combine an indexed file-open timing with a separate installed-entry check.
 The November 21 ordinary-entry retest confirmed responsive native return and
 released its lease at 11:11:25 (Asia/Shanghai). Its status remains `not_timed`;
 it supplies no release-to-render, release-to-submit or interaction latency.
+In the later [automatic stock-card run](docs/review/library-startup-latency-20261119/daily-render-20261121.md),
+the unchanged installation showed a complete grid in framebuffer memory by
+**8.258 s** after synthetic release (one launch; no frame-specific completion
+or `SEND` timestamp). All close checks passed; the lease was released at 12:28:06.
 
 ## What actually ran
 

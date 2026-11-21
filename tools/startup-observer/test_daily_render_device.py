@@ -29,11 +29,19 @@ MAIN = 'case "$mode" in\n    admit)'
 TILE = r'''#!/bin/sh
 set -eu
 root=@ROOT@; stage=$root/mnt/us/.weread-render-$2
+inspect() {
+    [ ! -e "$root/ambiguous-footer" ] || return 1
+    printf '%s %s\n' "$(cat "$root/tab")" "$(cat "$root/pointer")"
+}
 case "$1" in
+    inspect) inspect;;
     prepare)
-        [ ! -e "$root/prepare-refused" ] || exit 1
-        cat "$root/tab" >"$stage/tile-original"; printf 'library\n' >"$root/tab"
-        [ ! -e "$root/prepare-interrupted" ] || exit 1
+        [ "$(cat "$stage/prepare-started")" = "$2" ] && [ -s "$stage/stock-original" ] || exit 1
+        if [ -e "$root/prepare-refused" ]; then printf 'private diagnostic\ntile_refused original\n' >&2; exit 1; fi
+        if [ -e "$root/prepare-unknown" ]; then printf 'unknown private diagnostic\n' >&2; exit 1; fi
+        if [ -e "$root/change-origin" ]; then printf '8 9\n' >"$root/pointer"; fi
+        inspect >"$stage/tile-original"; printf 'library\n' >"$root/tab"; printf '515 760\n' >"$root/pointer"
+        if [ -e "$root/prepare-interrupted" ]; then printf 'private diagnostic\ntile_refused library_or_artwork\n' >&2; exit 1; fi
         printf '%s\n' "$2" >"$stage/tile-prepared"; printf 'tile_prepared\n';;
     tap)
         printf '%s\n' "$2" >"$stage/tile-gate"
@@ -42,7 +50,10 @@ case "$1" in
         printf '%s\n' "$2" >"$stage/tile-dispatch-intent"
         cat "$root/receipt" >"$stage/tile-release"; cat "$stage/tile-release";;
     restore)
-        cat "$stage/tile-original" >"$root/tab"; printf 'tile_restored\n';;
+        IFS=' ' read -r tab column row <"$stage/tile-original"
+        printf '%s\n' "$tab" >"$root/tab"
+        if [ ! -e "$root/incomplete-restore" ]; then printf '%s %s\n' "$column" "$row" >"$root/pointer"; fi
+        printf 'tile_restored\n';;
     *) exit 1;;
 esac
 '''
@@ -61,6 +72,7 @@ exit 1
 '''
 MOCKS = r'''
 fixture=@ROOT@
+if [ -d "$fixture/ssh-bin" ]; then PATH="$fixture/ssh-bin:$PATH"; fi
 uname() { [ "$*" = -m ] && printf 'armv7l\n'; }
 df() { [ "$*" = "-Pk $fixture/mnt/us" ] && printf 'local 999999 1 999998 1%% /\n'; }
 pidof() {
@@ -77,7 +89,7 @@ fixture_lipc() {
     case "$*" in
         '-s com.lab126.powerd state') printf 'active\n';;
         '-s com.lab126.appmgrd activeApp') printf 'com.lab126.KPPMainApp\n';;
-        '-s com.lab126.appmgrd activeView') cat "$fixture/tab";;
+        '-s com.lab126.appmgrd activeView') cat "$fixture/active-view"; [ ! -e "$fixture/unsupported-view" ];;
         '-i com.lab126.powerd flIntensity'|'-i com.lab126.powerd currentAmberLevel') cat "$fixture/light";;
         *) return 1;;
     esac
@@ -140,13 +152,16 @@ class DeviceTests(unittest.TestCase):
         for name, data in {'proc/stat': 'btime 1700000000\n', 'proc/uptime': '12345.25 1234.00\n',
                            'proc/mounts': f'local {self.volume} tmpfs rw 0 0\n', 'proc/usid': 'G0027J',
                            'etc/prettyversion.txt': 'Kindle 5.19.5 (fixture)\n', 'sys/class/input/event1': '',
-                           'tab': 'home\n', 'light': '10\n', 'scene': SCENE + '\n', 'receipt': RELEASE + '\n'}.items():
+                           'tab': 'home\n', 'pointer': '45 63\n', 'active-view': 'KPP_HOME\n',
+                           'light': '10\n', 'scene': SCENE + '\n', 'receipt': RELEASE + '\n'}.items():
             (self.root / name).write_text(data)
         guards = [self.daily, self.home / 'launch.sh', self.home / 'app/weread-frame-guard',
                   self.home / 'app/weread-native-query', self.home / 'data/library.sqlite',
                   self.home / 'data/logs/private', self.volume / 'documents/other-document']
         for path in guards:
             path.write_bytes(b'protected fixture\n')
+        self.daily.write_text('#!/bin/sh\n# Name: WeRead for Kindle\n# public wrapper fixture\n'
+                              'WEREAD_HOME=${WEREAD_HOME:-/mnt/us/weread}\nexec sh "$WEREAD_HOME/launch.sh" "$@"\n')
         with self.app.open('wb') as handle:
             handle.truncate(95137176)
         self.app.chmod(0o755)
@@ -174,30 +189,34 @@ class DeviceTests(unittest.TestCase):
         for path, state in self.baseline.items():
             self.assertEqual((path.stat().st_ino, path.stat().st_size, path.stat().st_mtime_ns), state, path)
 
-    def process(self, process, parent, birth, args, executable, state='S', role='shell'):
+    def process(self, process, parent, birth, args, executable, state='S', role='shell', owner=0):
         folder = self.proc / str(process)
         folder.mkdir(exist_ok=True)
         (folder / 'stat').write_text(f'{process} (fixture ) process) {state} {parent} ' + '0 ' * 17 + f'{birth} 0\n')
         (folder / 'cmdline').write_bytes(b'\0'.join(os.fsencode(value) for value in args) + b'\0')
         (folder / 'role').write_text(role)
+        (folder / 'status').write_text(f'Name:\tfixture\nUid:\t{owner}\t{owner}\t{owner}\t{owner}\n')
         image = folder / 'exe'
         image.unlink(missing_ok=True)
         image.symlink_to(executable)
 
-    def chain(self, *, generation=True, worker='--detached --managed-logs', parent=MASTER, gui_extra=(), entry_birth=110):
+    def chain(self, *, generation=True, worker='--detached --managed-logs', parent=MASTER, gui_extra=(), entry_birth=110,
+              owner=0, directory_mode=0o700, shell_name='sh'):
         launch = str(self.home / 'launch.sh')
-        self.process(ENTRY, MANAGER, entry_birth, ['sh', launch, '--library'], self.shell)
-        self.process(MASTER, ENTRY, 115, ['sh', launch, *worker.split()], self.shell)
+        self.process(ENTRY, MANAGER, entry_birth, [shell_name, launch, '--library'], self.shell, owner=owner)
+        self.process(MASTER, ENTRY, 115, [shell_name, launch, *worker.split()], self.shell, owner=owner)
         self.lock.mkdir(mode=0o700, exist_ok=True)
+        os.chown(self.lock, owner, owner); self.lock.chmod(directory_mode)
         contents = dict(pid=MASTER, nonce=NONCE)
         if generation:
-            self.process(RUNNER, parent, 120, ['sh', launch, *worker.split()], self.shell)
+            self.process(RUNNER, parent, 120, [shell_name, launch, *worker.split()], self.shell, owner=owner)
             self.process(GUI, RUNNER, 125, [self.app, '--kindle', '--device', 'scribe', '--data-dir', self.home / 'data', *gui_extra],
-                         self.app, role='weread')
+                         self.app, role='weread', owner=owner)
             contents.update({'application-pid': GUI, 'application-birth': 125, 'generation': '1:' + NONCE,
                              'state-open': '1:' + NONCE, 'application-owned': f'1:{NONCE}:{GUI}:125'})
         for name, value in contents.items():
             (self.lock / name).write_text(str(value) + '\n')
+            os.chown(self.lock / name, owner, owner); (self.lock / name).chmod(0o600)
 
     def entries(self):
         shell = shlex.quote(str(self.root))
@@ -229,6 +248,7 @@ class DeviceTests(unittest.TestCase):
             self.invoke(mode, state)
         self.assertFalse(self.stage.exists())
         self.assertEqual((self.root / 'tab').read_text(), 'home\n')
+        self.assertEqual((self.root / 'pointer').read_text(), '45 63\n')
 
     def child(self, mode):
         child = subprocess.Popen(['sh', self.program, mode, LABEL], stdin=subprocess.DEVNULL,
@@ -271,10 +291,8 @@ class DeviceTests(unittest.TestCase):
         self.assertEqual(before, list(self.volume.iterdir()))
         self.invoke('stage', 'staged')
         self.cleanup_stage()
-        (self.root / 'tab').write_text('\n')
-        self.invoke('admit', refused='active_view_unavailable'); self.invoke('stage', refused='active_view_unavailable')
-        self.invoke('absent', refused='absent')
-        self.invoke('restore', refused='unsafe_absence')
+        (self.root / 'active-view').write_text('\n')
+        self.invoke('admit', 'admitted'); self.invoke('absent', 'absent'); self.invoke('restore', 'already_absent')
 
     def test_native_manager_peer_catalog_and_wrong_owner_refused(self):
         self.process(MANAGER, 1, 25, ['sh'], self.shell, state='D')
@@ -347,6 +365,45 @@ class DeviceTests(unittest.TestCase):
         self.chain(); self.invoke('claim', 'claimed')
         (self.lock / 'nonce').write_text('c' * 32 + '\n')
         self.invoke('stop', refused='unproven_close')
+        self.assertFalse(self.signals())
+
+    def test_exact_firmware_shell_and_private_setgid_group_ignore_unrelated_ssh_path(self):
+        ssh_bin = self.root / 'ssh-bin'; ssh_bin.mkdir()
+        alternate = Path('/bin/bash').resolve()
+        self.assertNotEqual(alternate.stat().st_ino, self.shell.stat().st_ino)
+        (ssh_bin / 'sh').symlink_to(alternate)
+        for owner, directory_mode, first in [(0, 0o2700, 'sh'), (32123, 0o2700, '/bin/sh'), (32124, 0o700, 'sh')]:
+            with self.subTest(owner=owner, mode=oct(directory_mode), first=first):
+                self.setup_stage(); self.intent(); self.chain(owner=owner, directory_mode=directory_mode, shell_name=first)
+                self.invoke('claim', 'claimed'); self.assertEqual((self.stage / 'launch-owner').read_text(), f'{owner}\n')
+                self.cleanup_stage()
+                shutil.rmtree(self.root / 'retired-lock')
+                for process in [ENTRY, MASTER, RUNNER, GUI]:
+                    shutil.rmtree(self.root / f'retired-{process}')
+        self.assertEqual(self.signals(), [f'-TERM {MASTER}'] * 3)
+
+    def test_group_access_loose_records_or_mixed_effective_uids_cannot_be_signalled(self):
+        self.setup_stage(); self.intent()
+        for directory_mode in (0o755, 0o2770, 0o1700, 0o4700):
+            self.chain(directory_mode=directory_mode); self.invoke('claim', refused='launch_identity')
+        self.chain(owner=32123, directory_mode=0o2700)
+        for role in [ENTRY, MASTER, RUNNER, GUI]:
+            status = self.proc / str(role) / 'status'; initial = status.read_text()
+            status.write_text('Uid:\t32123\t0\t32123\t32123\n'); self.invoke('claim', refused='launch_identity')
+            self.invoke('stop', refused='unproven_close'); status.write_text(initial)
+        for record in ['pid', 'nonce', 'application-owned', 'state-open']:
+            path = self.lock / record
+            path.chmod(0o640); self.invoke('claim', refused='launch_identity'); path.chmod(0o600)
+            os.chown(path, 0, 0); self.invoke('claim', refused='launch_identity'); os.chown(path, 32123, 32123)
+        self.assertFalse(self.signals()); self.assertFalse((self.stage / 'session').exists())
+
+    def test_foreign_shell_inode_or_unclassified_first_argument_remains_refused(self):
+        self.setup_stage(); self.intent(); self.chain(shell_name='/usr/bin/sh')
+        self.invoke('claim', refused='launch_identity'); self.chain()
+        for role in [ENTRY, MASTER, RUNNER]:
+            path = self.proc / str(role) / 'exe'; path.unlink(); path.symlink_to('/bin/bash')
+            self.invoke('claim', refused='launch_identity'); self.invoke('stop', refused='unproven_close')
+            path.unlink(); path.symlink_to(self.shell)
         self.assertFalse(self.signals())
 
     def test_witness_rejects_missing_result_and_changed_live_session(self):
@@ -445,10 +502,10 @@ class DeviceTests(unittest.TestCase):
 
     def test_failed_prepare_restores_an_actual_navigation_and_detects_baseline_drift(self):
         self.setup_stage(prepare=False)
-        (self.root / 'prepare-refused').touch(); self.invoke('prepare', refused='preparation')
+        (self.root / 'prepare-refused').touch(); self.invoke('prepare', refused='stock_tabs_unconfirmed')
         self.assertFalse((self.stage / 'tile-original').exists()); self.cleanup_stage()
         (self.root / 'prepare-refused').unlink(); self.setup_stage(prepare=False)
-        (self.root / 'prepare-interrupted').touch(); self.invoke('prepare', refused='preparation')
+        (self.root / 'prepare-interrupted').touch(); self.invoke('prepare', refused='library_or_artwork')
         self.assertEqual((self.root / 'tab').read_text(), 'library\n'); self.invoke('stop', 'stopped')
         (self.root / 'light').write_text('12\n'); self.invoke('restore', refused='native_restore')
         self.assertFalse((self.stage / 'restored').exists()); (self.root / 'light').write_text('10\n')
@@ -458,6 +515,89 @@ class DeviceTests(unittest.TestCase):
         self.setup_stage(); (self.stage / 'tile-original').unlink()
         self.invoke('stop', 'stopped'); self.invoke('restore', refused='native_restore')
         self.invoke('close', refused='closeout'); self.assertTrue(self.stage.is_dir())
+
+    def test_unavailable_view_never_exports_raw_values_and_needs_stock_tab_and_pointer(self):
+        for value, unsupported in [('\n', False), ('KPP_HOME\n', True), ('private.view:123\n', False)]:
+            with self.subTest(unsupported=unsupported, empty=value == '\n'):
+                (self.root / 'active-view').write_text(value)
+                if unsupported:
+                    (self.root / 'unsupported-view').touch()
+                self.invoke('admit', 'admitted'); self.setup_stage()
+                self.assertEqual((self.stage / 'view').read_text(), 'unavailable\n')
+                self.assertEqual((self.stage / 'stock-original').read_text(), 'home 45 63\n')
+                self.assertEqual((self.stage / 'stock-original').read_bytes(), (self.stage / 'tile-original').read_bytes())
+                self.cleanup_stage(); (self.root / 'unsupported-view').unlink(missing_ok=True)
+
+    def test_unknown_ambiguous_or_out_of_bounds_start_never_authorizes_input(self):
+        (self.root / 'active-view').write_text('private\n')
+        for tab, pointer, ambiguous in [('home', '45 63', True), ('reader', '45 63', False),
+                                        ('library', '1860 32', False), ('home', '0 2480', False), ('home', '12 2 extra', False)]:
+            with self.subTest(tab=tab, pointer=pointer, ambiguous=ambiguous):
+                self.setup_stage(prepare=False)
+                (self.root / 'tab').write_text(tab + '\n'); (self.root / 'pointer').write_text(pointer + '\n')
+                if ambiguous:
+                    (self.root / 'ambiguous-footer').touch()
+                self.invoke('prepare', refused='stock_tabs_unconfirmed')
+                for leaf in ('stock-original', 'prepare-started', 'tile-original', 'tile-prepared', 'tile-dispatch-intent'):
+                    self.assertFalse((self.stage / leaf).exists())
+                self.invoke('stop', 'stopped'); self.invoke('restore', 'restored'); self.invoke('close', 'closed')
+                self.assertEqual((self.root / 'tab').read_text(), tab + '\n')
+                self.assertEqual((self.root / 'pointer').read_text(), pointer + '\n')
+                (self.root / 'ambiguous-footer').unlink(missing_ok=True)
+
+    def test_missing_optional_view_does_not_bless_unrestored_or_changed_pointer(self):
+        (self.root / 'unsupported-view').touch(); self.setup_stage(); self.invoke('stop', 'stopped')
+        (self.root / 'incomplete-restore').touch(); self.invoke('restore', refused='native_restore')
+        self.assertFalse((self.stage / 'restored').exists()); (self.root / 'incomplete-restore').unlink()
+        self.invoke('restore', 'restored'); (self.root / 'pointer').write_text('89 17\n')
+        self.invoke('close', refused='closeout'); self.assertTrue(self.stage.is_dir())
+        self.cleanup_stage()
+
+    def test_optional_classified_view_needs_same_class_on_return_and_before_navigation(self):
+        self.setup_stage(prepare=False)
+        self.assertEqual((self.stage / 'view').read_text(), 'kpp_home\n')
+        (self.root / 'active-view').write_text('KPP_LIBRARY\n'); self.invoke('prepare', refused='native_view_changed')
+        self.assertFalse((self.stage / 'prepare-started').exists()); (self.root / 'active-view').write_text('KPP_HOME\n')
+        self.invoke('prepare', 'prepared'); self.invoke('stop', 'stopped')
+        for changed in ['KPP_LIBRARY\n', '\n']:
+            (self.root / 'active-view').write_text(changed); self.invoke('restore', refused='native_restore')
+            self.assertFalse((self.stage / 'restored').exists())
+        (self.root / 'active-view').write_text('KPP_HOME\n'); self.cleanup_stage()
+
+    def test_uncertain_start_or_mismatched_memos_cannot_be_restored_by_guessing(self):
+        (self.root / 'unsupported-view').touch(); self.setup_stage(prepare=False)
+        (self.root / 'prepare-unknown').touch(); self.invoke('prepare', refused='preparation')
+        self.invoke('stop', 'stopped'); self.invoke('restore', refused='native_restore')
+        (self.stage / 'stock-original').unlink(); self.invoke('restore', refused='native_restore')
+        (self.stage / 'prepare-started').unlink(); self.invoke('restore', refused='native_restore')
+        self.invoke('close', refused='closeout')
+
+    def test_prepared_helper_origin_conflict_refuses_arm_and_untrusted_restore(self):
+        self.setup_stage(prepare=False); (self.root / 'change-origin').touch()
+        self.invoke('prepare', refused='stock_origin_changed'); self.invoke('arm', refused='arm')
+        self.invoke('stop', 'stopped'); self.invoke('restore', refused='native_restore')
+        self.assertFalse((self.stage / 'restored').exists()); self.assertFalse(self.signals())
+
+    def test_normal_catalog_touch_of_unchanged_wrapper_can_close(self):
+        self.setup_stage(); self.intent(); self.chain(); self.invoke('claim', 'claimed')
+        original = self.daily.read_bytes()
+        self.assertEqual((self.stage / 'document-original').read_bytes(), original)
+        stamp = self.daily.stat()
+        os.utime(self.daily, ns=(stamp.st_atime_ns, stamp.st_mtime_ns + 2_000_000_000))
+        self.baseline[self.daily] = (stamp.st_ino, stamp.st_size, self.daily.stat().st_mtime_ns)
+        self.cleanup_stage(); self.assertEqual(self.daily.read_bytes(), original)
+        self.assertEqual(self.signals(), [f'-TERM {MASTER}'])
+
+    def test_equal_size_in_place_wrapper_change_is_not_a_catalog_touch(self):
+        self.setup_stage(); self.invoke('stop', 'stopped')
+        original, stamp = self.daily.read_bytes(), self.daily.stat()
+        changed = original.replace(b'public wrapper fixture', b'public wrapper changed')
+        self.assertNotEqual(original, changed); self.assertEqual(len(original), len(changed))
+        self.daily.write_bytes(changed); os.utime(self.daily, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+        self.invoke('restore', refused='native_restore'); self.invoke('close', refused='closeout')
+        self.assertEqual(self.daily.read_bytes(), changed); self.assertEqual((self.stage / 'document-original').read_bytes(), original)
+        self.daily.write_bytes(original); os.utime(self.daily, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+        self.cleanup_stage()
 
 
 if __name__ == '__main__':

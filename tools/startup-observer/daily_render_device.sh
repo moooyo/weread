@@ -12,7 +12,10 @@ daily=/mnt/us/documents/weread.sh
 proc=/proc
 tmp=$(readlink -f /tmp) || exit 1
 lock=$tmp/weread-launcher.lock
+stock_shell=/bin/sh
+shell_trusted=0
 admit_reason=stage
+prepare_reason=preparation
 
 fail() { printf 'refused %s\n' "$1" >&2; exit 1; }
 reply() { printf '{"state":"%s"}\n' "$1"; }
@@ -52,12 +55,37 @@ identity() {
     number "$parent" && number "$birth"
 }
 argv() { pid=$1; shift; printf '%s\000' "$@" | cmp -s - "$proc/$pid/cmdline"; }
+system_shell() (
+    actual=$(readlink -f "$stock_shell") && [ -f "$actual" ] && [ -x "$actual" ] || return 1
+    case "$actual" in /bin/*|/usr/bin/*) ;; *) return 1;; esac
+    for path in "${stock_shell%/*}" "$actual"; do
+        while [ -n "$path" ]; do
+            trust=$(stat -Lc '%u:%a' "$path") || return 1
+            case "$trust" in 0:[0-7][0145][0145]|0:[0-7][0-7][0145][0145]) ;; *) return 1;; esac
+            path=${path%/*}
+        done
+    done
+)
 shell_args() {
-    shell_pid=$1; shift; shell_bin=$(command -v sh) || return 1
-    [ "$(readlink -f "$proc/$shell_pid/exe")" = "$(readlink -f "$shell_bin")" ] &&
-        { argv "$shell_pid" sh "$home/launch.sh" "$@" || argv "$shell_pid" "$shell_bin" "$home/launch.sh" "$@"; }
+    shell_pid=$1; shift
+    [ "$shell_trusted" = 1 ] && [ "$proc/$shell_pid/exe" -ef "$stock_shell" ] &&
+        { argv "$shell_pid" sh "$home/launch.sh" "$@" || argv "$shell_pid" "$stock_shell" "$home/launch.sh" "$@"; }
 }
 worker_args() { shell_args "$1" --detached --managed-logs || shell_args "$1" --library-catalog-worker; }
+lock_owner() (
+    directory "$lock" && metadata=$(stat -c '%u:%a' "$lock") || return 1
+    case "$metadata" in *:700|*:2700) ;; *) return 1;; esac
+    account=${metadata%:*}; { [ "$account" = 0 ] || number "$account"; } && printf '%s\n' "$account"
+)
+private_records() (
+    account=$1; shift
+    values=$(stat -c '%u:%a' "$@") || return 1
+    set -- $values; [ "$#" -gt 0 ] || return 1
+    for metadata; do [ "$metadata" = "$account:600" ] || return 1; done
+)
+process_owner() {
+    awk -v owner="$2" '$1=="Uid:" {seen++; if(NF!=5)bad=1; for(i=2;i<=5;i++)if(("u" $i)!=("u" owner))bad=1} END{exit !(seen==1 && !bad)}' "$proc/$1/status"
+}
 no_peer() {
     for app in aidoku bilicomics; do
         absent "$tmp/$app-launcher.lock" || return 1
@@ -73,12 +101,24 @@ native_idle() {
     managers=$(pidof awesome) && [ -n "$managers" ] || return 1
     for manager in $managers; do identity "$manager" || return 1; case "$process_state" in R|S) ;; *) return 1;; esac; done
 }
+document_identity() {
+    plain "$daily" && size=$(stat -c %s "$daily") && number "$size" && [ "$size" -le 131072 ] || return 1
+    { IFS= read -r header && [ "$header" = '#!/bin/sh' ] && IFS= read -r title && [ "$title" = '# Name: WeRead for Kindle' ]; } <"$daily" || return 1
+    [ "$(tail -n 1 "$daily")" = 'exec sh "$WEREAD_HOME/launch.sh" "$@"' ] && stat -c '%d:%i:%s:%f:%u:%g:%h' "$daily"
+}
+save_document() {
+    absent "$stage/document-original" && absent "$stage/document-original.next" &&
+        (set -C; dd if="$daily" bs=1024 count=129 >"$stage/document-original.next" 2>/dev/null) &&
+        [ "$(stat -c %s "$stage/document-original.next")" -le 131072 ] && cmp -s "$daily" "$stage/document-original.next" &&
+        mv "$stage/document-original.next" "$stage/document-original"
+}
 state() {
     native_idle || return 10
     [ "$(uname -m)" = armv7l ] || return 11
     case "$(dd if=/proc/usid bs=6 count=1 2>/dev/null)" in G??27J|G??2BL|G??263|G??227|G??2BM|G??23L|G??23M|G??270) ;; *) return 11;; esac
     [ "$(sed -n 's/^Kindle[[:space:]]*\([0-9][0-9.]*\).*$/\1/p' /etc/prettyversion.txt)" = 5.19.5 ] || return 11
-    for file in "$daily" "$home/launch.sh" "$home/app/weread" "$home/app/weread-frame-guard" "$home/app/weread-native-query"; do
+    document_identity || return 12
+    for file in "$home/launch.sh" "$home/app/weread" "$home/app/weread-frame-guard" "$home/app/weread-native-query"; do
         plain "$file" && stat -c '%d:%i:%s:%Y:%Z:%f' "$file" || return 12
     done
     [ "$(stat -c %s "$home/app/weread")" = 95137176 ] && [ -x "$home/app/weread" ] || return 12
@@ -93,9 +133,8 @@ state() {
     awk '$1=="btime"&&$2~/^[0-9]+$/ {print "boot",$2; ok=1} END{exit !ok}' "$proc/stat"
 }
 view() {
-    value=$(lipc-get-prop -s com.lab126.appmgrd activeView) || return 1
-    case "$value" in ''|*[!a-zA-Z0-9_.:-]*) return 1;; esac
-    [ "${#value}" -le 96 ] && printf '%s\n' "$value"
+    value=$(lipc-get-prop -s com.lab126.appmgrd activeView 2>/dev/null) || value=
+    case "$value" in KPP_HOME) printf 'kpp_home\n';; KPP_LIBRARY) printf 'kpp_library\n';; *) printf 'unavailable\n';; esac
 }
 ready_volume() {
     directory /mnt/us && awk '$2=="/mnt/us" && $4 ~ /(^|,)rw(,|$)/ && $4 !~ /(^|,)noexec(,|$)/ {ok=1} END{exit !ok}' "$proc/mounts" &&
@@ -108,17 +147,16 @@ admit() {
     absent "$stage" || { admit_reason=stage_occupied; return 1; }
     ready_volume || { admit_reason=volume; return 1; }
     state >/dev/null || { state_refusal "$?"; return 1; }
-    view >/dev/null || { admit_reason=active_view_unavailable; return 1; }
 }
 same() {
-    snapshot=$(state) && matches "$stage/before" "$snapshot"
+    snapshot=$(state) && matches "$stage/before" "$snapshot" && plain "$stage/document-original" && cmp -s "$daily" "$stage/document-original"
 }
 new_stage() {
     admit || return 1
     mkdir "$stage" && write_tag owner && stage_lock || return 1
     initial=$(state) || { state_refusal "$?"; return 1; }
-    initial_view=$(view) || { admit_reason=active_view_unavailable; return 1; }
-    record_once before "$initial" && record_once view "$initial_view" && write_tag staged
+    initial_view=$(view) || return 1
+    save_document && record_once before "$initial" && record_once view "$initial_view" && write_tag navigation-untouched && write_tag staged
 }
 install() {
     tag staged && absent "$stage/installed" && absent "$stage/armed" && absent "$stage/input.tgz" && same || return 1
@@ -138,9 +176,36 @@ install() {
         rm "$stage/input.tgz" && write_tag installed
 }
 tile() { tag installed && plain "$stage/tile/native_tile.sh" && sh "$stage/tile/native_tile.sh" "$1" "$label"; }
-prepare() { absent "$stage/armed" && same && [ "$(tile prepare)" = tile_prepared ] && tag tile-prepared; }
+stock_inspect() {
+    position=$(tile inspect) && [ "${#position}" -le 24 ] || return 1
+    printf '%s\n' "$position" | awk 'NR==1 && /^(home|library) (0|[1-9][0-9]*) (0|[1-9][0-9]*)$/ && $2<1860 && $3<2480 {valid=1; record=$0} END{if(NR!=1 || !valid)exit 1; print record}'
+}
+origin_agrees() {
+    absent "$stage/navigation-untouched" && tag prepare-started && original=$(line "$stage/stock-original") && matches "$stage/tile-original" "$original"
+}
+prepare() {
+    for leaf in stopped armed stock-original prepare-started prepare-no-input tile-original tile-prepared tile-gate tile-dispatch-intent tile-release; do absent "$stage/$leaf" || return 1; done
+    tag navigation-untouched && same || return 1
+    matches "$stage/view" "$(view)" || { prepare_reason=native_view_changed; return 1; }
+    original=$(stock_inspect) || { prepare_reason=stock_tabs_unconfirmed; return 1; }
+    record_once stock-original "$original" && mv "$stage/navigation-untouched" "$stage/prepare-started" && tag prepare-started || return 1
+    if report=$(tile prepare 2>&1); then
+        [ "${report##*'
+'}" = tile_prepared ] && tag tile-prepared || return 1
+        origin_agrees || { prepare_reason=stock_origin_changed; return 1; }
+    else
+        case "${report##*'
+'}" in
+            'tile_refused original'|'tile_refused native')
+                absent "$stage/tile-original" && write_tag prepare-no-input || return 1
+                prepare_reason=stock_tabs_unconfirmed;;
+            'tile_refused library_or_artwork') prepare_reason=library_or_artwork;;
+        esac
+        return 1
+    fi
+}
 arm() {
-    tag installed && tag tile-prepared && absent "$stage/armed" && absent "$stage/tile-dispatch-intent" && same && identity "$$" || return 1
+    tag installed && tag tile-prepared && origin_agrees && absent "$stage/armed" && absent "$stage/tile-dispatch-intent" && same && identity "$$" || return 1
     record_once armed "$label:$birth"
 }
 armed() {
@@ -186,17 +251,20 @@ observer_stopped() {
     return 1
 }
 supervision() {
-    armed && tag tile-dispatch-intent && no_peer && directory "$lock" && [ "$(stat -c '%u:%a' "$lock")" = 0:700 ] || return 1
+    armed && tag tile-dispatch-intent && no_peer && account=$(lock_owner) && private_records "$account" "$lock/pid" "$lock/nonce" || return 1
+    if ! absent "$stage/launch-owner" || ! absent "$stage/group"; then matches "$stage/launch-owner" "$account" || return 1; fi
     supervisor=$(line "$lock/pid") && nonce=$(line "$lock/nonce") && token "$nonce" && identity "$supervisor" || return 1
     super_birth=$birth; entry=$parent
     [ "$super_birth" -ge "$fence" ] && worker_args "$supervisor" && identity "$entry" || return 1
     entry_birth=$birth
-    [ "$entry_birth" -ge "$fence" ] && [ "$super_birth" -ge "$entry_birth" ] && shell_args "$entry" --library && identity "$supervisor" &&
+    [ "$entry_birth" -ge "$fence" ] && [ "$super_birth" -ge "$entry_birth" ] && shell_args "$entry" --library &&
+        process_owner "$entry" "$account" && process_owner "$supervisor" "$account" && identity "$supervisor" &&
         [ "$parent:$birth" = "$entry:$super_birth" ] && matches "$lock/pid" "$supervisor" && matches "$lock/nonce" "$nonce" || return 1
     printf '%s %s %s %s %s\n' "$entry" "$entry_birth" "$supervisor" "$super_birth" "$nonce"
 }
 gui() {
-    group=$(supervision) || return 1
+    group=$(supervision) && account=$(lock_owner) && matches "$stage/launch-owner" "$account" &&
+        private_records "$account" "$lock/application-pid" "$lock/application-birth" "$lock/generation" "$lock/state-open" "$lock/application-owned" || return 1
     set -- $group; supervisor=$3; supervisor_birth=$4; nonce=$5
     gui_pid=$(line "$lock/application-pid") && gui_birth=$(line "$lock/application-birth") && identity "$gui_pid" || return 1
     [ "$birth" = "$gui_birth" ] && [ "$(readlink "$proc/$gui_pid/exe")" = "$home/app/weread" ] &&
@@ -204,14 +272,14 @@ gui() {
     runner=$parent; identity "$runner" && [ "$parent" = "$supervisor" ] && worker_args "$runner" || return 1
     runner_birth=$birth
     [ "$runner_birth" -ge "$supervisor_birth" ] && [ "$gui_birth" -ge "$runner_birth" ] &&
+        process_owner "$runner" "$account" && process_owner "$gui_pid" "$account" &&
         matches "$lock/generation" "1:$nonce" && matches "$lock/state-open" "1:$nonce" &&
         matches "$lock/application-owned" "1:$nonce:$gui_pid:$gui_birth" && [ "$(supervision)" = "$group" ] &&
         identity "$gui_pid" && [ "$parent:$birth" = "$runner:$gui_birth" ] || return 1
     printf '%s %s %s %s %s\n' "$group" "$runner" "$runner_birth" "$gui_pid" "$gui_birth"
 }
 bind_group() {
-    observed=$(supervision) || return 1
-    record_once group "$observed"
+    observed=$(supervision) && account=$(lock_owner) && record_once launch-owner "$account" && record_once group "$observed"
 }
 bind_gui() {
     bind_group && observed=$(gui) || return 1
@@ -251,7 +319,7 @@ drained() {
 stop_session() {
     observer_stopped || return 1
     if absent "$stage/tile-dispatch-intent"; then
-        absent "$stage/session" && absent "$stage/group" && absent "$stage/tile-release" && absent "$stage/observed-session" &&
+        absent "$stage/session" && absent "$stage/group" && absent "$stage/launch-owner" && absent "$stage/tile-release" && absent "$stage/observed-session" &&
             absent "$stage/term-intent" && absent "$stage/term-sent" && native_idle && write_tag stopped
         return
     fi
@@ -275,17 +343,38 @@ stop_session() {
     done
     return 1
 }
+no_input_evidence() {
+    for leaf in tile-original tile-prepared armed tile-gate tile-dispatch-intent tile-release group launch-owner session observed-session term-intent term-sent; do absent "$stage/$leaf" || return 1; done
+}
+no_navigation_handoff() {
+    absent "$stage/prepare-started" && absent "$stage/prepare-no-input" && no_input_evidence || return 1
+    if tag staged; then tag navigation-untouched; else absent "$stage/staged" && absent "$stage/installed"; fi
+}
+stock_return() {
+    if absent "$stage/stock-original"; then
+        no_navigation_handoff
+        return
+    fi
+    tag staged && original=$(line "$stage/stock-original") || return 1
+    if absent "$stage/prepare-started"; then
+        no_navigation_handoff || return 1
+    elif ! tag prepare-started || ! absent "$stage/navigation-untouched"; then return 1
+    elif absent "$stage/tile-original"; then
+        tag prepare-no-input && no_input_evidence || return 1
+    else
+        absent "$stage/prepare-no-input" && matches "$stage/tile-original" "$original" || return 1
+        if [ "$1" = restore ]; then [ "$(tile restore)" = tile_restored ] || return 1; fi
+    fi
+    observed_stock=$(stock_inspect) && [ "$observed_stock" = "$original" ]
+}
 restore() {
-    tag stopped && observer_idle && native_idle || return 1
-    if ! absent "$stage/tile-original"; then
-        plain "$stage/tile-original" && [ "$(tile restore)" = tile_restored ] || return 1
-    else absent "$stage/tile-dispatch-intent" && absent "$stage/tile-prepared" && absent "$stage/tile-gate" && absent "$stage/armed" || return 1; fi
+    tag stopped && observer_idle && native_idle && stock_return restore || return 1
     if tag staged; then same && matches "$stage/view" "$(view)" || return 1
     else absent "$stage/tile-original" && absent "$stage/armed" && state >/dev/null || return 1; fi
     write_tag restored
 }
 close_stage() {
-    tag restored && tag stopped && observer_idle && native_idle || return 1
+    tag restored && tag stopped && observer_idle && native_idle && stock_return verify || return 1
     if tag staged; then same && matches "$stage/view" "$(view)" || return 1; else state >/dev/null || return 1; fi
     if ! absent "$stage/tile-dispatch-intent"; then drained || return 1; fi
     awk -v stage="$stage" '$2==stage || index($2,stage"/")==1 {bad=1} END{exit bad}' "$proc/mounts" &&
@@ -294,18 +383,19 @@ close_stage() {
 
 case "$mode" in
     admit) admit 2>/dev/null || fail "$admit_reason"; reply admitted;;
-    absent) absent "$stage" && state >/dev/null 2>&1 && view >/dev/null 2>&1 || fail absent; reply absent;;
+    absent) absent "$stage" && state >/dev/null 2>&1 || fail absent; reply absent;;
     stage) new_stage 2>/dev/null || fail "$admit_reason"; reply staged;;
     install|prepare|arm|tap|claim|observe|witness|cancel|stop|restore|close)
         if absent "$stage"; then
-            case "$mode" in stop|restore|close) state >/dev/null 2>&1 && view >/dev/null 2>&1 || fail unsafe_absence;; *) fail absent_stage;; esac
+            case "$mode" in stop|restore|close) state >/dev/null 2>&1 || fail unsafe_absence;; *) fail absent_stage;; esac
             reply already_absent
             exit 0
         fi
         stage_lock 2>/dev/null || fail stage_owner_or_busy
+        case "$mode" in claim|stop|witness|observe) if system_shell 2>/dev/null; then shell_trusted=1; fi;; esac
         case "$mode" in
             install) install 2>/dev/null || fail install; reply installed;;
-            prepare) prepare 2>/dev/null || fail preparation; reply prepared;;
+            prepare) prepare 2>/dev/null || fail "$prepare_reason"; reply prepared;;
             arm) arm 2>/dev/null || fail arm; reply armed;;
             tap) tap 2>/dev/null || fail uncertain_or_refused_tap;;
             observe) observe 2>/dev/null || fail observer;;

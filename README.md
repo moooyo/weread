@@ -55,6 +55,9 @@ in six pairs. The Kindle package enables the measured optimization. That
 candidate was installed and the ordinary WeRead Library entry retested
 without resetting private data. The timed starts used a file-open request,
 not an ordinary tile release; they do not measure the new interval or optical ink.
+In a [later single ordinary-card retest](docs/review/library-startup-latency-20261119/daily-render-20261121.md),
+the complete shelf was present in framebuffer memory by **8.258 s** after
+synthetic release. The installed build did not log the corresponding submission.
 
 In the [six-pair orientation A/B](docs/review/startup-orientation-20261121/physical-balanced.md),
 reusing a same-launch calibration instead of two timed-out queries improved

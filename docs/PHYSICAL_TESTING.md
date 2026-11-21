@@ -47,6 +47,12 @@ their original name. The November 21 operator retest confirmed responsive
 native return but did not time the shelf frame or a sort interaction; it
 remains an untimed functional observation under both definitions.
 
+In the later [unchanged-installation automatic retest](review/library-startup-latency-20261119/daily-render-20261121.md),
+the same-launch GUI and a complete digital grid scene were confirmed: one
+synthetic release to first matching framebuffer observation **≤ 8.258 s**.
+No frame-specific render or submission timestamp was available. This is
+therefore an observation bound only, not a measured primary endpoint.
+
 ## November 20 font admission and entry audit
 
 The [guarded CPU-only comparison](review/library-startup-latency-20261119/physical-20261120.md)
