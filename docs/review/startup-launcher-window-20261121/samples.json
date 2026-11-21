@@ -1,0 +1,63 @@
+{
+  "scope": "Linux detached supervisor to mock application entry, not Kindle or Library SEND.",
+  "endpoint": "Parent monotonic clock immediately before run_launcher to timestamp in a Python mock-app entry witness (includes its startup); no polling or SSH receipt.",
+  "fixture": "Scribe 5.19.5 profile, fake services and window manager, /dev/null framebuffer, no real input.",
+  "settle_seconds": 2,
+  "fixture_usleep_ms": 10,
+  "columns": ["case", "entry_ms", "xwininfo", "blanket", "starts", "exit_status", "statusbar_stops", "statusbar_starts", "native_restored", "passed"],
+  "ordering": "First two cases of each cohort are warmups; no cases failed or were excluded from the fixed measured pairs.",
+  "cohorts": {
+    "unchanged_x_probe": {
+      "added_query_delay_ms": 0,
+      "samples": [
+        ["A0", 2361.631592, 1, 1, 1, 0, 1, 1, true, true],
+        ["B0", 2365.277539, 0, 1, 1, 0, 1, 1, true, true],
+        ["A1", 2396.795713, 1, 1, 1, 0, 1, 1, true, true],
+        ["B1", 2349.57591, 0, 1, 1, 0, 1, 1, true, true],
+        ["B2", 2337.009202, 0, 1, 1, 0, 1, 1, true, true],
+        ["A2", 2415.64841, 1, 1, 1, 0, 1, 1, true, true],
+        ["A3", 2378.841462, 1, 1, 1, 0, 1, 1, true, true],
+        ["B3", 2350.666792, 0, 1, 1, 0, 1, 1, true, true],
+        ["B4", 2368.016998, 0, 1, 1, 0, 1, 1, true, true],
+        ["A4", 2412.9383, 1, 1, 1, 0, 1, 1, true, true],
+        ["A5", 2390.401536, 1, 1, 1, 0, 1, 1, true, true],
+        ["B5", 2341.284473, 0, 1, 1, 0, 1, 1, true, true],
+        ["B6", 2370.933734, 0, 1, 1, 0, 1, 1, true, true],
+        ["A6", 2385.219949, 1, 1, 1, 0, 1, 1, true, true]
+      ],
+      "measured": {
+        "control_median_ms": 2393.5986245,
+        "candidate_median_ms": 2350.121351,
+        "paired_savings_ms": [47.219802999999956, 78.6392079999996, 28.174669999999878, 44.92130199999974, 49.11706299999969, 14.286214999999629],
+        "median_paired_saving_ms": 46.07055249999985,
+        "faster_pairs": 6
+      }
+    },
+    "controlled_200ms_x_probe": {
+      "added_query_delay_ms": 200,
+      "samples": [
+        ["A0", 2589.237644, 1, 1, 1, 0, 1, 1, true, true],
+        ["B0", 2394.757474, 0, 1, 1, 0, 1, 1, true, true],
+        ["A1", 2626.802683, 1, 1, 1, 0, 1, 1, true, true],
+        ["B1", 2383.442674, 0, 1, 1, 0, 1, 1, true, true],
+        ["B2", 2387.034913, 0, 1, 1, 0, 1, 1, true, true],
+        ["A2", 2616.550296, 1, 1, 1, 0, 1, 1, true, true],
+        ["A3", 2614.818721, 1, 1, 1, 0, 1, 1, true, true],
+        ["B3", 2380.639576, 0, 1, 1, 0, 1, 1, true, true],
+        ["B4", 2362.805062, 0, 1, 1, 0, 1, 1, true, true],
+        ["A4", 2607.365141, 1, 1, 1, 0, 1, 1, true, true],
+        ["A5", 2603.741464, 1, 1, 1, 0, 1, 1, true, true],
+        ["B5", 2365.24768, 0, 1, 1, 0, 1, 1, true, true],
+        ["B6", 2376.855093, 0, 1, 1, 0, 1, 1, true, true],
+        ["A6", 2623.291794, 1, 1, 1, 0, 1, 1, true, true]
+      ],
+      "measured": {
+        "control_median_ms": 2615.6845085,
+        "candidate_median_ms": 2378.7473345,
+        "paired_savings_ms": [243.360009, 229.51538299999993, 234.17914500000006, 244.56007900000031, 238.49378400000023, 246.43670100000008],
+        "median_paired_saving_ms": 240.9268965000001,
+        "faster_pairs": 6
+      }
+    }
+  }
+}

@@ -70,6 +70,14 @@ establish behavior on other models or after a full device restart.
 
 The user removed the application drop-down Quick panel and application Wi-Fi from product scope. Their UI, native handoffs, and project-owned C Wi-Fi helper are historical experiments, not current features or pending deliverables. The product does not require the helper. Reader brightness, night mode, startup feedback, continuous selection, and sleep supervision remain in scope. The independent Rust/Slint application, conditional-server decision, and unselected project license are unchanged.
 
+Ordinary launcher startup does not enumerate X windows for these controls
+or advertise their availability. A generation-matched explicit native
+settings request still requires an initialized application and a saved
+checkpoint. Only then does the supervisor check the firmware and tools,
+return display ownership, and read the current foreground, view and window
+tree before sending an open command. The independent sleep-cover and
+display-takeover checks stay on the normal startup path.
+
 The earlier ABI experiment used a short-lived glibc helper and bounded private binary pipes because the static musl application could not `dlopen` the firmware's glibc `liblipc`. It used a fixed KOReader/OpenLIPC review without introducing a Jobman, KOReader, or Lua runtime or packaging OS libraries. Its 17 synthetic checks, `GLIBC_2.4` requirement, read-only Scribe 2022 firmware 5.19.5 status/probe observations, and empty-enterprise-flag handling remain historical evidence. They did not test a new real network connection.
 
 The removed `095f` overlay candidate and the later application `582b72345d863e918e403457cd32ef25c1efc8b8dce314027930df6f2fc0880d` / helper `3ec60abc4b335cfbbd23bfe4265aadae67fd52f55446a4da5eabe6c72f75f4da` experiments retain their probe, private-mock, and VM records in [Verification](VERIFICATION.md) and [Physical testing](PHYSICAL_TESTING.md). Earlier native Quick/Wi-Fi traces below are also retained as history; none commits the product to restoring the removed features.

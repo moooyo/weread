@@ -60,6 +60,12 @@ tests whether the two startup orientation queries can reuse a confirmed
 same-launch calibration. The feature is off in Kindle packages; it has no
 new physical result. The launcher's two-second wait is unchanged.
 
+A [separate launcher change](docs/review/startup-launcher-window-20261121/README.md)
+removes the startup window-tree scan for the retired Quick and Wi-Fi controls.
+On the Linux worker, the median paired saving to **mock application entry**
+was 46 ms over six warm pairs. The November 20 daily installation and frozen
+orientation pilot do not contain this change; no Kindle saving is claimed.
+
 The [catalog notification adapter](docs/CATALOG_ENTRY_ADAPTER.md) was merged to
 `main` on 2026-11-19. It retains the penguin cover and default FBInk behavior.
 The WeRead package does not install or replace the shared runtime. Device

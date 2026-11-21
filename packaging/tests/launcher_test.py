@@ -1391,8 +1391,9 @@ class LauncherLifecycleTests(unittest.TestCase):
         self.managed_fixture(**behavior)
         self.env.update(TEST_BLANKET_AVAILABLE="1" if available else "0",
                         TEST_BLANKET_MODULES=modules)
-        if not with_wm:
-            return None
+        return self.fixture_window_manager() if with_wm else None
+
+    def fixture_window_manager(self):
         ready = self.root / "cover-awesome-ready"
         error = self.root / "cover-awesome.stderr"
         source = self.root / "cover-awesome.py"
@@ -2097,7 +2098,8 @@ class LauncherLifecycleTests(unittest.TestCase):
                     self.assertGreaterEqual(entry["argument_count"], len(entry["arguments"]))
                     self.assertLessEqual(len(entry["arguments"]), 2)
 
-    def install_supervisor_query_fixture(self, command, behavior="blocked", gated=False, apply_before_block=False):
+    def install_supervisor_query_fixture(self, command, behavior="blocked", gated=False, apply_before_block=False,
+                                         property_query=("com.lab126.powerd", "state")):
         self.assertIn(command, ("xwininfo", "lipc-get-prop", "status", "pidof", "start", "stop", "xrefresh"))
         self.assertIn(behavior, ("blocked", "released", "oversize", "flood", "empty"))
         original = self.root / "original-query" / command
@@ -2115,6 +2117,7 @@ class LauncherLifecycleTests(unittest.TestCase):
             TEST_SUPERVISOR_QUERY_RELEASE=str(self.root / "supervisor-query-release"),
             TEST_SUPERVISOR_QUERY_BYTES=str(output_bytes),
             TEST_SUPERVISOR_QUERY_APPLY_FIRST="1" if apply_before_block else "0",
+            TEST_SUPERVISOR_QUERY_SERVICE=property_query[0], TEST_SUPERVISOR_QUERY_PROPERTY=property_query[1],
         )
         body = textwrap.dedent(r'''
             import errno
@@ -2129,7 +2132,8 @@ class LauncherLifecycleTests(unittest.TestCase):
             arguments = sys.argv[1:]
             command = os.environ["TEST_SUPERVISOR_QUERY_COMMAND"]
             armed = os.environ["TEST_SUPERVISOR_QUERY_ARM"]
-            applicable = command != "lipc-get-prop" or arguments == ["-s", "com.lab126.powerd", "state"]
+            applicable = command != "lipc-get-prop" or arguments == ["-s", os.environ["TEST_SUPERVISOR_QUERY_SERVICE"],
+                                                                   os.environ["TEST_SUPERVISOR_QUERY_PROPERTY"]]
             if not applicable or (armed and not Path(armed).exists()):
                 original = os.environ["TEST_SUPERVISOR_QUERY_ORIGINAL"]
                 os.execv(original, [original, *arguments])
@@ -2574,16 +2578,23 @@ class LauncherLifecycleTests(unittest.TestCase):
     def test_cover_sleep_revokes_display_permission_if_a_passcode_appears_before_wake(self):
         awesome = self.cover_sleep_fixture()
         observed = []
+        barriers = self.observe_wake_probe_barriers()
 
         def drive(_):
             pid = self.wait_for_managed_application()
             observed.append(pid)
             self.suspend_cover_application(pid)
+            barrier = "_weread_fixture_wake_barrier custom-cover-settled"
+            self.emit(barrier)
+            self.wait_until(lambda: barriers.is_file() and barrier in barriers.read_text().splitlines(), require_launcher_running=True)
+            self.assertEqual(self.process_state(awesome.pid), "T")
+            self.assertNotIn("xrefresh:", self.trace())
             (self.root / "passcode-enabled").touch()
             self.emit("outOfScreenSaver 1")
 
         status, _, error = self.run_launcher(drive)
         self.assertEqual(status, 1, error)
+        self.assertIn("Custom sleep display permission changed before wake; restoring native ownership.", error)
         self.assertIsNone(self.process_state(observed[0]))
         self.assertFalse(any(":wake:" in row for row in self.managed_events()))
         self.wait_until(lambda: self.process_state(awesome.pid) not in (None, "T", "Z", "X"))
@@ -3924,21 +3935,22 @@ class LauncherLifecycleTests(unittest.TestCase):
         self.assert_native_theme_helpers_finished()
         self.assert_native_theme_restored(awesome)
 
-    def test_supervisor_startup_window_query_timeout_reaps_its_group_and_continues(self):
+    def test_supervisor_startup_blanket_query_timeout_reaps_its_group_and_continues(self):
         awesome = self.native_dark_fixture()
-        _, ready, _ = self.install_supervisor_query_fixture("xwininfo")
+        _, ready, _ = self.install_supervisor_query_fixture("lipc-get-prop", property_query=("com.lab126.blanket", "load"))
+        self.observe_native_capture_reads(4096)
         self.observe_cleanup_descriptor()
 
         status, _, error = self.run_launcher(lambda _: self.wait_until(ready.exists))
         self.assertEqual(status, 0, error)
         self.assertEqual(self.starts(), ["0"])
-        self.assertIn("Native settings are unavailable", error)
+        self.assertFalse(any(event.startswith("native:") for event in self.trace()))
         self.assert_supervisor_query_resources_released()
         self.assert_native_theme_restored(awesome)
 
-    def test_supervisor_startup_window_query_term_closes_fifo_before_display_ownership(self):
+    def test_supervisor_startup_blanket_query_term_closes_fifo_before_display_ownership(self):
         awesome = self.native_dark_fixture(TEST_NATIVE_THEME_EXIT="hold", TEST_NATIVE_THEME_TARGET="")
-        _, ready, _ = self.install_supervisor_query_fixture("xwininfo")
+        _, ready, _ = self.install_supervisor_query_fixture("lipc-get-prop", property_query=("com.lab126.blanket", "load"))
         self.observe_cleanup_descriptor()
 
         def drive(child):
@@ -3954,8 +3966,11 @@ class LauncherLifecycleTests(unittest.TestCase):
         self.assertIsNone(awesome.poll())
         self.assert_supervisor_query_resources_released()
 
-    def test_supervisor_window_flood_rejects_a_zero_exit_truncated_capture_before_reading(self):
-        awesome = self.native_dark_fixture()
+    def test_supervisor_requested_window_flood_rejects_a_zero_exit_truncated_capture_before_reading(self):
+        self.native_fixture("wifi")
+        awesome = self.fixture_window_manager()
+        self.env["TEST_NATIVE_THEME_IDENTITIES"] = str(self.root / "native-helper-identities")
+        self.addCleanup(self.cleanup_native_theme_helpers)
         _, ready, count = self.install_supervisor_query_fixture("xwininfo", behavior="flood")
         self.observe_native_capture_reads(65536)
         self.observe_cleanup_descriptor()
@@ -3966,7 +3981,9 @@ class LauncherLifecycleTests(unittest.TestCase):
         # above the logical tree quota and at or below this capture hard cap.
         self.assertGreater(int(count.read_text()), 65536)
         self.assertLessEqual(int(count.read_text()), 262144)
-        self.assertIn("Native settings are unavailable", error)
+        self.assertEqual(self.native_starts(), ["0|0|closed", "1|1|failed"])
+        self.assertEqual(self.native_queries(), ["activeApp|none|KPP_HOME", "activeView|none|KPP_HOME"])
+        self.assertFalse(any(event.startswith("native:") for event in self.trace()))
         self.assert_supervisor_query_resources_released()
         self.assert_native_theme_restored(awesome)
 
@@ -4316,10 +4333,8 @@ class LauncherLifecycleTests(unittest.TestCase):
         self.assertIn("Resident wake was superseded", error)
         self.assert_native_theme_resident_cleanup(awesome, original[0])
 
-    def test_native_snapshot_does_not_require_a_dynconf_helper(self):
-        awesome = self.native_dark_fixture()
-        (self.bin / "get-dynconf-value").unlink()
-        system = self.root / "without-dynconf"
+    def isolate_standard_commands(self):
+        system = self.root / "standard-commands"
         system.mkdir()
         for name in ("sh", "awk", "sed", "head", "tr", "mkdir", "cat", "od", "mkfifo",
                      "sleep", "rm", "rmdir", "mv", "grep", "dirname", "basename", "env", "setsid", "wc"):
@@ -4328,6 +4343,11 @@ class LauncherLifecycleTests(unittest.TestCase):
             (system / name).symlink_to(command)
         (system / "python3").symlink_to(sys.executable)
         self.env["PATH"] = str(self.bin) + ":" + str(system)
+
+    def test_native_snapshot_does_not_require_a_dynconf_helper(self):
+        awesome = self.native_dark_fixture()
+        (self.bin / "get-dynconf-value").unlink()
+        self.isolate_standard_commands()
         self.assertIsNone(shutil.which("get-dynconf-value", path=self.env["PATH"]))
         status, _, error = self.run_launcher()
         self.assertEqual(status, 0, error)
@@ -5181,6 +5201,38 @@ class LauncherLifecycleTests(unittest.TestCase):
                 if entry.poll() is None:
                     entry.kill()
                 entry.wait(timeout=3)
+
+    def test_library_startup_skips_native_settings_tree_and_markers_but_keeps_power_and_display(self):
+        self.native_fixture("")
+        self.env.update(TEST_SLEEP="1", TEST_BLANKET_AVAILABLE="1", TEST_BLANKET_MODULES="splash screensaver")
+        awesome = self.fixture_window_manager()
+        self.script(self.bin / "xwininfo", 'echo "unexpected-tree" >>"$TEST_TRACE"; exit 97')
+        delay = self.root / "library-power-settle"
+        original_sleep = shutil.which("sleep", path=self.env["PATH"])
+        self.assertIsNotNone(original_sleep)
+        self.env.update(TEST_LIBRARY_SETTLE=str(delay), TEST_ORIGINAL_SLEEP=original_sleep)
+        self.script(self.bin / "sleep", 'if [ "$*" = 2 ]; then echo 2 >>"$TEST_LIBRARY_SETTLE"; fi\n'
+                    'exec "$TEST_ORIGINAL_SLEEP" "$@"')
+
+        def drive(entry, _worker):
+            self.wait_until(lambda: self.starts() == ["0"])
+            directory = self.root / "lock"
+            self.assertTrue((directory / "state-open").is_file())
+            for kind in ("wifi", "quick"):
+                self.assertFalse((directory / f"native-{kind}-available").exists())
+            self.assertIsNone(entry.poll())
+            self.assertEqual(delay.read_text().splitlines(), ["2"])
+            self.assertEqual((self.root / "blanket-queries").read_text().splitlines(), ["load"])
+            self.assertEqual(self.process_state(awesome.pid), "T")
+            self.assertIn("stop:statusbar", self.trace())
+            self.assertNotIn("unexpected-tree", self.trace())
+            os.kill(int((directory / "application-pid").read_text()), signal.SIGTERM)
+
+        self.assertEqual(self.run_library_entry(drive), 0)
+        self.assertNotIn("unexpected-tree", self.trace())
+        self.assertEqual(self.native_queries(), [])
+        self.assert_frame_guards_reaped(create_count=1)
+        self.assert_native_theme_restored(awesome)
 
     def test_library_entry_waits_for_native_recovery_and_preserves_worker_status(self):
         self.env.update(TEST_SLEEP="1", TEST_TERM_EXIT="7")
@@ -6384,6 +6436,41 @@ class LauncherLifecycleTests(unittest.TestCase):
         self.assertIn("restored:book-7:3:42", self.application_trace())
         self.assertFalse((self.root / "lock").exists())
 
+    def test_next_native_request_rechecks_tree_after_handoff_and_rejects_missing_visibility(self):
+        self.native_fixture("wifi")
+        application = self.home / "app" / "weread"
+        source = application.read_text()
+        first_request = '[ "$WEREAD_LAUNCH_GENERATION" = 1 ]; then'
+        self.assertEqual(source.count(first_request), 1)
+        application.write_text(source.replace(first_request, '[ "$WEREAD_LAUNCH_GENERATION" -le 2 ]; then', 1))
+        probe = self.bin / "xwininfo"
+        original = self.root / "original-window-tree"
+        probe.rename(original)
+        self.env["TEST_ORIGINAL_TREE"] = str(original)
+        self.script(probe,
+                    'directory="$WEREAD_HOME/../lock"\n'
+                    'if [ -f "$directory/native-wifi-request" ]; then\n'
+                    '    IFS=: read -r generation rest <"$directory/generation"\n'
+                    '    if [ "$generation" = 2 ]; then\n'
+                    '        echo second-request-tree >>"$TEST_TRACE"\n'
+                    '        echo "Root window id: 0x50"; exit 0\n'
+                    '    fi\n'
+                    'fi\nexec "$TEST_ORIGINAL_TREE" "$@"')
+
+        def drive(_supervisor):
+            self.wait_for_native_open("wifi")
+            self.close_native()
+
+        status, _, error = self.run_launcher(drive)
+        self.assertEqual(status, 0, error)
+        self.assertEqual(self.native_starts(), ["0|0|closed", "1|1|closed", "1|1|failed"])
+        self.assertEqual(self.native_queries()[-2:], ["activeApp|none|KPP_HOME", "activeView|none|KPP_HOME"])
+        trace = self.trace()
+        self.assertEqual(trace.count("second-request-tree"), 1)
+        self.assertEqual(trace[:trace.index("second-request-tree")].count("start:statusbar"), 2)
+        self.assertEqual(sum(event.startswith("native:") for event in trace), 1)
+        self.assert_frame_guards_reaped(create_count=3)
+
     def test_native_quick_settings_waits_for_its_mapped_window_to_close(self):
         self.native_fixture("quick")
 
@@ -6447,6 +6534,30 @@ class LauncherLifecycleTests(unittest.TestCase):
         self.assertIn("did not acknowledge a saved native", error)
         self.assertFalse(any(item.startswith("native:") for item in self.trace()))
         self.assertEqual(self.starts(), ["0"])
+
+    def assert_native_request_rejects_unavailable_interface(self):
+        status, _, error = self.run_launcher()
+        self.assertEqual(status, 1, error)
+        self.assertIn("no supported window-observation interface", error)
+        self.assertEqual(self.starts(), ["0"])
+        self.assertEqual(self.native_queries(), [])
+        self.assertEqual(self.native_window_polls(), [])
+        self.assertFalse(any(event.startswith("native:") for event in self.trace()))
+        self.assertEqual(self.trace().count("start:statusbar"), 1)
+        self.assert_frame_guards_reaped(create_count=1)
+
+    def test_native_request_requires_reviewed_firmware_even_when_launch_is_allowed(self):
+        self.native_fixture("wifi")
+        (self.home / "data" / "device-allowlist").write_text("scribe 5.19.9\n")
+        (self.root / "firmware").write_text("Kindle 5.19.9 (fixture)\n")
+        self.assert_native_request_rejects_unavailable_interface()
+
+    def test_native_request_requires_window_tool_only_when_requested(self):
+        self.native_fixture("quick")
+        (self.bin / "xwininfo").unlink()
+        self.isolate_standard_commands()
+        self.assertIsNone(shutil.which("xwininfo", path=self.env["PATH"]))
+        self.assert_native_request_rejects_unavailable_interface()
 
     def test_failed_native_save_does_not_open_or_resume_a_previous_checkpoint(self):
         self.native_fixture("quick")

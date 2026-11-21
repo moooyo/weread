@@ -56,3 +56,13 @@ pilot before judging whether to time six pairs.
 See the linked experiment for build results and remaining gates. The [power-observer
 investigation](docs/review/startup-orientation-20261121/power-wait.md) keeps
 the two-second wait unchanged. Neither changes the measured font result.
+
+## Independent launcher change
+
+The working supervisor no longer reads the X window tree at startup for
+the retired Wi-Fi and Quick settings controls. Explicit native requests
+still require current, live checks. In an independent Linux fixture, six
+of six pairs reached the mock app faster (46.071 ms median paired saving).
+The [source comparison and samples](docs/review/startup-launcher-window-20261121/README.md)
+are **not** a new Scribe timing or installation. Keep the existing orientation
+pilot and its worker sources frozen, including their original supervisor.

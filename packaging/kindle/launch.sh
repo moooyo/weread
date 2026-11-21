@@ -259,7 +259,6 @@ NATIVE_COMMAND_FAILURE=''
 NATIVE_QUERY_OUTPUT_LIMIT=4096
 NATIVE_WINDOW_OUTPUT_LIMIT=65536
 NATIVE_COMMAND_FILE_BLOCKS=256
-NATIVE_SETTINGS_SUPPORTED=0
 NATIVE_OBSERVER_PID=''
 NATIVE_GENERATION=0
 NATIVE_SLEEPING=0
@@ -1520,10 +1519,6 @@ start_application() {
     if ! publish_native_portrait_calibration native-portrait-calibration; then
         launcher_log '%s\n' 'weread: Native portrait record publication failed; keeping fixed orientation.'
     fi
-    if [ "$NATIVE_SETTINGS_SUPPORTED" -eq 1 ]; then
-        printf '%s:%s\n' "$APP_GENERATION" "$LAUNCH_TOKEN" >"$LOCK_DIR/native-wifi-available"
-        printf '%s:%s\n' "$APP_GENERATION" "$LAUNCH_TOKEN" >"$LOCK_DIR/native-quick-available"
-    fi
     if [ "$APP_NATIVE_RETURN_INTENT" -eq 1 ]; then
         printf '%s:%s\n' "$APP_GENERATION" "$LAUNCH_TOKEN" >"$LOCK_DIR/native-return"
     fi
@@ -2373,24 +2368,18 @@ native_window_tree() {
     cat "$LOCK_DIR/native-theme-output" 3>&-
 }
 
-configure_native_settings() {
+native_settings_tools_available() {
     # These interfaces were reviewed in the Scribe 5.20.1 stock firmware.
     # A matching 5.19.5 exported interface is an experimental device gate,
     # not a claim that static firmware review verifies physical behavior.
     case "$PROFILE:$FIRMWARE" in
         scribe:5.19.5|scribe:5.20.1) ;;
-        *) return 0 ;;
+        *) return 1 ;;
     esac
-    command -v lipc-set-prop >/dev/null 2>&1 || return 0
-    command -v lipc-get-prop >/dev/null 2>&1 || return 0
-    command -v xwininfo >/dev/null 2>&1 || return 0
-    command -v usleep >/dev/null 2>&1 || return 0
-    if native_window_tree >"$LOCK_DIR/native-baseline" &&
-        grep -q 'MapState=' "$LOCK_DIR/native-baseline"; then
-        NATIVE_SETTINGS_SUPPORTED=1
-    else
-        launcher_log '%s\n' 'weread: Native settings are unavailable because native window visibility cannot be observed.'
-    fi
+    command -v lipc-set-prop >/dev/null 2>&1 &&
+        command -v lipc-get-prop >/dev/null 2>&1 &&
+        command -v xwininfo >/dev/null 2>&1 &&
+        command -v usleep >/dev/null 2>&1
 }
 
 observe_native_settings() {
@@ -2636,7 +2625,7 @@ resume_from_native() {
 
 begin_native_settings() {
     native_open_kind=$1
-    [ "$NATIVE_SETTINGS_SUPPORTED" -eq 1 ] || fail 'Native settings have no supported window-observation interface.'
+    native_settings_tools_available || fail 'Native settings have no supported window-observation interface.'
     release_display || return 1
     native_baseline_app=''
     native_baseline_view=''
@@ -2793,7 +2782,6 @@ start_power_observer || fail 'Power observer startup failed before a proven subs
 
 sleep 2
 export WEREAD_HOME
-configure_native_settings
 configure_cover_sleep
 take_display
 start_application 0
