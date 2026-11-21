@@ -197,6 +197,36 @@ never package a simulation build. Do not query the Kindle just to reserve it.
 True physical turning and touch mapping still need independent sensor and
 target evidence. Neither a fixed-pose visit nor a synthetic tap satisfies them.
 
+### Operator-assisted opposite portrait and shelf tap
+
+This separate single-visit plan opens a **public offline Library** using the
+orientation-reuse candidate. It does not use the installed daily card, put
+the device to sleep or time startup. Agree on the two actions with a present
+operator while off-device; do not ask them to touch a peer's running visit.
+
+1. Freeze a new plan with `assisted_shelf.py` and run the worker-only
+   `run_assisted_shelf.py --work WORK --plan PLAN --preflight`. Use the live
+   runner with `--operator-ready`, the owner and lease utility only after
+   peer handoff and when an immediate visit is possible.
+2. Read the native reference **under the lease**. If it is `D:1`, tell the
+   operator to keep the screen facing them and turn it half a turn in its own
+   plane; if it is already `U:3`, ask them to hold it still. The operator does
+   not open any card. The candidate must not start unless the prelaunch
+   native calibration and the independent sensor readings agree on the
+   opposite portrait. An unmet gate is a skipped launch, not a pass.
+3. When the complete shelf is visible, the operator waits about five seconds,
+   taps the **rightmost bottom tab with the person icon** exactly once and
+   leaves the resulting page visible. It is the profile tab, internally
+   `settings`, not the settings list reached through a second tap. If the
+   intended control is absent or unreadable, do not tap blindly. Keep the
+   pose and let the trial close itself. Never ask for a photo of a private shelf.
+4. Separate the native reference, prelaunch sample, digital shelf observation,
+   application-reported final route, and operator's account. A `settings`
+   final route alone cannot prove who tapped, where the finger landed or what
+   the operator saw. Restore, verify absence, and release before discussing
+   results. This does not qualify the other touch targets, a turn during
+   startup, held-gesture cancellation or wake after turning in sleep.
+
 The frozen collector measures file-open request to first Library `SEND`.
 The [current primary metric](../../docs/PHYSICAL_TESTING.md#library-first-frame-startup)
 instead starts at release of the ordinary stock tile (label automated input
