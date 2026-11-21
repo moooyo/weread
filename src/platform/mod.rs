@@ -918,7 +918,6 @@ impl RenderSink for KindleRenderSink {
         &self,
         calibration: NativePortraitCalibration,
     ) -> Result<(), PlatformError> {
-        use slint_backend_kindle::NativePortraitOrientation;
         let handle = self
             .orientation
             .as_ref()
@@ -935,10 +934,7 @@ impl RenderSink for KindleRenderSink {
                 "the initial native portrait calibration is immutable",
             ));
         }
-        let direction = match calibration.direction {
-            NativePortraitDirection::Up => NativePortraitOrientation::Up,
-            NativePortraitDirection::Down => NativePortraitOrientation::Down,
-        };
+        let direction = calibration.direction.into();
         handle
             .set_calibrated_presentation(direction, direction, calibration.framebuffer_rotation)
             .map_err(|error| PlatformError::Operation(error.to_string()))?;
@@ -954,7 +950,6 @@ impl RenderSink for KindleRenderSink {
         &self,
         observation: NativePortraitCalibration,
     ) -> Result<(), PlatformError> {
-        use slint_backend_kindle::NativePortraitOrientation;
         let Some(handle) = self.orientation.as_ref() else {
             return Ok(());
         };
@@ -984,14 +979,10 @@ impl RenderSink for KindleRenderSink {
         if confirmed_rotation != raw_rotation {
             return Ok(());
         }
-        let scanout = match scanout {
-            NativePortraitDirection::Up => NativePortraitOrientation::Up,
-            NativePortraitDirection::Down => NativePortraitOrientation::Down,
-        };
         // The protected observation supplies scope and freshness; its winmgr
         // direction does not redefine the initial scanout/GETVAR relationship.
         handle
-            .set_calibrated_presentation(holding, scanout, raw_rotation)
+            .set_calibrated_presentation(holding, scanout.into(), raw_rotation)
             .map_err(|error| PlatformError::Operation(error.to_string()))
     }
 

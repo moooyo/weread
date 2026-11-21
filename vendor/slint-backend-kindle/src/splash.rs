@@ -8,6 +8,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use crate::framebuffer::Framebuffer;
+use crate::orientation::NativePortraitOrientation;
 use crate::render_control::GrayMode;
 
 const UPDATE_INTERVAL: Duration = Duration::from_millis(1_250);
@@ -312,6 +313,7 @@ impl StartupSplash {
         images: StartupImages,
         approved_size: (u32, u32),
         dark_mode: bool,
+        portrait: Option<(NativePortraitOrientation, u32)>,
     ) -> io::Result<Self> {
         let framebuffer = Framebuffer::open()?;
         if (framebuffer.width, framebuffer.height) != approved_size {
@@ -320,7 +322,7 @@ impl StartupSplash {
                 "framebuffer dimensions changed after launch approval",
             ));
         }
-        let flipped = crate::platform::launch_render_offset("splash") == 180;
+        let flipped = crate::platform::splash_render_offset(&framebuffer, portrait) == 180;
         let mut renderer = Renderer::new(framebuffer, images, flipped, dark_mode)?;
         renderer.draw_initial(0);
         let mut splash = Self {

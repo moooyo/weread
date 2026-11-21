@@ -13,13 +13,18 @@ from freeze import SCHEDULE
 
 
 TRACE = re.compile(r"WEREAD_STARTUP ([0-9]+)\.([0-9]{9}) ([a-z0-9_]+)")
+QUERY_OUTCOMES = ("success", "failed", "unavailable", "timeout")
 
 
-def metrics(request, trace):
+def request_ns(request):
     match = re.fullmatch(r"REQUEST ([0-9]+)\.([0-9]{9})\s*", request)
     if not match:
         raise ValueError("Missing or repeated device request timestamp")
-    start = int(match[1]) * 10**9 + int(match[2])
+    return int(match[1]) * 10**9 + int(match[2])
+
+
+def metrics(request, trace, *, outcomes=QUERY_OUTCOMES):
+    start = request_ns(request)
     times = {}
     previous = start
     for line in trace.splitlines():
@@ -39,7 +44,7 @@ def metrics(request, trace):
               "t_from_request_ns": {key: value - start for key, value in times.items()}}
     for site in ("splash", "event_loop"):
         prefix = site + "_orientation_"
-        found = [status for status in ("success", "failed", "unavailable", "timeout") if prefix + status in times]
+        found = [status for status in outcomes if prefix + status in times]
         if len(found) != 1 or prefix + "begin" not in times or times[prefix + found[0]] < times[prefix + "begin"]:
             raise ValueError("Missing orientation outcome")
         result[site] = {"outcome": found[0], "elapsed_ms": (times[prefix + found[0]] - times[prefix + "begin"]) / 1e6}
@@ -76,8 +81,11 @@ def picture(reader, name):
     return software, aligned, {"aligned_degrees": turn, "driver_software_body_mae": score, "opposite_body_mae": other}
 
 
-def analyze(path, qualifications=False):
+def analyze(path, qualifications=False, *, parse_sample=metrics, verify_archive=None):
     with tarfile.open(path, "r:gz") as archive:
+        if verify_archive is not None:
+            verify_archive(archive)
+
         def read(case, name):
             entry = archive.getmember(f"out/{case}/{name}")
             if not entry.isfile() or not 0 < entry.size <= 12 * 1024**2:
@@ -108,7 +116,7 @@ def analyze(path, qualifications=False):
             return result
         for case in SCHEDULE[4:]:
             lane = case[0]
-            row = metrics(read(case, "request").decode(), read(case, "markers").decode())
+            row = parse_sample(read(case, "request").decode(), read(case, "markers").decode())
             actual = thumb(case)
             right = mae(actual, references[lane + "-library"])
             wrong = mae(actual, references[lane + "-reader"])

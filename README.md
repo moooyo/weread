@@ -55,6 +55,11 @@ in six pairs. The Kindle package enables the measured optimization. That
 candidate was installed and the ordinary WeRead Library entry retested
 without resetting private data. This is not a finger-to-ink measurement.
 
+The [next experiment](docs/review/startup-orientation-20261121/README.md)
+tests whether the two startup orientation queries can reuse a confirmed
+same-launch calibration. The feature is off in Kindle packages; it has no
+new physical result. The launcher's two-second wait is unchanged.
+
 The [catalog notification adapter](docs/CATALOG_ENTRY_ADAPTER.md) was merged to
 `main` on 2026-11-19. It retains the penguin cover and default FBInk behavior.
 The WeRead package does not install or replace the shared runtime. Device

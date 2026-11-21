@@ -6,6 +6,16 @@ pub enum NativePortraitDirection {
     Down,
 }
 
+#[cfg(all(feature = "kindle", target_os = "linux"))]
+impl From<NativePortraitDirection> for slint_backend_kindle::NativePortraitOrientation {
+    fn from(direction: NativePortraitDirection) -> Self {
+        match direction {
+            NativePortraitDirection::Up => Self::Up,
+            NativePortraitDirection::Down => Self::Down,
+        }
+    }
+}
+
 /// The native owner pairs a confirmed scanout direction with a read-only
 /// framebuffer rotation before taking the window manager's display ownership.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

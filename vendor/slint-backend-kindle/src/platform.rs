@@ -21,7 +21,11 @@ use crate::dithering::{
 use crate::framebuffer::Framebuffer;
 use crate::gyro::GyroObserver;
 use crate::managed_sleep::ManagedSleepControl;
-use crate::orientation::{NativeOrientationHandle, OrientationRequest, PortraitController};
+#[cfg(feature = "startup-orientation-reuse")]
+use crate::orientation::PortraitMapping;
+use crate::orientation::{
+    NativeOrientationHandle, NativePortraitOrientation, OrientationRequest, PortraitController,
+};
 use crate::power::{arm_wakealarm, find_wakealarm, suspend_to_mem};
 use crate::refresh::{
     PendingRefresh, PhysicalRect, RefreshHandle, RefreshWaveform, ResolvedRefresh,
@@ -304,7 +308,7 @@ impl Platform for KindlePlatform {
         let mut rendered_image_scene = RenderedImageScene::default();
 
         let (panel_width, panel_height) = (frame_buffer.width, frame_buffer.height);
-        let mut portrait = PortraitRuntime::new(launch_render_offset("event_loop"));
+        let mut portrait = PortraitRuntime::at_launch(&self.native_orientation, &frame_buffer);
         let mut input_generation = 1u64;
         portrait.ensure_active(&self.native_orientation, &frame_buffer)?;
         crate::startup_timing::mark("portrait_opened");
@@ -1048,6 +1052,38 @@ struct PortraitRuntime {
 }
 
 impl PortraitRuntime {
+    fn at_launch(request: &Mutex<OrientationRequest>, framebuffer: &Framebuffer) -> Self {
+        #[cfg(feature = "startup-orientation-reuse")]
+        let reuse = || {
+            let current = || Some(*request.lock().ok()?);
+            let launch = current()?;
+            let (controller, observer) = confirmed_launch_controller(
+                launch,
+                current,
+                || framebuffer.portrait_rotation(),
+                || {
+                    let mut observer = GyroObserver::open().ok()??;
+                    let pose = observer.snapshot().ok()??;
+                    Some((pose.into(), observer))
+                },
+            )?;
+            Some(Self {
+                controller,
+                observer: Some(observer),
+                attempted: true,
+                snapshot_pending: false,
+                seen_request: launch.sequence,
+                generation: 1,
+            })
+        };
+        #[cfg(not(feature = "startup-orientation-reuse"))]
+        let reuse = || {
+            let _ = (request, framebuffer);
+            None
+        };
+        resolve_launch_orientation("event_loop", reuse, legacy_render_offset, Self::new)
+    }
+
     fn new(legacy_render_offset: u32) -> Self {
         Self {
             controller: PortraitController::new(legacy_render_offset),
@@ -1391,19 +1427,82 @@ impl Drop for KindlePlatform {
     }
 }
 
-/// Devices with an accelerometer let the framework flip its UI 180° when
-/// held the other way up. Touch input then already arrives flipped, but the
-/// framebuffer does not, so rendering has to compensate by whatever the
-/// framework thinks is up when the app starts.
-pub(crate) fn launch_render_offset(site: &'static str) -> u32 {
-    observe_render_offset(site, || {
-        if !has_accelerometer() {
-            return Err(OrientationQueryError::Unavailable);
-        }
-        let mut command = Command::new("lipc-get-prop");
-        command.args(["com.lab126.winmgr", "accelerometer"]);
-        query_render_offset(&mut command, ORIENTATION_TIMEOUT)
-    })
+pub(crate) fn splash_render_offset(
+    framebuffer: &Framebuffer,
+    launch: Option<(NativePortraitOrientation, u32)>,
+) -> u32 {
+    #[cfg(feature = "startup-orientation-reuse")]
+    let reuse = || {
+        let (mapping, ()) = confirmed_launch_mapping(
+            launch,
+            || framebuffer.portrait_rotation(),
+            || Some((crate::probe_native_portrait_pose().ok()??, ())),
+        )?;
+        Some(mapping.render_offset())
+    };
+    #[cfg(not(feature = "startup-orientation-reuse"))]
+    let reuse = || {
+        let _ = (framebuffer, launch);
+        None
+    };
+    resolve_launch_orientation(
+        "splash",
+        reuse,
+        legacy_render_offset,
+        std::convert::identity,
+    )
+}
+
+#[cfg(feature = "startup-orientation-reuse")]
+fn confirmed_launch_mapping<Resource>(
+    launch: Option<(NativePortraitOrientation, u32)>,
+    mut rotation: impl FnMut() -> io::Result<u32>,
+    snapshot: impl FnOnce() -> Option<(NativePortraitOrientation, Resource)>,
+) -> Option<(PortraitMapping, Resource)> {
+    let (scanout, expected_rotation) = launch?;
+    if expected_rotation > 3 || rotation().ok()? != expected_rotation {
+        return None;
+    }
+    let (holding, resource) = snapshot()?;
+    if holding != scanout || rotation().ok()? != expected_rotation {
+        return None;
+    }
+    Some((PortraitMapping { holding, scanout }, resource))
+}
+
+#[cfg(feature = "startup-orientation-reuse")]
+fn confirmed_launch_controller<Observer>(
+    launch: OrientationRequest,
+    current: impl FnOnce() -> Option<OrientationRequest>,
+    rotation: impl FnMut() -> io::Result<u32>,
+    snapshot: impl FnOnce() -> Option<(NativePortraitOrientation, Observer)>,
+) -> Option<(PortraitController, Observer)> {
+    let calibration = launch.calibration?;
+    if launch.sequence != 1 || calibration.holding != calibration.scanout {
+        return None;
+    }
+    let (mapping, observer) = confirmed_launch_mapping(
+        Some((calibration.scanout, calibration.raw_rotation)),
+        rotation,
+        snapshot,
+    )?;
+    if current()? != launch {
+        return None;
+    }
+    let mut controller = PortraitController::new(mapping.render_offset());
+    controller
+        .apply_request(launch, calibration.raw_rotation)
+        .ok()?
+        .then_some((controller, observer))
+}
+
+fn legacy_render_offset() -> Result<u32, OrientationQueryError> {
+    if !has_accelerometer() {
+        return Err(OrientationQueryError::Unavailable);
+    }
+    let mut command = Command::new("lipc-get-prop");
+    command.args(["com.lab126.winmgr", "accelerometer"]);
+    query_render_offset(&mut command, ORIENTATION_TIMEOUT)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1413,11 +1512,17 @@ enum OrientationQueryError {
     Failed,
 }
 
-fn observe_render_offset(
+fn resolve_launch_orientation<Value>(
     site: &'static str,
+    reuse: impl FnOnce() -> Option<Value>,
     query: impl FnOnce() -> Result<u32, OrientationQueryError>,
-) -> u32 {
+    from_legacy: impl FnOnce(u32) -> Value,
+) -> Value {
     crate::startup_timing::mark_orientation(site, "begin");
+    if let Some(value) = reuse() {
+        crate::startup_timing::mark_orientation(site, "reused");
+        return value;
+    }
     let result = query();
     let outcome = match result {
         Ok(_) => "success",
@@ -1426,7 +1531,7 @@ fn observe_render_offset(
         Err(OrientationQueryError::Failed) => "failed",
     };
     crate::startup_timing::mark_orientation(site, outcome);
-    result.unwrap_or(0)
+    from_legacy(result.unwrap_or(0))
 }
 
 fn parse_render_offset(output: &[u8]) -> Option<u32> {
@@ -2134,11 +2239,182 @@ mod active_orientation_runtime_tests {
     }
 }
 
+#[cfg(all(test, feature = "startup-orientation-reuse"))]
+mod startup_orientation_reuse_tests {
+    use super::*;
+    use crate::orientation::NativePortraitOrientation::{Down, Up};
+    use crate::orientation::PortraitCalibration;
+
+    fn launch(direction: NativePortraitOrientation, rotation: u32) -> OrientationRequest {
+        OrientationRequest {
+            sequence: 1,
+            calibration: Some(PortraitCalibration {
+                holding: direction,
+                scanout: direction,
+                raw_rotation: rotation,
+            }),
+        }
+    }
+
+    #[test]
+    fn both_sites_reuse_confirmed_portraits_and_preserve_independent_touch_mapping() {
+        for (direction, opposite) in [(Up, Down), (Down, Up)] {
+            for rotation in 0..=3 {
+                let request = launch(direction, rotation);
+                let mut reads = 0;
+                let offset = resolve_launch_orientation(
+                    "splash",
+                    || {
+                        confirmed_launch_mapping(
+                            Some((direction, rotation)),
+                            || {
+                                reads += 1;
+                                Ok(rotation)
+                            },
+                            || Some((direction, ())),
+                        )
+                        .map(|(mapping, ())| mapping.render_offset())
+                    },
+                    || panic!("A confirmed splash does not need winmgr"),
+                    std::convert::identity,
+                );
+                assert_eq!((reads, offset), (2, 0));
+
+                let (mut controller, observer) = resolve_launch_orientation(
+                    "event_loop",
+                    || {
+                        confirmed_launch_controller(
+                            request,
+                            || Some(request),
+                            || Ok(rotation),
+                            || Some((direction, "retained observer")),
+                        )
+                    },
+                    || panic!("An applied, observed controller does not need winmgr"),
+                    |_| unreachable!(),
+                );
+                assert_eq!(observer, "retained observer");
+                assert_eq!(controller.render_offset(), 0);
+                assert_eq!(controller.touch_offset(), direction.offset());
+                assert!(controller.observe(opposite, rotation).unwrap());
+                assert_eq!(controller.render_offset(), 180);
+                assert_eq!(controller.touch_offset(), opposite.offset());
+
+                let wake = OrientationRequest {
+                    sequence: 2,
+                    ..launch(opposite, (rotation + 2) % 4)
+                };
+                assert!(controller.apply_request(wake, (rotation + 2) % 4).unwrap());
+                assert_eq!(controller.render_offset(), 0);
+                assert_eq!(controller.touch_offset(), opposite.offset());
+            }
+        }
+    }
+
+    #[test]
+    fn missing_changed_or_unreadable_evidence_runs_the_complete_fallback_once() {
+        let anchor = Some((Up, 3));
+        for (launch, before, pose, after, required_reads, required_poses) in [
+            (None, None, None, None, 0, 0),
+            (Some((Up, 4)), Some(4), Some(Up), Some(4), 0, 0),
+            (anchor, None, Some(Up), Some(3), 1, 0),
+            (anchor, Some(1), Some(Up), Some(1), 1, 0),
+            (anchor, Some(3), None, Some(3), 1, 1),
+            (anchor, Some(3), Some(Down), Some(3), 1, 1),
+            (anchor, Some(3), Some(Up), None, 2, 1),
+            (anchor, Some(3), Some(Up), Some(0), 2, 1),
+        ] {
+            let mut rotations = [before, after].into_iter();
+            let mut reads = 0;
+            let mut poses = 0;
+            let mut queries = 0;
+            let offset = resolve_launch_orientation(
+                "splash",
+                || {
+                    confirmed_launch_mapping(
+                        launch,
+                        || {
+                            reads += 1;
+                            rotations
+                                .next()
+                                .unwrap()
+                                .ok_or_else(|| io::Error::other("GETVAR"))
+                        },
+                        || {
+                            poses += 1;
+                            pose.map(|direction| (direction, ()))
+                        },
+                    )
+                    .map(|(mapping, ())| mapping.render_offset())
+                },
+                || {
+                    queries += 1;
+                    Ok(180)
+                },
+                std::convert::identity,
+            );
+            assert_eq!((offset, queries), (180, 1));
+            assert_eq!((reads, poses), (required_reads, required_poses));
+        }
+    }
+
+    #[test]
+    fn only_the_unchanged_initial_request_can_seed_the_event_loop() {
+        let initial = launch(Up, 3);
+        let wake = OrientationRequest {
+            sequence: 2,
+            ..initial
+        };
+        let distinct = OrientationRequest {
+            calibration: Some(PortraitCalibration {
+                holding: Down,
+                ..initial.calibration.unwrap()
+            }),
+            ..initial
+        };
+        for (request, latest, pose) in [
+            (OrientationRequest::default(), Some(initial), Some(Up)),
+            (wake, Some(wake), Some(Up)),
+            (distinct, Some(distinct), Some(Down)),
+            (initial, None, Some(Up)),
+            (initial, Some(launch(Down, 3)), Some(Up)),
+            (initial, Some(wake), Some(Up)),
+            (initial, Some(initial), None),
+            (initial, Some(initial), Some(Down)),
+        ] {
+            let mut queries = 0;
+            let controller = resolve_launch_orientation(
+                "event_loop",
+                || {
+                    confirmed_launch_controller(
+                        request,
+                        || latest,
+                        || Ok(3),
+                        || pose.map(|direction| (direction, ())),
+                    )
+                    .map(|(controller, ())| controller)
+                },
+                || {
+                    queries += 1;
+                    Ok(180)
+                },
+                PortraitController::new,
+            );
+            assert_eq!(queries, 1);
+            assert!(!controller.calibrated());
+            assert_eq!(
+                (controller.render_offset(), controller.touch_offset()),
+                (180, 0)
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod orientation_tests {
     use super::{
-        OrientationQueryError, observe_render_offset, parse_render_offset, query_render_offset,
-        read_render_offset, retire_orientation_child, set_orientation_pipe_nonblocking,
+        OrientationQueryError, parse_render_offset, query_render_offset, read_render_offset,
+        resolve_launch_orientation, retire_orientation_child, set_orientation_pipe_nonblocking,
     };
     use std::fs;
     use std::os::unix::process::CommandExt;
@@ -2347,6 +2623,11 @@ mod orientation_tests {
     #[test]
     fn observing_each_query_preserves_its_offset_or_zero_fallback() {
         for site in ["splash", "event_loop"] {
+            #[cfg(feature = "startup-orientation-reuse")]
+            assert_eq!(
+                resolve_launch_orientation(site, || Some(0), || panic!("Not queried"), |_| 180),
+                0
+            );
             for (result, expected) in [
                 (Ok(0), 0),
                 (Ok(180), 180),
@@ -2354,7 +2635,10 @@ mod orientation_tests {
                 (Err(OrientationQueryError::Unavailable), 0),
                 (Err(OrientationQueryError::Failed), 0),
             ] {
-                assert_eq!(observe_render_offset(site, || result), expected);
+                assert_eq!(
+                    resolve_launch_orientation(site, || None, || result, std::convert::identity),
+                    expected
+                );
             }
         }
     }
@@ -2375,6 +2659,11 @@ mod orientation_tests {
             let mut expected = Vec::new();
             if enabled {
                 for site in ["splash", "event_loop"] {
+                    #[cfg(feature = "startup-orientation-reuse")]
+                    {
+                        expected.push(format!("{site}_orientation_begin"));
+                        expected.push(format!("{site}_orientation_reused"));
+                    }
                     for outcome in ["success", "success", "timeout", "unavailable", "failed"] {
                         expected.push(format!("{site}_orientation_begin"));
                         expected.push(format!("{site}_orientation_{outcome}"));

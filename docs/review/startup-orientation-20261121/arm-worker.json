@@ -1,0 +1,223 @@
+{
+  "date": "2026-11-21",
+  "timezone": "Asia/Shanghai",
+  "environment": "test-env, shared Ubuntu worker, QEMU user-mode only; no Kindle run or performance measurement",
+  "source": "Same /work/src in both lanes: 17a2659 plus the uncommitted startup-orientation change set, not a clean commit build",
+  "toolchain": {
+    "rustc": "1.99.1",
+    "cargo": "1.99.1",
+    "zig": "0.15.2",
+    "cargo-zigbuild": "0.24.0",
+    "qemu-arm": "8.2.2"
+  },
+  "artifacts": {
+    "baseline": {
+      "lane": "baseline",
+      "source": "/work/src",
+      "command": [
+        "cargo",
+        "zigbuild",
+        "--locked",
+        "--offline",
+        "--release",
+        "--target",
+        "armv7-unknown-linux-musleabihf",
+        "--no-default-features",
+        "--features",
+        "kindle,bundled-font-preflight",
+        "--bin",
+        "weread",
+        "--message-format=json-render-diagnostics"
+      ],
+      "abi": "armv7-unknown-linux-musleabihf",
+      "release_profile": {
+        "lto": "thin",
+        "codegen-units": 1,
+        "strip": true
+      },
+      "application_features": [
+        "bundled-font-preflight",
+        "kindle"
+      ],
+      "backend_features": [],
+      "both_recompiled": true,
+      "local_dependencies": [
+        "i-slint-core",
+        "swash",
+        "zeno",
+        "zip"
+      ],
+      "compiler_flags": {},
+      "generated_receipts": [
+        "SANS_REGULAR",
+        "SANS_MEDIUM",
+        "SANS_BOLD",
+        "SERIF_LIGHT",
+        "SERIF_REGULAR",
+        "SERIF_MEDIUM",
+        "SERIF_BOLD"
+      ],
+      "elf": {
+        "bytes": 95202712,
+        "elf_flags": "0x5000400",
+        "program_types": [
+          6,
+          1,
+          1,
+          1,
+          1,
+          7,
+          1685382482,
+          1685382481,
+          1879048193
+        ]
+      },
+      "qemu_cpu": "cortex-a8",
+      "version_output": "weread 0.2.0"
+    },
+    "candidate": {
+      "lane": "candidate",
+      "source": "/work/src",
+      "command": [
+        "cargo",
+        "zigbuild",
+        "--locked",
+        "--offline",
+        "--release",
+        "--target",
+        "armv7-unknown-linux-musleabihf",
+        "--no-default-features",
+        "--features",
+        "kindle,bundled-font-preflight,startup-orientation-reuse",
+        "--bin",
+        "weread",
+        "--message-format=json-render-diagnostics"
+      ],
+      "abi": "armv7-unknown-linux-musleabihf",
+      "release_profile": {
+        "lto": "thin",
+        "codegen-units": 1,
+        "strip": true
+      },
+      "application_features": [
+        "bundled-font-preflight",
+        "kindle",
+        "startup-orientation-reuse"
+      ],
+      "backend_features": [
+        "startup-orientation-reuse"
+      ],
+      "both_recompiled": true,
+      "local_dependencies": [
+        "i-slint-core",
+        "swash",
+        "zeno",
+        "zip"
+      ],
+      "compiler_flags": {},
+      "generated_receipts": [
+        "SANS_REGULAR",
+        "SANS_MEDIUM",
+        "SANS_BOLD",
+        "SERIF_LIGHT",
+        "SERIF_REGULAR",
+        "SERIF_MEDIUM",
+        "SERIF_BOLD"
+      ],
+      "elf": {
+        "bytes": 95205016,
+        "elf_flags": "0x5000400",
+        "program_types": [
+          6,
+          1,
+          1,
+          1,
+          1,
+          7,
+          1685382482,
+          1685382481,
+          1879048193
+        ]
+      },
+      "qemu_cpu": "cortex-a8",
+      "version_output": "weread 0.2.0"
+    },
+    "backend-tests": {
+      "abi": "armv7-unknown-linux-musleabihf",
+      "command": [
+        "cargo",
+        "zigbuild",
+        "--locked",
+        "--offline",
+        "--release",
+        "--target",
+        "armv7-unknown-linux-musleabihf",
+        "--tests",
+        "--no-default-features",
+        "--features",
+        "startup-orientation-reuse",
+        "--message-format=json-render-diagnostics",
+        "--config",
+        "patch.crates-io.i-slint-core.path=\"/work/src/vendor/i-slint-core\"",
+        "--config",
+        "patch.crates-io.swash.path=\"/work/src/vendor/swash\"",
+        "--config",
+        "patch.crates-io.zeno.path=\"/work/src/vendor/zeno\"",
+        "--config",
+        "profile.release.lto=\"thin\"",
+        "--config",
+        "profile.release.codegen-units=1",
+        "--config",
+        "profile.release.strip=true"
+      ],
+      "backend_features": [
+        "startup-orientation-reuse"
+      ],
+      "release_profile": {
+        "lto": "thin",
+        "codegen-units": 1,
+        "strip": true
+      },
+      "lock_identities_from_application": 465,
+      "local_patches": [
+        "i-slint-core",
+        "swash",
+        "zeno"
+      ],
+      "elf": {
+        "bytes": 8347440,
+        "elf_flags": "0x5000400",
+        "program_types": [
+          6,
+          1,
+          1,
+          1,
+          1,
+          7,
+          1685382482,
+          1685382481,
+          1879048193
+        ]
+      },
+      "qemu_cpu": "cortex-a8",
+      "passed": [
+        "platform::startup_orientation_reuse_tests::both_sites_reuse_confirmed_portraits_and_preserve_independent_touch_mapping",
+        "platform::startup_orientation_reuse_tests::missing_changed_or_unreadable_evidence_runs_the_complete_fallback_once",
+        "platform::startup_orientation_reuse_tests::only_the_unchanged_initial_request_can_seed_the_event_loop"
+      ]
+    }
+  },
+  "qemu_tests": [
+    "running 3 tests",
+    "test platform::startup_orientation_reuse_tests::both_sites_reuse_confirmed_portraits_and_preserve_independent_touch_mapping ... ok",
+    "test platform::startup_orientation_reuse_tests::missing_changed_or_unreadable_evidence_runs_the_complete_fallback_once ... ok",
+    "test platform::startup_orientation_reuse_tests::only_the_unchanged_initial_request_can_seed_the_event_loop ... ok",
+    "",
+    "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 150 filtered out; finished in 0.02s"
+  ],
+  "retained_on_worker": [
+    "arm-pair/{baseline,candidate}/{weread,result.json,build.log}",
+    "arm-pair/backend-tests/{result.json,build.log,qemu.log}"
+  ],
+  "cleanup": "The private arm-pair/target and arm-pair/backend-test-src were removed after all nine evidence files were checked; the test executable was not retained."
+}

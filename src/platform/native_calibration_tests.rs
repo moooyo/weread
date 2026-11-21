@@ -194,6 +194,7 @@ fn inactive_power_and_unreviewed_directions_are_rejected() {
 
 #[test]
 fn unavailable_helpers_never_read_framebuffer_and_are_reaped() {
+    let _registry = native_command::exclusive_registry_fixture();
     let directory = tempfile::tempdir().unwrap();
     assert!(
         query_native_portrait_calibration(
@@ -230,6 +231,7 @@ fn unavailable_helpers_never_read_framebuffer_and_are_reaped() {
 
 #[test]
 fn fragmented_complete_session_requires_successful_exit_and_eof() {
+    let _registry = native_command::exclusive_registry_fixture();
     let (directory, path) = helper("valid");
     assert_eq!(
         query_native_portrait_calibration(&path, DeviceProfile::Scribe, || Ok((true, 3)))
@@ -242,6 +244,7 @@ fn fragmented_complete_session_requires_successful_exit_and_eof() {
 
 #[test]
 fn connected_protocol_failures_never_become_legacy_availability_fallbacks() {
+    let _registry = native_command::exclusive_registry_fixture();
     for mode in [
         "wrong_opcode",
         "rejected",
@@ -254,10 +257,12 @@ fn connected_protocol_failures_never_become_legacy_availability_fallbacks() {
         "hang_query",
     ] {
         let (directory, path) = helper(mode);
-        assert!(
+        let error =
             query_native_portrait_calibration(&path, DeviceProfile::Scribe, || Ok((true, 3)))
-                .is_err(),
-            "{mode}"
+                .expect_err(mode);
+        assert!(
+            directory.path().join("pid").is_file(),
+            "{mode}: fixture did not publish its PID before returning {error:?}"
         );
         assert_reaped(directory.path());
     }
@@ -265,6 +270,7 @@ fn connected_protocol_failures_never_become_legacy_availability_fallbacks() {
 
 #[test]
 fn a_connected_framebuffer_failure_does_not_trigger_legacy_fallback() {
+    let _registry = native_command::exclusive_registry_fixture();
     let (directory, path) = helper("valid");
     assert!(
         query_native_portrait_calibration(&path, DeviceProfile::Scribe, || Err(

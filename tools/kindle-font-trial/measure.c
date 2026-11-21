@@ -10,6 +10,15 @@
 #include <time.h>
 #include <unistd.h>
 
+#if defined(WEREAD_ORIENTATION_TRIAL) && WEREAD_ORIENTATION_TRIAL != 1
+#error "WEREAD_ORIENTATION_TRIAL must be 1 when defined"
+#endif
+#ifdef WEREAD_ORIENTATION_TRIAL
+#define TRIAL_DOCUMENT "weread-orientation-trial-"
+#else
+#define TRIAL_DOCUMENT "weread-font-trial-"
+#endif
+
 enum { WIDTH = 1860, HEIGHT = 2480, STRIDE = 1872, COLS = 48, ROWS = 64 };
 
 static int geometry(int descriptor, struct fb_var_screeninfo *info) {
@@ -65,7 +74,7 @@ int main(int argc, char **argv) {
     if (argc != 3 || strcmp(argv[1], "request") != 0 ||
         strlen(argv[2]) != 16 || strspn(argv[2], "0123456789abcdef") != 16) return 64;
     char uri[128];
-    snprintf(uri, sizeof(uri), "file:///mnt/us/documents/weread-font-trial-%s.sh", argv[2]);
+    snprintf(uri, sizeof(uri), "file:///mnt/us/documents/" TRIAL_DOCUMENT "%s.sh", argv[2]);
     struct timespec time;
     if (clock_gettime(CLOCK_MONOTONIC, &time) != 0 ||
         printf("REQUEST %jd.%09ld\n", (intmax_t)time.tv_sec, time.tv_nsec) < 0 || fflush(stdout) != 0) return 2;

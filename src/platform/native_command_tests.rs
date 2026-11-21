@@ -180,6 +180,7 @@ fn assert_reusable(runner: &CommandRunner, group: &FixtureGroup) {
 
 #[test]
 fn actual_native_entry_accepts_a_successful_empty_reply() {
+    let _registry = exclusive_registry_fixture();
     assert_eq!(run_command(Path::new("/bin/true"), &[]).unwrap(), "");
     quiesce_commands(Duration::ZERO).unwrap();
 }

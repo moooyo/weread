@@ -8,6 +8,7 @@ from pathlib import Path
 import shlex
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -6633,7 +6634,7 @@ class LauncherLifecycleTests(unittest.TestCase):
         self.assertEqual(self.trace(), [])
         self.assertFalse((self.root / "lock").exists())
 
-    def power_observer_fixture(self, term_ignoring=False):
+    def power_observer_fixture(self, term_ignoring=False, service_socket=None):
         self.power_observer_identity = self.root / "power-subscriber-identity"
         self.power_observer_signals = self.root / "power-subscriber-signals"
         self.power_observer_observed = []
@@ -6641,6 +6642,7 @@ class LauncherLifecycleTests(unittest.TestCase):
             TEST_POWER_SUBSCRIBER_IDENTITY=str(self.power_observer_identity),
             TEST_POWER_SUBSCRIBER_SIGNALS=str(self.power_observer_signals),
             TEST_POWER_SUBSCRIBER_IGNORE="1" if term_ignoring else "0",
+            TEST_POWER_SERVICE_SOCKET=str(service_socket) if service_socket else "",
         )
         body = textwrap.dedent(r'''
             import json
@@ -6672,7 +6674,19 @@ class LauncherLifecycleTests(unittest.TestCase):
             pending = identity_path.with_suffix(".pending")
             pending.write_text(json.dumps(identity))
             pending.replace(identity_path)
-            # This replacement subscriber never forks or emits synthetic power events.
+            endpoint = os.environ["TEST_POWER_SERVICE_SOCKET"]
+            if endpoint:
+                import socket
+                with socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET) as peer:
+                    peer.connect(endpoint)
+                    peer.sendall(json.dumps([os.getpid(), *sys.argv[1:]]).encode())
+                    if peer.recv(64) != b"subscribed":
+                        sys.exit(1)
+                    peer.sendall(b"listening")
+                    event = peer.recv(128)
+                    if not event:
+                        sys.exit(1)
+                    print(event.decode("ascii"), flush=True)
             while True:
                 time.sleep(0.02)
         ''').lstrip()
@@ -6754,6 +6768,71 @@ class LauncherLifecycleTests(unittest.TestCase):
                                    for identity in self.power_observer_observed))
         self.assertEqual(Path(self.env["TEST_CLEANUP_DESCRIPTOR_TRACE"]).read_text(), "closed\n")
         self.assertFalse((self.root / "lock").exists())
+
+    def test_power_observer_stream_ready_precedes_subscriber_exec(self):
+        self.power_observer_fixture()
+        gate = self.root / "power-startup-gate"
+        os.mkfifo(gate)
+        self.addCleanup(os.close, os.open(gate, os.O_RDWR))
+        settling = self.root / "power-settling"
+        self.env.update(TEST_POWER_STARTUP_GATE=str(gate), TEST_POWER_SETTLING=str(settling))
+        block = 'IFS= read -r fixture_release <"$TEST_POWER_STARTUP_GATE" || exit 1\n'
+        subscriber = '            exec lipc-wait-event '
+        settle = '\nsleep 2\n'
+        source = self.launcher.read_text()
+        self.assertEqual(source.count(subscriber), 1)
+        self.assertEqual(source.count(settle), 1)
+        source = source.replace(subscriber, block + subscriber, 1)
+        self.launcher.write_text(source.replace(settle, '\n: >"$TEST_POWER_SETTLING"\n' + block + settle, 1))
+
+        def drive(supervisor):
+            self.wait_until(settling.is_file, require_launcher_running=True)
+            directory = self.root / "lock"
+            record = self.read_power_observer_record()
+            self.remember_power_observer_record(record)
+            self.assertEqual((directory / "observer-stream-ready").read_bytes(),
+                             (directory / "observer-owned").read_bytes())
+            self.assertTrue(self.original_process_exists(record["child"]))
+            self.assertFalse(self.power_observer_identity.exists())
+            supervisor.terminate()
+
+        status, _, error = self.run_launcher(drive)
+        self.assertEqual(status, 143, error)
+        self.assertFalse(self.power_observer_identity.exists())
+        self.assertEqual(self.trace(), [])
+        self.assert_power_observer_retired()
+
+    def test_power_observer_delayed_subscription_delivers_usb_after_application_start(self):
+        endpoint = self.root / "power-service.sock"
+        self.power_observer_fixture(service_socket=endpoint)
+        self.env["TEST_SLEEP"] = "1"
+        with socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET) as service:
+            service.bind(str(endpoint))
+            service.listen(1)
+            service.settimeout(8)
+
+            def drive(supervisor):
+                record = self.wait_for_power_observer(supervisor)
+                peer, _ = service.accept()
+                with peer:
+                    peer.settimeout(8)
+                    self.assertEqual(json.loads(peer.recv(512)), [
+                        record["child"]["pid"], "-m", "-s", "0", "com.lab126.powerd",
+                        "goingToScreenSaver,outOfScreenSaver,exitingScreenSaver,usbConfigured",
+                    ])
+                    self.wait_until(lambda: self.starts() == ["0"], require_launcher_running=True)
+                    self.assertTrue((self.root / "lock" / "state-open").is_file())
+                    self.assertEqual(self.trace(), ["stop:statusbar"])
+                    peer.sendall(b"subscribed")
+                    self.assertEqual(peer.recv(64), b"listening")
+                    peer.sendall(b"usbConfigured 1")
+
+            status, _, error = self.run_launcher(drive)
+        self.assertEqual(status, 143, error)
+        self.assertEqual(self.starts(), ["0"])
+        self.assertEqual(self.trace(), ["stop:statusbar", "start:statusbar", "xrefresh:"])
+        self.assert_power_observer_retired()
+        self.assert_frame_guards_reaped(create_count=1)
 
     def unrelated_power_process(self):
         ready = self.root / "unrelated-power-ready"

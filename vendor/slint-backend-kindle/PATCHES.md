@@ -279,6 +279,14 @@ is `unavailable`; bad replies, nonzero exits, and other errors are `failed`.
 No orientation value is logged. The default lookup, timeout, child retirement
 and fallback remain in place. These markers are not a measured device gain.
 
+The opt-in `startup-orientation-reuse` experiment adds a `reused` outcome.
+Each launch site independently requires a live matching holding direction and
+matching framebuffer rotation on both sides of that observation. The event
+loop additionally requires an unchanged initial request and retains its
+synchronized sensor descriptor. Missing, changed or unreadable evidence uses
+the existing winmgr query. The fast path is not a wake path and is not enabled
+in normal packages. See the [experiment and acceptance gates](../../docs/review/startup-orientation-20261121/README.md).
+
 ## Verification boundary
 
 On 2026-11-12, the complete standalone backend suite passed 95 tests on

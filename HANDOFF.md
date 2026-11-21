@@ -1,10 +1,11 @@
 # Handoff: Kindle Library startup
 
-Updated November 20, 2026 (Asia/Shanghai). **Font optimization measured,
+Updated November 21, 2026 (Asia/Shanghai). **Font optimization measured,
 deployed and retested on Kindle Scribe 2022 / firmware 5.19.5.** The Kindle
 package now deliberately selects `kindle,bundled-font-preflight`. The default
 desktop build, custom-font validation, launcher wait and orientation queries
-are unchanged. There is no outstanding WeRead device lease or cleanup.
+are unchanged. At the November 21 handoff WeRead held no device lease and
+had no outstanding cleanup. This is not a statement of shared availability.
 
 ## What actually ran
 
@@ -43,8 +44,15 @@ the early November 20 read-only audit is likewise **not** the current install.
 ## Separate future work
 
 Both orientation queries timed out during all twelve timed launches, about
-half a second each. A reuse experiment would need independently validated
-normal/inverted portrait calibration, changed/missing calibration fallback
-and wake recovery. No such change was deployed. Similarly, changing the
-two-second power-observer wait needs its own interruption and sleep/wake
-tests. Neither remaining opportunity changes the measured font result.
+half a second each. A [November 21 orientation candidate](docs/review/startup-orientation-20261121/README.md)
+is now available behind `startup-orientation-reuse`. It is **off** in the
+normal Kindle package. Both ARM builds and the two-launch public Library
+pilot are frozen on `test-env`; all 52 collector and regression tests passed
+without the device. At 09:39 Asia/Shanghai on November 21, the original
+Aidoku batch had no verified close and release receipt. WeRead had run no
+physical orientation pilot or timed pair and had not installed the candidate.
+Check for a newer verified handoff before starting; restore and release the
+pilot before judging whether to time six pairs.
+See the linked experiment for build results and remaining gates. The [power-observer
+investigation](docs/review/startup-orientation-20261121/power-wait.md) keeps
+the two-second wait unchanged. Neither changes the measured font result.

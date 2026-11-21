@@ -46,8 +46,14 @@ impl StartupScreen {
                         ))?,
                     ],
                 };
+                let portrait = if cfg!(feature = "startup-orientation-reuse") {
+                    super::startup_native_portrait_calibration()
+                        .map(|anchor| (anchor.direction.into(), anchor.framebuffer_rotation))
+                } else {
+                    None
+                };
                 // The framebuffer owner applies native-polarity compensation.
-                Some(StartupSplash::show(images, viewport, dark_mode)?)
+                Some(StartupSplash::show(images, viewport, dark_mode, portrait)?)
             } else {
                 None
             };

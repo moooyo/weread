@@ -18,6 +18,12 @@ const MAX_COMMAND_SLOTS: usize = 8;
 
 static COMMANDS: OnceLock<CommandRunner> = OnceLock::new();
 
+#[cfg(test)]
+pub(super) fn exclusive_registry_fixture() -> std::sync::MutexGuard<'static, ()> {
+    static FIXTURE: Mutex<()> = Mutex::new(());
+    FIXTURE.lock().unwrap_or_else(|error| error.into_inner())
+}
+
 enum CommandSlot {
     Free,
     Active,

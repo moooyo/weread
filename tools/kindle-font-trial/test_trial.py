@@ -11,10 +11,44 @@ from PIL import Image, ImageDraw
 
 from analyze import analyze, metrics
 from freeze import HERE, ROOT, SCHEDULE, device_body, launcher
-from run import transport
+from run import close_transaction, is_installed_retest, transport
 
 
 class AnalysisTests(unittest.TestCase):
+    def test_collection_error_does_not_skip_verified_close(self):
+        for error in (OSError("No room for transfer"), KeyboardInterrupt()):
+            calls = []
+
+            def device(mode, **_kwargs):
+                calls.append(mode)
+                if mode == "collect":
+                    raise error
+                return True
+
+            self.assertEqual(close_transaction(device, None), (True, False))
+            self.assertEqual(calls, ["restore", "collect", "close"])
+
+    def test_restore_alone_never_confirms_close(self):
+        for failed, expected in (("close", ["restore", "collect", "close"]),
+                                 ("restore", ["restore", "restore", "collect"])):
+            calls = []
+
+            def device(mode, **_kwargs):
+                calls.append(mode)
+                return mode != failed
+
+            self.assertEqual(close_transaction(device, None), (False, True))
+            self.assertEqual(calls, expected)
+
+    def test_interrupted_close_does_not_grant_release(self):
+        def device(mode, **_kwargs):
+            if mode == "close":
+                raise KeyboardInterrupt
+            return True
+
+        with self.assertRaises(KeyboardInterrupt):
+            close_transaction(device, None)
+
     def test_pixel_and_per_case_route_gates(self):
         def encoded(image, kind):
             output = io.BytesIO()
@@ -72,6 +106,13 @@ class AnalysisTests(unittest.TestCase):
     def test_schedule(self):
         self.assertEqual(len(set(SCHEDULE)), 18)
         self.assertEqual(SCHEDULE[4:], "A0 B0 A1 B1 B2 A2 A3 B3 B4 A4 A5 B5 B6 A6".split())
+
+    def test_only_the_two_font_plan_types_can_select_a_device_schedule(self):
+        self.assertFalse(is_installed_retest({}))
+        self.assertTrue(is_installed_retest({"purpose": "installed-retest"}))
+        for purpose in (None, "", "startup-orientation-reuse", "other"):
+            with self.assertRaisesRegex(ValueError, "Unsupported plan purpose"):
+                is_installed_retest({"purpose": purpose})
 
     def test_monotonic_endpoint(self):
         stages = "main_enter splash_orientation_begin splash_orientation_success window_created fonts_registered software_ready event_loop_orientation_begin event_loop_orientation_timeout first_application_frame_send".split()
