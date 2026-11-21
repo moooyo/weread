@@ -161,6 +161,42 @@ for the completed Linux and ARM user-mode checks, the physical admission
 criteria and the same-launch sensor-window classifier. The fixed portrait
 samples from the six-pair batch cannot be reused as observed turns.
 
+### Native reference and candidate Reader visit
+
+These are separate, non-timing checks. On `test-env`, build and test
+`pose_snapshot.c`, the public splash reference and observer, and the production
+`pose_visit_alarm.c` before acquiring a lease. The snapshot helper is read-only
+and non-grabbing. The wake helper's `--policy` must identify `CLOCK_BOOTTIME_ALARM`;
+never package a simulation build. Do not query the Kindle just to reserve it.
+
+1. In a private worker directory, run `run_pose_probe.py --preflight` with
+   `--helper`, `--runs`, `--owner` and `--lease-tool`. After peer handoff, the
+   same command without `--preflight` acquires once, samples the live sensor
+   between two stock calibration reads, closes, verifies absence and releases.
+   A matching result establishes only the current native reference. A busy
+   lease or denied admission grants no right to proceed.
+2. Freeze a **new** `pose_visit.py freeze` plan with `--retained` pointing to
+   the original orientation worker, `--plan` in the new worker, and `--splash`
+   and `--wake` pointing to the qualified helpers. No production installation
+   or private library is used. Check `run_pose_visit.py --work WORK --plan PLAN
+   --preflight` before the next independently acquired lease.
+3. Use `run_pose_visit.py --work WORK --plan PLAN --owner OWNER --lease-tool LEASE_TOOL`
+   for one public candidate Reader visit. The observer tests the static startup
+   lettering against both orientations in the same process's splash window.
+   Missing that window is not a pass. Sleep is optional: the guardian must
+   confirm process ownership and a bounded wake path before asking stock
+   `powerd` to enter the screen saver. A successful command alone does not
+   establish sleep or wake.
+4. The runner restores native state, collects the public results, closes the
+   stage, independently checks absence, and releases **before** interpreting
+   pictures or reporting wake. See `operations.json` for the transaction and
+   `pose-visit.json` for the actual observations. If cleanup is interrupted,
+   use the original owner and `--recover ORIGINAL_ATTEMPT` on the same runner
+   and plan, never another launch or another owner's token.
+
+True physical turning and touch mapping still need independent sensor and
+target evidence. Neither a fixed-pose visit nor a synthetic tap satisfies them.
+
 The frozen collector measures file-open request to first Library `SEND`.
 The [current primary metric](../../docs/PHYSICAL_TESTING.md#library-first-frame-startup)
 instead starts at release of the ordinary stock tile (label automated input

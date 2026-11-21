@@ -7,6 +7,10 @@ the screen and touch agree in the opposite portrait or after a change. The
 checks below use public fixtures on `test-env`. No Kindle was claimed,
 accessed or updated in this round; there is no new startup time.
 
+A [subsequent physical visit](physical-pose-visit.md) verified the digital
+splash and Reader at native `D:1` on the Scribe. It did not enter sleep,
+change pose or exercise physical touch. The software results below are unchanged.
+
 | Qualification | What can be checked off-device | Still required on Scribe 2022 / 5.19.5 |
 | --- | --- | --- |
 | Opposite stable portrait | Fixed `U:3` and `D:1` fixture inputs; splash mapping, independently resolved event-loop mapping, oriented software pixels and asymmetric touch targets. | Establish the opposite native portrait independently of the app. Check the actual splash and shelf frame against the expected panel orientation, the intended physical tap target and native return. |

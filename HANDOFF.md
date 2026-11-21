@@ -73,7 +73,11 @@ Do not treat the rest as orientation-query time, or any of it as a measured
 saving from ordinary tile release. The [pose qualification](docs/review/startup-orientation-20261121/pose-qualification.md)
 checks screen/touch mappings and wake on the Linux worker. The opposite
 physical portrait, a turn during startup, and a turn across actual sleep/wake
-remain untested on the Scribe; leave the package flag off.
+remain untested on the Scribe; leave the package flag off. In a separate
+[real candidate Reader visit](docs/review/startup-orientation-20261121/physical-pose-visit.md),
+the splash and Reader matched the expected digital orientation in the same
+`D:1` pose. The wake-command guard refused before sleep. The device was
+restored and released at 13:28:38; no daily installation was changed.
 See the linked experiment for build results and remaining gates. The [power-observer
 investigation](docs/review/startup-orientation-20261121/power-wait.md) keeps
 the two-second wait unchanged. Neither changes the measured font result.

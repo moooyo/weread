@@ -68,7 +68,7 @@ def close_transaction(call, archive):
     return closed, collected
 
 
-def run(args, *, orientation_schedule=None):
+def run(args, *, orientation_schedule=None, pose_visit_schedule=None):
     if sys.platform != "linux" or not Path("/opt/kindle-toolchain/ubuntu-run").is_file():
         raise ValueError("Use the worker host, not the build userspace")
     os.umask(0o077)
@@ -78,7 +78,10 @@ def run(args, *, orientation_schedule=None):
         raise ValueError("Expected this worker's private frozen plan")
     config = json.loads((plan / "plan.json").read_text())
     label = config["label"]
-    if orientation_schedule is None:
+    if pose_visit_schedule:
+        rollout = False
+        schedule = pose_visit_schedule(config)
+    elif orientation_schedule is None:
         rollout = is_installed_retest(config)
         schedule = ["normal"] if rollout else SCHEDULE
     else:
@@ -108,9 +111,11 @@ def run(args, *, orientation_schedule=None):
         raise ValueError("Missing private authentication")
     if not args.recover:
         attempt = Path(tempfile.mkdtemp(dir=plan, prefix="admission-" if args.admit_only else "batch-"))
-    kind = "weread-orientation-" if orientation_schedule else "weread-indexed-"
+    kind = "weread-pose-wake-" if pose_visit_schedule else ("weread-orientation-" if orientation_schedule else "weread-indexed-")
     request = lease.LeaseRequest(LEASE, attempt / "private-token", args.owner, kind + label)
     report = {"label": label, "started": stamp(), "operations": [], "passed": False}
+    if pose_visit_schedule:
+        report.update(purpose=config["purpose"], scope="transaction_only")
     report_path = attempt / ("recovery.json" if args.recover else "operations.json")
 
     def save():
@@ -153,6 +158,8 @@ def run(args, *, orientation_schedule=None):
                     if sink:
                         sink.close()
             expected = {"admit": "admitted", "stage": "indexed", "case": f"completed {name}", "restore": "restored", "close": "closed"}
+            if pose_visit_schedule:
+                expected["absent"] = "absent"
             if code == 0 and mode in expected and stdout != expected[mode]:
                 code, errors = 65, "refused acknowledgement"
             message = next((line for line in errors.splitlines() if re.fullmatch(r"refused [a-z_]+", line)), "")
@@ -160,7 +167,7 @@ def run(args, *, orientation_schedule=None):
                                          "diagnostic": message or ("transport_or_command_failed" if code else "")})
             save()
             print(f"{mode} {name} {code} {message}", flush=True)
-            if code:
+            if code and not pose_visit_schedule:
                 (attempt / f"private-{mode}-{name}.stderr").write_text(errors[:4096])
             return code == 0
 
@@ -189,7 +196,11 @@ def run(args, *, orientation_schedule=None):
                     end = time.monotonic() + args.wait
                     while LEASE.exists() and time.monotonic() < end:
                         time.sleep(3)
-                lease.acquire(request)
+                acquired_receipt = lease.acquire(request)
+                acquired = True
+                if pose_visit_schedule:
+                    report["acquired"] = acquired_receipt["acquired_at_utc"]
+                    save()
             acquired = True
             if not args.recover:
                 if not call("admit"):
@@ -207,7 +218,9 @@ def run(args, *, orientation_schedule=None):
         except (Exception, KeyboardInterrupt) as error:
             report["error"] = getattr(error, "code", type(error).__name__)
             if not acquired:
-                if request.token_file.exists():
+                partial = getattr(error, "details", {})
+                if request.token_file.exists() or (pose_visit_schedule and any(partial.get(key) for key in (
+                    "lease_directory_created", "private_token_created", "owner_record_created"))):
                     report["recovery_required"] = True
                 save()
             print(str(error) if isinstance(error, ValueError) else report["error"], flush=True)
@@ -216,9 +229,15 @@ def run(args, *, orientation_schedule=None):
                 closed = not attempted
                 try:
                     if attempted:
-                        archive = "recovery-results.tgz" if args.recover else "results.tgz"
-                        closed, collected = close_transaction(call, attempt / archive)
-                        completed = completed and collected
+                        if pose_visit_schedule and args.recover:
+                            closed = call("restore") and call("close")
+                        else:
+                            archive = "recovery-results.tgz" if args.recover else "results.tgz"
+                            closed, collected = close_transaction(call, attempt / archive)
+                            completed = completed and collected
+                        if closed and pose_visit_schedule:
+                            closed = False
+                            closed = call("absent")
                 finally:
                     if closed:
                         receipt = lease.release(request, native_restored_and_connections_closed=True)
@@ -226,12 +245,18 @@ def run(args, *, orientation_schedule=None):
                             raise RuntimeError("Release not confirmed")
                         request.token_file.unlink()
                         report["released"] = receipt["released_at_utc"]
+                        if pose_visit_schedule:
+                            report["owner_token_checked_on_release"] = True
                         print("Released exact physical lease.", flush=True)
                     else:
                         report["recovery_required"] = True
                     report["passed"] = completed and closed
                     save()
-    if report["passed"] and not args.admit_only and not rollout and not args.recover:
+    if pose_visit_schedule and report.get("released") and not args.recover:
+        rel = "/work/" + str(attempt.relative_to(work))
+        analyze_on_worker("analyze_pose_visit.py", rel + "/../plan.json", rel + "/operations.json",
+                          rel + "/results.tgz", rel + "/pose-visit.json")
+    elif report["passed"] and not args.admit_only and not rollout and not args.recover:
         rel = "/work/" + str(attempt.relative_to(work))
         if orientation_schedule:
             inputs = [rel + "/../plan.json", rel + "/operations.json", rel + "/results.tgz"]

@@ -53,6 +53,13 @@ synthetic release to first matching framebuffer observation **≤ 8.258 s**.
 No frame-specific render or submission timestamp was available. This is
 therefore an observation bound only, not a measured primary endpoint.
 
+A separate [fixed-pose Scribe correctness visit](review/startup-orientation-20261121/physical-pose-visit.md)
+verified that the orientation-reuse candidate's startup lettering and public
+Reader matched the expected digital orientation at native `down`, raw `1`.
+It did not time a Library launch. The wake-command guard refused before
+sleep, so no resumed frame or physical turn is claimed. Native control was
+restored and the device released at 13:28:38 Asia/Shanghai on November 21.
+
 ## November 20 font admission and entry audit
 
 The [guarded CPU-only comparison](review/library-startup-latency-20261119/physical-20261120.md)
