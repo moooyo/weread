@@ -1,0 +1,32 @@
+{
+  "device": "Kindle Scribe 2022",
+  "firmware": "5.19.5",
+  "date": "2026-11-22",
+  "timezone": "Asia/Shanghai",
+  "scope": "Read-only mount-table diagnosis; no installation, mount, user input or application launch.",
+  "public_label": "4f9ee8e32ea1193a",
+  "acquired_at_utc": "2026-11-21T20:35:06.787614+00:00",
+  "released_at_utc": "2026-11-21T20:35:08.163848+00:00",
+  "observation": {
+    "policy": "mount-table-read-v1",
+    "table": "ok",
+    "fd": "ok",
+    "base_rows": "one",
+    "base_fd_rows": "one",
+    "fd_rows": "one",
+    "base_shape": "root",
+    "first_error": "parent_id",
+    "error_scope": "other",
+    "repeat": "same",
+    "seek": "not_observed",
+    "propagation": "private"
+  },
+  "operations": {"admit": 0, "diagnose": 0, "verify": 0},
+  "native_and_absence_verified": true,
+  "owner_and_token_checked": true,
+  "lease_directory_absent_after_release": true,
+  "bind_tested": false,
+  "supports_bind": null,
+  "formal_launches": 0,
+  "formal_pairs": 0
+}

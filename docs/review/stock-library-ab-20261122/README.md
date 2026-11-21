@@ -158,6 +158,20 @@ and no A/B warmup or formal pair began. No speedup or regression can be
 reported for card release to frame submission. Do not rerun the same
 probe, relax the mount guard, or substitute the earlier indexed results.
 
+### Read-only diagnosis on the same Scribe
+
+At **04:35:06–04:35:08 on November 22 (Asia/Shanghai)**, a separate visit
+read the mount table without creating a file, binding a path or opening an
+application. Two reads agreed: there was exactly one `/mnt/us` row, its
+ID matched the opened volume directory, its filesystem root was `/`, and
+its propagation was private. The first field rejected by the selector's
+numeric rules was **a parent mount ID on a different row**. The diagnostic
+did not record that row's path or numeric value, and did not exercise the
+C parser's stream rewind. It does not establish that the value was zero or
+that the other row was unrelated to the selector. The [read-only receipt](mount-table-observation.json)
+also records the independent native-state check and exact lease release.
+Bind support and ordinary-card performance remain unmeasured.
+
 ## Acceptance and stopping rules
 
 - Start: the automatic button release on the uniquely recognized normal
