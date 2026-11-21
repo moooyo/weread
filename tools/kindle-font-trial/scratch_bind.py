@@ -7,7 +7,7 @@ import re
 HERE = Path(__file__).resolve().parent
 POLICY = 'selector-bind-v1'
 REASONS = ('bind_stage bind_files bind_native_service bind_native_view bind_native_proc_permission bind_native_proc_read '
-           'bind_native_proc_limit bind_namespace bind_mount_table bind_propagation bind_foreign_mount bind_journal '
+           'bind_native_proc_limit bind_namespace bind_mount_table bind_parent_value bind_parent_scope bind_propagation bind_foreign_mount bind_journal '
            'bind_provenance bind_unknown_state bind_contended bind_mount_unconfirmed bind_unmount_unconfirmed helper_response').split()
 
 

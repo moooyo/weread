@@ -172,6 +172,24 @@ that the other row was unrelated to the selector. The [read-only receipt](mount-
 also records the independent native-state check and exact lease release.
 Bind support and ordinary-card performance remain unmeasured.
 
+**Selector change after diagnosis:** the revised parser accepts the exact
+parent token `0` only on an unrelated mount row or on a unique `/` row
+whose filesystem root is also `/`. It does not skip those rows. The user
+volume, protected paths, source aliases and the exact bind target still
+require a positive parent, and malformed or out-of-range parent values
+are refused. The new error categories distinguish a forbidden zero from
+an invalid numeric value. This covers one possible cause; the physical
+receipt does not establish that the actual rejected token was `0`.
+
+On `test-env`, the revised native and ARM/QEMU helpers each passed four
+parser test groups and the original nine real-mount and recovery cases.
+The original 66,044-byte helper and the 14 unused visit plans were not
+modified. The revised 66,868-byte helper has **not** been run on this
+Kindle. The next hardware gate is a **fresh disposable-file probe**. Only
+if the independent session sees the mounted marker and handback reveals
+the original unchanged file can a new matching batch start its two
+untimed stock-card warmups. A worker preflight does not clear that gate.
+
 ## Acceptance and stopping rules
 
 - Start: the automatic button release on the uniquely recognized normal

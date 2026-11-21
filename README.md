@@ -74,8 +74,10 @@ also handles a confirmed opposite grip; it is not in the standard package.
 Neither path shortens the launcher's two-second wait.
 The [ordinary-card A/B](docs/review/stock-library-ab-20261122/README.md)
 has **zero measured pairs**: the November 22 disposable-file probe stopped
-before mounting or pressing the card. The indexed saving is not a result
-for the ordinary card.
+before mounting or pressing the card. A separate read-only device check
+located a rejected parent mount ID on a different row from `/mnt/us`;
+the revised parser has only been tested on the worker. The indexed saving
+is not a result for the ordinary card.
 
 A [separate launcher change](docs/review/startup-launcher-window-20261121/README.md)
 removes the startup window-tree scan for the retired Quick and Wi-Fi controls.

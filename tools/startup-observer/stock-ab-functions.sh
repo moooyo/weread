@@ -133,7 +133,7 @@ checked_bind() {
     case "$bind_message" in
         'refused bind_'*)
             category=${bind_message#refused }
-            if printf '%s\n' "$category" | awk 'NR==1 && (/^bind_(stage|files|contended|journal|provenance|foreign_mount|mount_table|propagation|namespace|native_view|native_service|native_proc_(read|permission|limit)|unknown_state|(mount|unmount)_unconfirmed)$/ || (/^bind_(mount|unmount)_call_[1-9][0-9]*$/ && (substr($0,match($0,/[0-9]+$/))+0)<=4095)) {ok=1} END{exit !(ok && NR==1)}'; then bind_reason=$category; fi;;
+            if printf '%s\n' "$category" | awk 'NR==1 && (/^bind_(stage|files|contended|journal|provenance|foreign_mount|mount_table|parent_(value|scope)|propagation|namespace|native_view|native_service|native_proc_(read|permission|limit)|unknown_state|(mount|unmount)_unconfirmed)$/ || (/^bind_(mount|unmount)_call_[1-9][0-9]*$/ && (substr($0,match($0,/[0-9]+$/))+0)<=4095)) {ok=1} END{exit !(ok && NR==1)}'; then bind_reason=$category; fi;;
     esac
     return 1
 }

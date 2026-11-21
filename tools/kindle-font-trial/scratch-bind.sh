@@ -27,7 +27,7 @@ no_helper_state() {
 helper_step() {
     bind_reply=$("$stage/helper" "$1" scratch "$label" 2>&1) && [ "$bind_reply" = "$2" ] && return 0
     case "$bind_reply" in
-        'refused bind_stage'|'refused bind_files'|'refused bind_native_service'|'refused bind_native_view'|'refused bind_native_proc_permission'|'refused bind_native_proc_read'|'refused bind_native_proc_limit'|'refused bind_namespace'|'refused bind_mount_table'|'refused bind_propagation'|'refused bind_foreign_mount'|'refused bind_journal'|'refused bind_provenance'|'refused bind_unknown_state'|'refused bind_contended'|'refused bind_mount_unconfirmed'|'refused bind_unmount_unconfirmed') reason=${bind_reply#refused };;
+        'refused bind_stage'|'refused bind_files'|'refused bind_native_service'|'refused bind_native_view'|'refused bind_native_proc_permission'|'refused bind_native_proc_read'|'refused bind_native_proc_limit'|'refused bind_namespace'|'refused bind_mount_table'|'refused bind_parent_value'|'refused bind_parent_scope'|'refused bind_propagation'|'refused bind_foreign_mount'|'refused bind_journal'|'refused bind_provenance'|'refused bind_unknown_state'|'refused bind_contended'|'refused bind_mount_unconfirmed'|'refused bind_unmount_unconfirmed') reason=${bind_reply#refused };;
         'refused bind_mount_call_'*|'refused bind_unmount_call_'*)
             reason=${bind_reply#refused }; number=${reason##*_}; operation=${reason%_*}
             case "$operation:$number" in bind_mount_call:*|bind_unmount_call:*)

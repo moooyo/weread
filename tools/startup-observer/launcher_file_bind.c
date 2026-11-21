@@ -179,6 +179,14 @@ static int positive(const char *word, unsigned *value) {
     if (errno || *end || !parsed || parsed>UINT_MAX) return 0;
     *value=(unsigned)parsed; return 1;
 }
+static int needs_parent(const struct operation *op,const char *point) {
+    if (!strcmp(point,"/")) return 0;
+    return !strcmp(point,VOLUME) || nested(VOLUME,point) || !strcmp(point,op->target) ||
+        nested(point,op->target) || nested(point,op->source) || !strcmp(point,VOLUME "/documents") || nested(point,VOLUME "/documents") ||
+        !strcmp(point,op->stage) || nested(point,op->stage) || nested(op->stage,point) ||
+        !strcmp(point,op->home) || nested(point,op->home) || nested(op->home,point) ||
+        !strcmp(point,op->private) || nested(point,op->private) || nested(op->private,point);
+}
 static int propagation(char *cursor,int *unsafe) {
     char *flag;
     while ((flag=strtok_r(NULL," ",&cursor))) {
@@ -190,17 +198,24 @@ static int propagation(char *cursor,int *unsafe) {
 static int mounts(const struct operation *op, struct table *result) {
     memset(result,0,sizeof(*result));
     FILE *file=fopen("/proc/self/mountinfo","r"); if (!file) return refuse("mount_table");
-    char *line=NULL; size_t room=0; int good=1; unsigned pass=0;
+    char *line=NULL; size_t room=0; int good=1; unsigned pass=0;const char *error="mount_table";
     for (pass=0; pass<2 && good; pass++) {
         if (pass) { if (fseek(file,0,SEEK_SET)) {good=0;break;} }
-        unsigned lines=0;
+        unsigned lines=0,root_entries=0;int zero_root=0;
         while (getline(&line,&room,file)>=0) {
             if (++lines>8192 || strlen(line)>32768) {good=0;break;}
             char *cursor=NULL,*id=strtok_r(line," ",&cursor),*parent=strtok_r(NULL," ",&cursor),*dev=strtok_r(NULL," ",&cursor);
             char *root=strtok_r(NULL," ",&cursor), *point=strtok_r(NULL," ",&cursor), *opts=strtok_r(NULL," ",&cursor),extra;
             unsigned cur=0,up=0,major=0,minor=0;
-            if (!id||!parent||!dev||!root||!point||!opts||!positive(id,&cur)||!positive(parent,&up)||
+            if (!id||!parent||!dev||!root||!point||!opts||!positive(id,&cur)||
                 sscanf(dev,"%u:%u%c",&major,&minor,&extra)!=2||root[0]!='/'||point[0]!='/') {good=0;break;}
+            if (!strcmp(point,"/")) ++root_entries;
+            if (!positive(parent,&up)) {
+                if (strcmp(parent,"0")) {error="parent_value";good=0;break;}
+                int alias=pass && major==result->major && minor==result->minor && !strcmp(root,result->source_root);
+                if ((!strcmp(point,"/") && strcmp(root,"/")) || needs_parent(op,point) || alias || (pass && cur==result->base)) {error="parent_scope";good=0;break;}
+                if (!strcmp(point,"/")) zero_root=1;
+            }
             if (!pass && !strcmp(point,VOLUME)) {
                 if (result->base || strchr(root,'\\') || !build(result->source_root,sizeof(result->source_root),"%s%s",!strcmp(root,"/")?"":root,op->source_relative)) {good=0;break;}
                 result->base=cur;result->major=major;result->minor=minor;
@@ -215,10 +230,11 @@ static int mounts(const struct operation *op, struct table *result) {
                 if (result->base==cur && (strcmp(point,VOLUME) || major!=result->major || minor!=result->minor)) {good=0;break;}
             }
         }
+        if (zero_root && root_entries!=1) {error="parent_scope";good=0;}
         if (ferror(file) || !result->base) good=0;
     }
     free(line);fclose(file);
-    if (!good) return refuse("mount_table");
+    if (!good) return refuse(error);
     if (result->propagates) return refuse("propagation");
     return !(result->foreign||result->aliases||result->mounts>1) || refuse("foreign_mount");
 }
