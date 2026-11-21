@@ -13,10 +13,7 @@ REQUEST_LIFETIME_NS = 60_000_000_000
 
 
 def qualify(report):
-    """Use only one worker report. Arm records its device clock and request window; tap keeps its
-    checked receipt. The live collector must verify the request inode and claimed GUI before
-    recording the app's original line in library_submit. The external-only runner cannot qualify.
-    """
+    """Use the live arm and collect receipts, including the original stage's tile release."""
     if not isinstance(report, dict) or not isinstance(report.get('label'), str) or not LABEL.fullmatch(report['label']):
         raise Refused('unknown_batch')
     if (report.get('released') is not True or report.get('owner_and_token_checked') is not True or
@@ -45,17 +42,29 @@ def qualify(report):
     stored = report.get('synthetic_release_ns')
     if stored != [before, after] or any(type(value) is not int for value in stored):
         raise Refused('unbound_release')
-    marker = by_mode['library_submit'].get('receipt')
+    witness = by_mode['library_submit'].get('receipt')
+    if (not isinstance(witness, dict) or set(witness) != {'label', 'marker', 'tile_receipt', 'observed_ns'} or
+            witness['label'] != report['label'] or not isinstance(witness['tile_receipt'], dict) or
+            type(witness['observed_ns']) is not int or not 0 < witness['observed_ns'] < 2**63):
+        raise Refused('unbound_library_witness')
+    stage_tap = witness['tile_receipt']
+    if (stage_tap.keys() != tap.keys() or
+            any(type(stage_tap[key]) is not type(value) or stage_tap[key] != value for key, value in tap.items())):
+        raise Refused('unbound_stage_release')
+    marker = witness['marker']
     match = SUBMITTED.fullmatch(marker) if isinstance(marker, str) and len(marker) < 100 else None
     if not match or match[1] != report['label']:
         raise Refused('unbound_library_submit')
     submitted = int(match[2])
-    request = by_mode['arm']
+    request = by_mode['arm'].get('receipt')
+    if (not isinstance(request, dict) or set(request) != {'state', 'label', 'request_clock', 'request_armed_ns', 'request_deadline_ns'} or
+            request['state'] != 'armed' or request['label'] != report['label']):
+        raise Refused('unbound_arm')
     armed, deadline = request.get('request_armed_ns'), request.get('request_deadline_ns')
     if (request.get('request_clock') != CLOCK or type(armed) is not int or type(deadline) is not int or
             not 0 < armed <= tap['down_before_ns'] <= before < deadline < 2**63):
         raise Refused('unbound_request_window')
-    if deadline - armed > REQUEST_LIFETIME_NS or not after <= submitted < deadline:
+    if deadline - armed > REQUEST_LIFETIME_NS or not after <= submitted < deadline or submitted > witness['observed_ns']:
         raise Refused('unresolved_endpoint_order')
     scene = report.get('observation')
     if scene is not None and (not isinstance(scene, dict) or scene.get('clock') != CLOCK or

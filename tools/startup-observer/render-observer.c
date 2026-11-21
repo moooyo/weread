@@ -181,6 +181,12 @@ static int output(struct observed_scene picture,uint64_t negative,uint64_t first
 }
 
 int main(int argc,char **argv) {
+    if ((argc == 2 || argc == 3) && strcmp(argv[1],"--monotonic-ns") == 0) {
+        uint64_t sampled = now(), deadline;
+        if (argc == 3 && (argv[2][0] == '0' || !numeric(argv[2],argv[2]+strlen(argv[2]),&deadline) ||
+            deadline > INT64_MAX || deadline <= sampled || deadline-sampled > 60*SECOND)) return fail("request_window");
+        return printf("%" PRIu64 "\n",sampled) < 0 || fflush(stdout) != 0;
+    }
     if (argc != 2 || strlen(argv[1]) != 16 || strspn(argv[1],"0123456789abcdef") != 16) return fail("label");
     sigset_t alarms;
     if (signal(SIGALRM,SIG_DFL) == SIG_ERR || sigemptyset(&alarms) || sigaddset(&alarms,SIGALRM) ||

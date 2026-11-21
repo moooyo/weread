@@ -69,6 +69,54 @@ interval, not a point. Missing or malformed records, rejected or ambiguous
 launches, and missed/expired frames are `not_timed`. A user-mode ARM smoke test
 or host fixture is not a physical Kindle or firmware-emulator result.
 
+`library-submit.sh` is the read side for a future authorized collector, not an
+installation or device runner. Its caller must keep the newly created directory
+and original request open on file descriptors 6 and 7 in the **same shell**,
+provide the ordinary transaction's stage and identity checks, and own cleanup.
+Before the card input, call `library_submit_arm DEADLINE_NS` directly (not in a
+subshell); it checks the live request and records device `CLOCK_MONOTONIC` via
+`render-observer --monotonic-ns`. After the bound GUI and observer witness, call
+`library_submit_collect` in that shell before stopping the GUI. Preserve both
+JSON objects as the `arm` and `library_submit` operation receipts. The qualifier
+compares the latter's saved tile release with the actual `tap` receipt. The
+unchanged external daily runner cannot keep these descriptors or select an
+instrumented app; those prerequisites are not implemented by this component.
+
+## November 22 ordinary-card A/B preparation
+
+Two ARM measurement builds from `ac6d63f` can emit the same submission
+record. A includes the bundled-font optimization and no orientation reuse
+(95,224,032 bytes); B adds the normal exact-pose reuse (95,228,264 bytes).
+Neither includes the experimental opposite-pose path. The worker retains the
+binaries and their Cargo records in
+`test-env:/root/weread-ordinary-library-pair-20261122.icCGKPHm/pair.json`.
+With no account or network and no forced route, the ordinary desktop app
+opened Library from the public 15-book data directory and Login from an empty
+one. This verifies a suitable public fixture, not Kindle startup latency.
+
+**No ordinary-card A/B ran.** The existing stock document starts the installed
+program. Changing the program or data path causes the current submission
+witness to decline the request, and the installed daily program lacks this
+witness. Do not replace the shared handler, cover the installed program or
+data with a system-wide mount, or open the private shelf to manufacture a
+result. The [daily-entry routing decision](../../docs/review/library-startup-latency-20261119/physical-20261120.md)
+is distinct from the approved temporary indexed test entry.
+
+One option, not an approved deployment, is a temporary, restorable change
+only to WeRead's own launcher: the normal stock card would select a fixed
+measurement build and disposable public data for that visit. Both arms
+would first need the same narrowly scoped submission witness for that
+launcher and its process; keep the installed witness unchanged. Compare
+identical release-to-submit intervals and label the result as a stock-card
+launch of an isolated measurement build, not of the untouched installation.
+
+The observer tools passed 61 `test_*.py` tests and five non-overlapping
+`*_test.py` cases under Xvfb on `test-env`. The 12 focused witness tests
+also passed under BusyBox. Native and static ARM helpers built with
+`-Wall -Wextra -Werror`; the native binary and Cortex-A8 QEMU each returned
+clock values inside the surrounding monotonic interval and refused expired
+deadlines. These are clock and collector checks, not on-device samples.
+
 ## November 21 worker verification
 
 On `test-env`, formatting passed for the changed Rust files. The Kindle-feature
