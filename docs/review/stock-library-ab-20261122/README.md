@@ -45,6 +45,30 @@ observer lock and a disconnect after the launcher exchange but before any
 click. Recovery restored the original without reopening the app. The ARM
 QEMU software checks and these rehearsals are not device timing samples.
 
+## First device attempt: transfer not confirmed
+
+The first A warmup (`dcb6fdc5f079ab22`) acquired the Scribe at 03:33:20
+Asia/Shanghai on November 22. Admission and stage creation succeeded. The
+install step returned `unconfirmed` **276 ms after the stage acknowledgment**.
+There was no successful install receipt, navigation, launcher activation,
+card click or submission. Stop, restore, close and independent absence all
+succeeded; the original owner's lease was released at **03:33:30**. This
+attempt contributes **zero measured pairs** and is never reused as a warmup.
+
+The old install path sent a 47,225-byte SSH command before the 102,851,217-byte
+payload. It did not retain a transport exit code or a device-side refusal
+from which to identify why it stopped. A command-length limit is a plausible
+explanation, not a verified fact about the device; the result does not show
+a broken card, renderer or launcher, or a successful transfer.
+
+The revised sender uses a 217-byte SSH command. The remote shell reads the
+exact script length from stdin; the untouched archive follows. In an isolated
+Dropbear/BusyBox test on `test-env`, the old command failed immediately in
+both lanes. The short command received all 102,851,217 A bytes and 102,853,044
+B bytes respectively, with the original archive content and EOF verified.
+This check used no Kindle. The failed device visit and its receipt remain
+separate from any new series; a transfer fix cannot supply a timing sample.
+
 ## Acceptance and stopping rules
 
 - Start: the automatic button release on the uniquely recognized normal

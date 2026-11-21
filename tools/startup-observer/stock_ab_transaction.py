@@ -18,6 +18,13 @@ GUARDS = ('original', 'audit_before', 'audit_after')
 METADATA = ('label', 'purpose', 'lane', 'slot', 'role', 'pair')
 
 
+class WireRefusal(Refused):
+    def __init__(self, reason, returncode=None, header_observed=None):
+        super().__init__(reason)
+        self.returncode = returncode
+        self.header_observed = header_observed
+
+
 def valid_stat(key, value):
     return (key in STAT_FIELDS and isinstance(value, str) and
             (DOCUMENT_STAT if key == 'document' else STAT).fullmatch(value) is not None)
@@ -130,7 +137,13 @@ def drive(transport, release, report, journal, save, persist, *, recovering=Fals
             receipt = checked(mode, action(), label)
         except (Exception, KeyboardInterrupt) as error:
             reason = public_error(error)
-            collection.append(dict(mode=mode, status=1, reason=reason, at=now()))
+            failed = dict(mode=mode, status=1, reason=reason, at=now())
+            if isinstance(error, WireRefusal):
+                if type(error.returncode) is int and -255 <= error.returncode <= 255:
+                    failed['ssh_returncode'] = error.returncode
+                if mode == 'install' and type(error.header_observed) is bool:
+                    failed['install_header_observed'] = error.header_observed
+            collection.append(failed)
             save()
             raise Refused(mode + ':' + reason) from None
         collection.append(dict(mode=mode, status=0, reason='', receipt=receipt, at=now()))

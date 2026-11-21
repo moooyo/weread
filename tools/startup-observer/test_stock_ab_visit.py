@@ -15,8 +15,8 @@ from unittest.mock import patch
 
 from qualified_submit import ISOLATED_SEQUENCE
 from run_daily_render import Refused
-from run_stock_ab_visit import RequestChannel, Transport, audit_reference, execute, invocation, original_attempt, references
-from stock_ab_transaction import GUARDS, STATES, checkpoint, checked, drive, fresh_journal, initial, valid_journal
+from run_stock_ab_visit import HEADER_RECEIVED, RequestChannel, Transport, audit_reference, execute, invocation, original_attempt, references, staged_wire, transport_failure
+from stock_ab_transaction import GUARDS, STATES, WireRefusal, checkpoint, checked, drive, fresh_journal, initial, valid_journal
 from test_qualified_submit import LABEL, SENT, START, receipt
 
 
@@ -191,9 +191,50 @@ if IFS= read -r line; then exit 1; fi; printf '{"result":1}\\n' '''
         with tempfile.TemporaryDirectory() as work:
             file=Path(work)/'inputs.tgz'; data=b'\x1f\x8b\n\x00\xff'; file.write_bytes(data)
             program=b'[ "$2" = '+LABEL.encode()+b' ] || exit 64; cat'
-            sent=[]; transport=Transport(['sh','-c'],program,LABEL,file,b'DOC\nLAUNCH\n',os.environ,lambda:sent.append('check'))
+            wire=staged_wire(file,invocation(program,'install',LABEL)[1],Path(work)/'install.stream')
+            sent=[]; transport=Transport(['sh','-c'],program,LABEL,file,b'DOC\nLAUNCH\n',os.environ,lambda:sent.append('check'),wire=wire)
             self.assertEqual(transport.call('install'),data)
             self.assertEqual(transport.call('audit_after'),b'DOC\nLAUNCH\n'); self.assertEqual(sent,['check','check'])
+
+    def test_arm_framing_limits_exec_length_and_does_not_consume_any_archive_byte(self):
+        with tempfile.TemporaryDirectory() as work:
+            root=Path(work); archive=root/'payload'; data=bytes(range(256))*10+b'\n\x00\r\xff'; archive.write_bytes(data)
+            secret='private-content-in-program'; baseline=("#"+secret+"x"*47000+"\ncat\n").encode()
+            command,header=invocation(baseline,'install',LABEL); self.assertLess(len(command.encode()),256)
+            self.assertNotIn(secret,command); self.assertGreater(len(header),47000)
+            compare=staged_wire(archive,header,root/'wire'); self.assertEqual(compare.stat().st_size,len(header)+len(data))
+            with compare.open('rb') as stream:
+                completed=subprocess.run(['sh','-c',command],stdin=stream,capture_output=True,timeout=8)
+            self.assertEqual((completed.returncode,completed.stdout,completed.stderr),(0,data,HEADER_RECEIVED+b'\n'))
+            short=subprocess.run(['sh','-c',command],input=header[:-1],capture_output=True,timeout=8)
+            self.assertEqual((short.returncode,short.stdout,short.stderr),(64,b'',b''))
+
+    def test_exit_diagnostics_preserve_sequence_without_exporting_private_ssh_text(self):
+        for code,raw,reason,observed in [(255,b'private auth failure\n','ssh_transport_exit',False),
+                (None,HEADER_RECEIVED+b'\nprivate path\n','transport_timeout',True),
+                (64,b'private path\n','install_header_unconfirmed',False),
+                (9,HEADER_RECEIVED+b'\nprivate path\n','unconfirmed_after_header',True),
+                (1,HEADER_RECEIVED+b'\nprivate path\nrefused install\n','install',True)]:
+            fixture=Fixture(); previous=fixture.call
+            def call(mode):
+                if mode=='install': raise transport_failure(mode,code,raw)
+                return previous(mode)
+            fixture.call=call
+            self.assertEqual(fixture.run(),1)
+            failed=next(row for row in fixture.report['operations'] if row['mode']=='install')
+            self.assertEqual(failed.get('ssh_returncode'),code); self.assertIs(failed['install_header_observed'],observed)
+            self.assertEqual(failed['reason'],reason); self.assertNotIn('private',str(fixture.report)); self.assertTrue(fixture.report['released'])
+
+    def test_no_install_wire_or_missing_header_sentinel_cannot_activate(self):
+        with tempfile.TemporaryDirectory() as work:
+            root=Path(work); archive=root/'payload'; archive.write_bytes(b'fixture')
+            program=b'cat >/dev/null; echo installed'; remote=Transport(['sh','-c'],program,LABEL,archive,b'',os.environ,lambda:None)
+            with self.assertRaisesRegex(Refused,'install_wire_not_prepared'): remote.call('install')
+            remote.wire=staged_wire(archive,invocation(program,'install',LABEL)[1],root/'wire')
+            simulated=subprocess.CompletedProcess([],0,b'{"state":"installed"}\n',b'private stderr\n')
+            with patch('run_stock_ab_visit.subprocess.run',return_value=simulated), self.assertRaises(WireRefusal) as refused:
+                remote.call('install')
+            self.assertEqual((str(refused.exception),refused.exception.returncode,refused.exception.header_observed),('missing_install_header_receipt',0,False))
 
     def test_pinned_original_reference_order_does_not_depend_on_tar_order(self):
         with tempfile.TemporaryDirectory() as work:

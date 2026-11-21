@@ -19,13 +19,14 @@ import tempfile
 import time
 
 from run_daily_render import LABEL, SHARED, Refused, now, public_reason
-from stock_ab_transaction import METADATA, checkpoint, drive, fresh_journal, initial, valid_journal
+from stock_ab_transaction import METADATA, WireRefusal, checkpoint, drive, fresh_journal, initial, valid_journal
 
 
 TIMES = dict(install=240, prepare=120, tap=100, claim=40, stop=100, restore=125, close=60)
 REFS = ('document-reference', 'launch-reference')
 TRUST = Path('/root/.config/kindle-physical')
 WORKER_RUNNER = Path('/opt/kindle-toolchain/ubuntu-run')
+HEADER_RECEIVED = b'WEREAD_STOCK_INSTALL_HEADER_COMPLETE'
 
 
 def invocation(body, mode, label):
@@ -35,19 +36,39 @@ def invocation(body, mode, label):
     if (mode not in allowed or not LABEL.fullmatch(label) or not header.isascii() or not 0 < len(header) <= 256 * 1024
             or b'\r' in header or b'\0' in header):
         raise ValueError('Invalid frozen device program or operation')
+    acknowledged = "printf '%s\\n' " + HEADER_RECEIVED.decode('ascii') + ' >&2; ' if mode == 'install' else ''
     command = (f'export LC_ALL=C; program=$(dd bs=1 count={len(header)} 2>/dev/null); '
-               f'[ "${{#program}}" = {len(header)} ] || exit 64; exec sh -c "$program" ' +
+               f'[ "${{#program}}" = {len(header)} ] || exit 64; ' + acknowledged + 'exec sh -c "$program" ' +
                shlex.join(['weread-stock-ab', mode, label]))
     return command, header
 
 
-def install_command(body, label):
-    _, header = invocation(body, 'install', label)
-    delimiter = 'WEREAD_STOCK_AB_INSTALL_BODY'
-    if delimiter.encode('ascii') in header.splitlines() or len(header) > 96 * 1024:
-        raise ValueError('Frozen installation program exceeds its command transport')
-    return ("export LC_ALL=C; program=$(cat <<'" + delimiter + "'\n" + header.decode('ascii') + '\n' + delimiter +
-            '\n) || exit 64; exec sh -c "$program" ' + shlex.join(['weread-stock-ab','install',label]))
+def staged_wire(archive, header, destination):
+    if archive.is_symlink() or not archive.is_file():
+        raise Refused('unsafe_install_archive')
+    size = archive.stat().st_size
+    if not 0 < size <= 512 * 1024**2:
+        raise Refused('invalid_install_archive_size')
+    with archive.open('rb') as source, destination.open('xb') as wire:
+        wire.write(header)
+        while chunk := source.read(1024 * 1024):
+            wire.write(chunk)
+        if wire.tell() != len(header) + size:
+            raise Refused('install_archive_changed')
+        if os.fstat(source.fileno()).st_size != size:
+            raise Refused('install_archive_changed')
+    return destination
+
+
+def transport_failure(mode, code, stderr):
+    raw = stderr if isinstance(stderr,bytes) else b''
+    seen = HEADER_RECEIVED in raw.splitlines() if mode == 'install' else None
+    reason = public_reason(raw)
+    if reason == 'unconfirmed':
+        reason = ('transport_timeout' if code is None else 'ssh_transport_exit' if code == 255 else
+                  'transport_signaled' if code < 0 else 'unconfirmed_after_header' if seen else
+                  'install_header_unconfirmed' if mode == 'install' else 'unconfirmed')
+    return WireRefusal(reason,code,seen)
 
 
 def references(package):
@@ -160,9 +181,10 @@ class RequestChannel:
 
 
 class Transport:
-    def __init__(self, ssh, script, label, archive, reference, env, owned):
+    def __init__(self, ssh, script, label, archive, reference, env, owned, *, wire=None):
         self.ssh, self.script, self.label = ssh, script, label
         self.archive, self.reference, self.env, self.owned = archive, reference, env, owned
+        self.wire = wire
 
     def request(self):
         self.owned()
@@ -175,17 +197,21 @@ class Transport:
         command, header = invocation(self.script, operation, self.label)
         try:
             if mode == 'install':
-                with self.archive.open('rb') as source:
-                    result = subprocess.run([*self.ssh, install_command(self.script,self.label)], stdin=source,
+                if self.wire is None:
+                    raise Refused('install_wire_not_prepared')
+                with self.wire.open('rb') as source:
+                    result = subprocess.run([*self.ssh, command], stdin=source,
                                             capture_output=True, env=self.env, timeout=TIMES['install'])
             else:
                 payload = header + (self.reference if operation == 'audit' else b'')
                 result = subprocess.run([*self.ssh, command], input=payload, capture_output=True, env=self.env,
                                         timeout=TIMES.get(mode, 45))
-        except subprocess.TimeoutExpired:
-            raise Refused('transport_timeout') from None
+        except subprocess.TimeoutExpired as error:
+            raise transport_failure(mode,None,error.stderr) from None
         if result.returncode:
-            raise Refused(public_reason(result.stderr))
+            raise transport_failure(mode,result.returncode,result.stderr)
+        if mode == 'install' and result.stderr.splitlines().count(HEADER_RECEIVED) != 1:
+            raise WireRefusal('missing_install_header_receipt',result.returncode,False)
         return result.stdout
 
 
@@ -255,7 +281,7 @@ def execute(args):
     label = config['label']
     body = (plan / 'device.sh').read_bytes()
     invocation(body, 'request', label)
-    install_command(body, label)
+    _, install_header = invocation(body, 'install', label)
     archive = plan / 'inputs.tgz'
     originals = None if args.recover else references(archive)
     if args.preflight:
@@ -317,7 +343,8 @@ def execute(args):
             askpass.chmod(0o700)
             env = dict(os.environ, SSH_ASKPASS=str(askpass), SSH_ASKPASS_REQUIRE='force', DISPLAY='unused',
                        WEREAD_TRANSIENT_PASSWORD=password)
-            transport = Transport(ssh, body, label, archive, originals, env, owned)
+            wire = None if args.recover else staged_wire(archive,install_header,Path(private)/'install.stream')
+            transport = Transport(ssh, body, label, archive, originals, env, owned, wire=wire)
             signal.signal(signal.SIGTERM, interrupt)
             if args.recover:
                 original = read_json(attempt/'operations.json')
