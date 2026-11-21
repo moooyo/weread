@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <inttypes.h>
 #include <limits.h>
+#include <linux/fb.h>
 #include <linux/input.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -96,9 +97,29 @@ static int still_unique(int descriptor) {
     return same;
 }
 
+static int display_sample(void) {
+    int sensor = discover();
+    if (sensor < 0) return 2;
+    int frame = open("/dev/fb0", O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    struct stat status;
+    struct input_absinfo pressure;
+    struct fb_var_screeninfo screen;
+    uint64_t before, after;
+    int valid = frame >= 0 && fstat(frame, &status) == 0 && S_ISCHR(status.st_mode) &&
+        monotonic_ns(&before) && ioctl(sensor, EVIOCGABS(ABS_PRESSURE), &pressure) == 0 &&
+        ioctl(frame, FBIOGET_VSCREENINFO, &screen) == 0 && monotonic_ns(&after) && before <= after &&
+        pressure.value >= 15 && pressure.value <= 18 && screen.rotate <= 3 && still_unique(sensor);
+    if (frame >= 0) close(frame);
+    close(sensor);
+    if (!valid) return 2;
+    if (printf("sample %" PRIu64 " %" PRIu64 " %d %u\n", before, after, pressure.value, screen.rotate) < 0) return 2;
+    return fflush(stdout) == 0 ? 0 : 2;
+}
+
 int main(int argc, char **argv) {
     int count = 1;
     if (argc == 2) {
+        if (!strcmp(argv[1], "--display-sample")) return display_sample();
         size_t length = strlen(argv[1]);
         if (length == 0 || length > 3 || argv[1][0] == '0' || strspn(argv[1], "0123456789") != length) return 64;
         count = atoi(argv[1]);

@@ -16,7 +16,7 @@ for index in $(seq 1 10); do printf '%s %s %s 16\n' "$index" "$((100*index))" "$
 '''
 
 
-class ProbeTests(unittest.TestCase):
+class PoseFixture(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -25,8 +25,8 @@ class ProbeTests(unittest.TestCase):
         self.before = "D:1"
         self.after = "D:1"
 
-    def execute(self, mode, payload=HELPER, expected=0, extra="", reason=None, length=None):
-        source = render_device(len(payload) if length is None else length)
+    def execute(self, mode, payload=HELPER, expected=0, extra="", reason=None, length=None, *, display_trace=False):
+        source = render_device(len(payload) if length is None else length, display_trace=display_trace)
         self.assertIn('file_identity /mnt/us/bilicomics/app/bilicomics 74340832', source)
         for excluded in ('sha256sum ', 'lipc-set-prop', 'rm -rf', 'scan() {'):
             self.assertNotIn(excluded, source)
@@ -44,12 +44,14 @@ else touch {self.root}/second; printf '%s\\n' '{self.before}'; fi
         mocks = 'state() { echo native-stable; }\nview() { echo kpp_library; }\npeer_projection() { echo peers-stable; }\n'
         source = source.replace(DISPATCH, mocks + extra + '\n' + DISPATCH)
         child = subprocess.run(['sh', '-c', source, 'pose-test', mode, LABEL, 'none'], input=payload,
-                               capture_output=True, timeout=5)
+                               capture_output=True, timeout=8 if display_trace else 5)
         self.assertEqual(child.returncode, expected, child.stderr)
         if reason:
             self.assertEqual(child.stderr, f'refused {reason}\n'.encode())
         return child.stdout
 
+
+class ProbeTests(PoseFixture):
     def test_self_cleaning_probe_and_independent_absence(self):
         self.assertEqual(self.execute('admit'), b'admitted\n')
         self.assertFalse(self.stage.exists())

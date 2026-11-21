@@ -86,6 +86,9 @@ released at 15:47:11 without uploading anything. The earlier ten sensor reads
 were from a separate lease, not the live turn window. Neither opposite-portrait
 startup nor a physical tap was observed; see the
 [follow-up](docs/review/startup-orientation-20261121/physical-pose-visit.md#native-only-follow-up).
+The worker now has a [native-only diagnostic](tools/kindle-font-trial/ORIENTATION.md#native-sensor-and-display-trace)
+for observing the sensor, window manager and scan rotation within one physical turn.
+It has not been used on the Scribe; do not treat its fixture results as device evidence.
 See the linked experiment for build results and remaining gates. The [power-observer
 investigation](docs/review/startup-orientation-20261121/power-wait.md) keeps
 the two-second wait unchanged. Neither changes the measured font result.

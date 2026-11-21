@@ -16,7 +16,7 @@ from pose_probe import parse_observation, render_device
 from run import LEASE, UTIL, stamp, transport
 
 
-def transact(call, release, report, save, recovering=False):
+def transact(call, release, report, save, recovering=False, *, display_trace=False):
     touched = recovering
     raw = None
     try:
@@ -38,7 +38,7 @@ def transact(call, release, report, save, recovering=False):
         finally:
             save()
     if raw is not None:
-        report['observation'] = parse_observation(raw.decode('ascii'), expected_label=report['label'])
+        report['observation'] = parse_observation(raw.decode('ascii'), expected_label=report['label'], display_trace=display_trace)
     report['passed'] = True
     save()
 
@@ -47,7 +47,15 @@ def main(args):
     os.umask(0o077)
     if not Path('/opt/kindle-toolchain/ubuntu-run').is_file():
         raise ValueError('Use the designated worker host')
+    if args.recover and args.display_trace:
+        raise ValueError('Recovery is cleanup only, not a display trace')
     runs = args.runs.resolve(strict=True)
+    if args.recover:
+        mode, scope = 'recover', 'stage_cleanup_only'
+    elif args.display_trace:
+        mode, scope = 'display_trace', 'stock_native_display_trace_only'
+    else:
+        mode, scope = 'probe', 'stock_native_reference_only'
     if args.recover:
         attempt = args.recover.resolve(strict=True)
         if attempt.parent != runs or not (attempt / 'private-token').is_file():
@@ -64,14 +72,14 @@ def main(args):
         if helper[:7] != b'\x7fELF\x01\x01\x01' or int.from_bytes(helper[18:20], 'little') != 40:
             raise ValueError('Expected an ARM32 little-endian ELF')
         label = secrets.token_hex(8)
-        body = render_device(len(helper))
-    for mode in ('admit', 'probe', 'close', 'absent'):
-        transport(body, mode, label, 'none')
+        body = render_device(len(helper), display_trace=args.display_trace)
+    for operation in ('admit', 'probe', 'close', 'absent'):
+        transport(body, operation, label, 'none')
     trust = Path('/root/.config/kindle-physical')
     ssh = UTIL['ssh_command'](trust / 'ssh_config', trust / 'known_hosts', 'kindle-physical')
     lease = UTIL['load_lease'](args.lease_tool.resolve(strict=True))
     if args.preflight:
-        print('Worker inputs and pinned SSH configuration ready; no device access or lease.')
+        print(f'{scope}: worker inputs and pinned SSH configuration ready; no device access or lease.')
         return 0
     secret = getpass.getpass('Device password (not saved): ') if sys.stdin.isatty() else sys.stdin.readline().rstrip('\r\n')
     if not secret:
@@ -80,8 +88,7 @@ def main(args):
         attempt = Path(tempfile.mkdtemp(prefix='probe-', dir=runs))
         (attempt / 'label').write_text(label + '\n')
         (attempt / 'device.sh').write_text(body)
-    report = {'label': label, 'started': stamp(), 'operations': [], 'passed': False, 'mode': 'recover' if args.recover else 'probe',
-              'scope': 'stock_native_reference_only'}
+    report = {'label': label, 'started': stamp(), 'operations': [], 'passed': False, 'mode': mode, 'scope': scope}
     output = attempt / ('recovery.json' if args.recover else 'operations.json')
     request = lease.LeaseRequest(LEASE, attempt / 'private-token', args.owner, 'weread-native-pose-' + label)
 
@@ -104,9 +111,12 @@ def main(args):
             if not lease.status(request)['ownership_verified']:
                 raise ValueError('ownership_changed')
             remote, header = transport(body, mode, label, 'none')
+            tracing = args.display_trace and mode == 'probe'
+            if tracing:
+                print('Native admission passed; the trace is about to start. Keep the current pose for now.', flush=True)
             try:
                 result = subprocess.run([*ssh, remote], input=header + (helper if mode == 'probe' else b''),
-                                        capture_output=True, env=env, timeout=30)
+                                        capture_output=True, env=env, timeout=40 if tracing else 30)
                 code = result.returncode
                 refusal = re.search(rb'^refused ([a-z0-9_]{1,48})$', result.stderr, re.MULTILINE)
                 reason = refusal[1].decode() if refusal else 'transport_or_device'
@@ -128,7 +138,8 @@ def main(args):
             if not args.recover:
                 report['acquired'] = lease.acquire(request)['acquired_at_utc']
             save()
-            transact(call, lambda: lease.release(request, native_restored_and_connections_closed=True), report, save, args.recover)
+            transact(call, lambda: lease.release(request, native_restored_and_connections_closed=True), report, save,
+                     args.recover, display_trace=args.display_trace)
         except (Exception, KeyboardInterrupt) as error:
             report['error'] = getattr(error, 'code', type(error).__name__)
             changes = getattr(error, 'details', {})
@@ -148,6 +159,9 @@ if __name__ == '__main__':
     parser.add_argument('--lease-tool', type=Path, required=True)
     parser.add_argument('--owner', required=True)
     parser.add_argument('--helper', type=Path)
-    parser.add_argument('--recover', type=Path)
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('--display-trace', action='store_true',
+                       help='Read stock orientation, framebuffer rotation and evdev reports; make no turn or app-readiness decision')
+    group.add_argument('--recover', type=Path)
     parser.add_argument('--preflight', action='store_true')
     raise SystemExit(main(parser.parse_args()))

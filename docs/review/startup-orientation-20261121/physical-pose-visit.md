@@ -81,9 +81,17 @@ prelaunch gate as well.
 
 Worker receipts: `weread-physical-pose-20261121.Qb79xqcC/runs/probe-foiydu15/operations.json`
 and `weread-assisted-shelf-20261121.BcM2UfxL/live-reference-tnuztiw7/report.json`,
-both under `/root` on `test-env`. A useful next diagnostic would sample the
-sensor and native display readings within the **same** turn; neither an
-orientation lock nor a failed sensor has been established by these visits.
+both under `/root` on `test-env`. Neither an orientation lock nor a failed
+sensor has been established by these visits.
+
+The [native sensor and display trace](../../../tools/kindle-font-trial/ORIENTATION.md#native-sensor-and-display-trace)
+is prepared on the worker for a future motion window. It reads the dedicated
+sensor and scan rotation on both sides of the raw stock orientation query,
+using the Kindle clock, without starting WeRead. Its worker preflight and
+the 133-test Linux collector suite passed; the ARM helper was also exercised
+under QEMU with four valid rotations and eleven rejection cases. It has
+**not** been run on the physical Kindle, and cannot reconstruct the previous
+turn or change the default setting.
 
 ## Remaining gates
 

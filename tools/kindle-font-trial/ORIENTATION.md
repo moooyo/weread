@@ -197,6 +197,28 @@ never package a simulation build. Do not query the Kindle just to reserve it.
 True physical turning and touch mapping still need independent sensor and
 target evidence. Neither a fixed-pose visit nor a synthetic tap satisfies them.
 
+### Native sensor and display trace
+
+If the operator sees the stock page reorient but repeated calibration reads
+stay the same, do not repeat the shelf trial to guess why. The native-only
+`run_pose_probe.py --display-trace` uses the small `pose_snapshot.c` helper,
+not the candidate package. Supply `--helper`, `--runs`, `--owner`, and
+`--lease-tool`; first add `--preflight` on `test-env`, without a lease. Only
+run the live command under a fresh exclusive lease when a meaningful motion
+window is available. It does not open any card, set an orientation, capture
+pixels or collect touch input. It does not instruct an operator to turn.
+
+For each group the helper reads the dedicated evdev sensor and framebuffer
+scan rotation, the script queries the unnormalized stock `winmgr.accelerometer`
+property, and the helper reads the first two values again. Device
+`CLOCK_MONOTONIC` bounds locate each pair and bracket the intervening property
+query. These are **not simultaneous** readings: the evdev value is the last
+reported axis state, not a timestamped physical turn. A missing property
+value is recorded as `unknown`. If the required command timeout is unavailable,
+the diagnostic refuses rather than running unbounded. It restores and releases
+before analysis; a successful trace is **not** permission to launch or a pass
+for a physical turn, rotation lock, optical orientation or touch mapping.
+
 ### Operator-assisted opposite portrait and shelf tap
 
 This separate single-visit plan opens a **public offline Library** using the
