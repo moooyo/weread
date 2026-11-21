@@ -77,6 +77,9 @@ def shelf_scene(raw, sample, startup):
 
 def analyze_shelf(plan, receipt, path, operator=None):
     schedule_for_shelf(plan)
+    target = plan['expected_calibration']
+    fixed_down = target == 'D:1'
+    pressures = (16, 18) if fixed_down else (15, 17)
     if (receipt.get('label') != plan['label'] or receipt.get('purpose') != plan['purpose']
             or receipt.get('scope') != 'transaction_only' or receipt.get('owner_token_checked_on_release') is not True
             or receipt.get('recovery_required') or timestamp(receipt['released']) < timestamp(receipt['acquired'])):
@@ -85,16 +88,24 @@ def analyze_shelf(plan, receipt, path, operator=None):
             or set(operator) != {'label', *OPERATOR_FIELDS} or any(type(operator[key]) is not bool for key in OPERATOR_FIELDS)):
         raise ValueError('Operator observations must be explicitly bound to this visit')
     report = {'label': plan['label'], 'released': receipt['released'], 'device': plan['device'], 'firmware': plan['firmware'],
+              'purpose': plan['purpose'], 'expected_calibration': target, 'expected_target': plan['expected_target'],
+              'qualification_scope': 'fixed_native_down_single_profile_tap' if fixed_down else 'opposite_native_up_single_profile_tap',
+              'candidate_pose_qualification': 'not_established',
               'collection': 'not_qualified', 'single_profile_tap': 'not_established', 'operator_report': operator,
               'not_measured': ['exact first complete Library frame', 'optical ink', 'turn during startup',
                                'sleep or wake', 'touch at other targets', 'ordinary card startup latency']}
+    if fixed_down:
+        report['not_measured'].append('startup and touch in the opposite portrait')
+    initial = receipt.get('initial_native_reference')
+    if isinstance(initial, str) and re.fullmatch('[UD]:[0-3]', initial):
+        report['initial_native_reference'] = initial
     operations = receipt.get('operations')
     if (receipt.get('passed') is not True or receipt.get('error') or not isinstance(operations, list)
             or any(not isinstance(op, dict) or type(op.get('status')) is not int or op['status'] != 0 for op in operations)
             or [(op.get('mode'), op.get('case')) for op in operations] != SEQUENCE):
         return report
-    initial = receipt.get('initial_native_reference')
-    if (initial not in ('U:3', 'D:1') or not timestamp(receipt['acquired']) <= timestamp(receipt['operator_cue_issued']) <= timestamp(receipt['released'])):
+    if (initial not in (('D:1',) if fixed_down else ('U:3', 'D:1'))
+            or not timestamp(receipt['acquired']) <= timestamp(receipt['operator_cue_issued']) <= timestamp(receipt['released'])):
         raise ValueError('No valid pre-instruction reference in this lease')
     entries = records(path, plan['label'])
     seen = entries.get('observation')
@@ -104,23 +115,26 @@ def analyze_shelf(plan, receipt, path, operator=None):
         raise ValueError('Incomplete assisted visit or inconsistent launch evidence')
     native, returned = pose(entries['portrait']), pose(entries['portrait-return'])
     points = samples(entries['sensor'])
-    expected_pose = native == 'U:3' and all(point[2] in (15, 17) for point in points)
-    report.update(collection='completed_and_released', initial_native_reference=initial, native_before=native, native_return=returned,
+    expected_pose = native == target and all(point[2] in pressures for point in points)
+    report.update(collection='completed_and_released', native_before=native, native_return=returned,
                   prelaunch_snapshot_raw=[point[2] for point in points], prelaunch_sensor_ns=[points[0][0], points[-1][1]])
     if seen.startswith(b'not_started'):
         report['application'] = 'not_started_pose_gate'
         return report
-    if not expected_pose or pose(entries['portrait-launch']) != native:
+    launch = pose(entries['portrait-launch'])
+    if not expected_pose or launch != native:
         raise ValueError('Candidate launched without the independently confirmed target portrait')
     trace = orientation_sample(entries['request'].decode('ascii'), entries['markers'].decode('ascii'))
     if points[-1][1] >= trace['request_ns']:
         raise ValueError('Independent posture observations must precede the launch request')
     scene = shelf_scene(entries['shelf'], trace, native)
     route = final_route(entries['final.metadata.json'])
-    report.update(application='launched', entry_route_requested='library', native_launch=native,
-                  orientation_queries={site: trace[site]['outcome'] for site in ('splash', 'event_loop')},
+    queries = {site: trace[site]['outcome'] for site in ('splash', 'event_loop')}
+    both_reused = all(outcome == 'reused' for outcome in queries.values())
+    report.update(application='launched', entry_route_requested='library', native_launch=launch,
+                  orientation_queries=queries, both_orientation_sites_reused=both_reused,
                   final_application_route=route, digital_shelf=scene)
-    if route != 'settings':
+    if route != plan['expected_target']:
         report['single_profile_tap'] = 'expected_final_route_not_observed'
     elif operator is None:
         report['single_profile_tap'] = 'settings_observed_operator_unconfirmed'
@@ -130,6 +144,8 @@ def analyze_shelf(plan, receipt, path, operator=None):
         report['single_profile_tap'] = 'return_pose_different'
     else:
         report['single_profile_tap'] = 'operator_and_route_confirmed'
+        if scene['status'] == 'observed_populated_shelf' and both_reused:
+            report['candidate_pose_qualification'] = 'confirmed_in_scope'
     return report
 
 

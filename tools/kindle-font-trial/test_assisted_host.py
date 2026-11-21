@@ -12,6 +12,7 @@ from unittest.mock import Mock, patch
 import run
 import run_assisted_shelf as assisted
 from analyze_assisted_shelf import BASE, CASE, OPERATOR_FIELDS, SEQUENCE, analyze_shelf
+from assisted_shelf import CONTRACT, DOWN_CONTRACT
 from test_orientation import records
 
 
@@ -22,7 +23,7 @@ class AssistedHostTests(unittest.TestCase):
         self.work = Path(temporary.name)
         self.plan = self.work / 'plan'
         self.plan.mkdir()
-        self.config = assisted.CONTRACT | dict(label='0123456789abcdef')
+        self.config = CONTRACT | dict(label='0123456789abcdef')
         (self.plan / 'plan.json').write_text(json.dumps(self.config))
         (self.plan / 'device.sh').write_text('exit 1\n')
         (self.plan / 'inputs.tgz').write_bytes(b'public fixture')
@@ -79,6 +80,40 @@ class AssistedHostTests(unittest.TestCase):
         self.assertEqual(self.execute(), 0)
         self.assertFalse(self.calls)
         self.lease.acquire.assert_not_called()
+
+    def test_fixed_down_and_opposite_up_plans_require_their_own_exact_reference(self):
+        for target, contract in [('D:1', DOWN_CONTRACT), ('U:3', CONTRACT)]:
+            self.config = contract | dict(label=self.config['label'])
+            (self.plan/'plan.json').write_text(json.dumps(self.config))
+            for index, actual in enumerate(('D:1', 'U:3', 'D:3', 'U:1')):
+                with self.subTest(purpose=contract['purpose'], target=target, actual=actual):
+                    self.start = (actual + '\n').encode('ascii')
+                    self.calls.clear()
+                    self.output = io.StringIO()
+                    self.assertEqual(self.execute(), 0 if actual == target else 1)
+                    attempt, = self.plan.glob('batch-*')
+                    receipt = json.loads((attempt/'operations.json').read_text())
+                    self.assertEqual(receipt['purpose'], contract['purpose'])
+                    self.assertEqual(receipt['initial_native_reference'], actual)
+                    self.assertTrue(receipt['owner_token_checked_on_release'])
+                    self.assertNotIn('TURN_NOW', self.output.getvalue())
+                    if actual == target:
+                        self.assertEqual(self.calls, SEQUENCE + ['analyze-after-release'])
+                        self.assertIn('OPERATOR_CUE HOLD_STILL', self.output.getvalue())
+                        self.assertIn('wait about five seconds. Then tap the rightmost tab with the person icon once.', self.output.getvalue())
+                    else:
+                        self.assertEqual(self.calls, [('admit','none'), ('reference','none'), 'analyze-after-release'])
+                        self.assertNotIn('OPERATOR_CUE', self.output.getvalue())
+                        self.assertNotIn('operator_cue_issued', receipt)
+                    attempt.rename(self.plan/('fixture-' + contract['purpose'] + str(index)))
+
+    def test_wrong_target_cannot_be_relabelled_as_the_other_contract(self):
+        for contract, swapped in ((CONTRACT,'D:1'), (DOWN_CONTRACT,'U:3')):
+            self.config = contract | dict(label=self.config['label'], expected_calibration=swapped)
+            with self.assertRaises(ValueError):
+                self.execute()
+            self.lease.acquire.assert_not_called()
+            self.assertFalse(self.calls)
 
     def test_down_records_pose_and_releases_without_cue_or_upload(self):
         self.start = b'D:1\n'
@@ -165,7 +200,7 @@ class AssistedAnalysisTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.archive = Path(temporary.name)/'results.tgz'
-        self.plan = assisted.CONTRACT | dict(label='0123456789abcdef')
+        self.plan = CONTRACT | dict(label='0123456789abcdef')
         self.receipt = dict(label=self.plan['label'], purpose=self.plan['purpose'], scope='transaction_only', passed=True,
                             acquired='2026-11-21T00:00:00+00:00', operator_cue_issued='2026-11-21T00:00:01+00:00',
                             released='2026-11-21T00:01:00+00:00', owner_token_checked_on_release=True,

@@ -23,11 +23,20 @@ DWELL = 35000
 CONTRACT = dict(purpose='assisted-stable-shelf-touch', schedule=[CASE], clock='CLOCK_MONOTONIC',
                 device=DEVICE, firmware=FIRMWARE, candidate_features=CANDIDATE,
                 expected_calibration='U:3', expected_target='settings')
+DOWN_CONTRACT = CONTRACT | dict(purpose='assisted-fixed-down-shelf-touch', expected_calibration='D:1')
 MEMBERS = ('document', 'measure', 'seed.tar.gz', 'pose-snapshot', 'shelf-scene', 'B/launch.sh',
            'B/app/weread', *(f'B/app/{name}' for name in HELPERS))
 
 
-def device_program():
+def contract_for(plan):
+    if isinstance(plan, dict):
+        for contract in (CONTRACT, DOWN_CONTRACT):
+            if all(plan.get(key) == value for key, value in contract.items()):
+                return contract
+    raise ValueError('Unrecognized assisted shelf purpose or calibration contract')
+
+
+def device_program(*, fixed_down=False):
     body = render_device(ARM_A, ARM_B)
     both = 'document measure seed.tar.gz A/launch.sh B/launch.sh A/app/weread B/app/weread A/app/weread-frame-guard B/app/weread-frame-guard A/app/weread-native-query B/app/weread-native-query'
     body = once(body, both, ' '.join(MEMBERS))
@@ -53,7 +62,17 @@ def device_program():
         esac
 ''' + body[end:]
     common = section((HERE / 'pose_visit.sh').read_text(encoding='ascii'), 'same_gui() {', 'pose_recover_wake() {')
-    body = once(body, section(body, 'capture_case() {', 'no_trial() {'), common + '\n' + (HERE / 'assisted-shelf.sh').read_text(encoding='ascii').strip())
+    case = (HERE / 'assisted-shelf.sh').read_text(encoding='ascii').strip()
+    if case.count('@PORTRAIT@') != 2:
+        raise ValueError('Unexpected before/after native portrait predicates')
+    target = DOWN_CONTRACT if fixed_down else CONTRACT
+    first_raw, second_raw = ('16', '18') if fixed_down else ('15', '17')
+    case = once(once(case, '@RAW_FIRST@', first_raw), '@RAW_SECOND@', second_raw).replace('@PORTRAIT@', target['expected_calibration'])
+    if fixed_down:
+        common += '\n' + (HERE / 'assisted-fixed-foreground.sh').read_text(encoding='ascii').strip()
+        collection = section(case, '    public_foreground || fail public_owner', '    for tick in $(seq 1 240)')
+        case = once(case, collection, '    fixed_capture_shelf')
+    body = once(body, section(body, 'capture_case() {', 'no_trial() {'), common + '\n' + case)
     body = once(body, 'case) capture_case;;', 'case) assisted_case;;\n    absent) no_trial && printf \'absent\\n\';;')
     if len(body.encode('ascii')) > 32768:
         raise ValueError('Assisted device program exceeds the established transport')
@@ -62,10 +81,12 @@ def device_program():
 
 def verify_recovery(plan_dir):
     plan = read_record(plan_dir / 'plan.json')
-    if any(plan.get(key) != value for key, value in CONTRACT.items()) or not re.fullmatch(r'[0-9a-f]{16}', plan['label']):
+    contract = contract_for(plan)
+    if not isinstance(plan.get('label'), str) or not re.fullmatch(r'[0-9a-f]{16}', plan['label']):
         raise ValueError('Not a single supervised shelf plan')
     script = plan_dir / 'device.sh'
-    if script.is_symlink() or not script.is_file() or script.stat().st_size > 32768 or script.read_bytes() != device_program().encode('ascii'):
+    frozen = device_program(fixed_down=contract == DOWN_CONTRACT).encode('ascii')
+    if script.is_symlink() or not script.is_file() or script.stat().st_size > 32768 or script.read_bytes() != frozen:
         raise ValueError('Incorrect frozen device program')
     return plan
 
@@ -91,7 +112,7 @@ def verify_plan(plan_dir):
     return plan
 
 
-def freeze(retained, plan_dir, sensor, scene):
+def freeze(retained, plan_dir, sensor, scene, *, fixed_down=False):
     retained = retained.resolve(strict=True)
     helpers = retained / 'orientation-inputs/helpers'
     seed = retained / 'orientation-inputs/seed.tar.gz'
@@ -114,7 +135,8 @@ def freeze(retained, plan_dir, sensor, scene):
     entries = dict(zip(MEMBERS, [document, helpers / 'measure', seed, sensor, scene, supervisor,
                                  retained / arms['B']['executable'], *(helpers / name for name in HELPERS)], strict=True))
     sizes = {name: len(value) if isinstance(value, bytes) else value.stat().st_size for name, value in entries.items()}
-    device = device_program().encode('ascii')
+    contract = DOWN_CONTRACT if fixed_down else CONTRACT
+    device = device_program(fixed_down=fixed_down).encode('ascii')
     for script in (device, document, supervisor):
         subprocess.run(['sh', '-n'], input=script, check=True)
     plan_dir.mkdir(mode=0o700)
@@ -127,7 +149,7 @@ def freeze(retained, plan_dir, sensor, scene):
             member.size, member.mode = sizes[name], 0o600 if name == 'seed.tar.gz' else 0o755
             with (io.BytesIO(value) if isinstance(value, bytes) else value.open('rb')) as stream:
                 archive.addfile(member, stream)
-    publish(plan_dir / 'plan.json', CONTRACT | dict(label=label, members=sizes, archive_bytes=archive_path.stat().st_size))
+    publish(plan_dir / 'plan.json', contract | dict(label=label, members=sizes, archive_bytes=archive_path.stat().st_size))
     return verify_plan(plan_dir)
 
 
@@ -138,7 +160,8 @@ if __name__ == '__main__':
     prep = commands.add_parser('freeze')
     for key in ('retained', 'plan', 'sensor', 'scene'):
         prep.add_argument('--' + key, type=Path, required=True)
+    prep.add_argument('--fixed-down', action='store_true', help='Qualify only the previously seen D:1 pose, not the opposite portrait.')
     commands.add_parser('verify').add_argument('--plan', type=Path, required=True)
     args = parser.parse_args()
-    plan = freeze(args.retained, args.plan, args.sensor, args.scene) if args.operation == 'freeze' else verify_plan(args.plan)
-    print(f"Ready: {plan['label']}, one public B-library visit; no device access.")
+    plan = freeze(args.retained, args.plan, args.sensor, args.scene, fixed_down=args.fixed_down) if args.operation == 'freeze' else verify_plan(args.plan)
+    print(f"Ready: {plan['label']}, {plan['purpose']} at {plan['expected_calibration']}; no device access.")

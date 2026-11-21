@@ -4,8 +4,10 @@
 the startup lettering and the public Reader in the expected digital orientation
 on a Kindle Scribe 2022 / 5.19.5. The native reference was `D:1`, **the same
 portrait as the six-pair experiment**. The requested screen-saver cycle was
-**not run**. Keep the feature off in the normal package. There is no new
-startup latency, physical touch, or optical display result.
+**not run**. A [separate shelf visit](#fixed-down-library-touch) has an
+operator-confirmed physical tap in `D:1`, without independent final-route
+evidence. Keep the feature off in the normal package. Neither visit measured
+ordinary-entry startup latency or optical settling.
 
 | Actual observation | Result | What it establishes |
 | --- | --- | --- |
@@ -89,16 +91,60 @@ is prepared on the worker for a future motion window. It reads the dedicated
 sensor and scan rotation on both sides of the raw stock orientation query,
 using the Kindle clock, without starting WeRead. Its worker preflight and
 the 134-test Linux collector suite passed; the ARM helper was also exercised
-under QEMU with four valid rotations and eleven rejection cases. It has
-**not** been run on the physical Kindle, and cannot reconstruct the previous
-turn or change the default setting.
+under QEMU with four valid rotations and eleven rejection cases.
+
+### Physical three-source trace
+
+At **15:59:13–15:59:18**, the new baseline (`dc5d07a77a204457`) reported
+native `D:1` at both ends and ten axis reads of `16`. It released before the
+next visit. At **15:59:41–16:00:06**, with the operator present, a separate
+trace (`938e194177e7f8df`) recorded **eight groups spanning 17.901 s** on the
+Kindle monotonic clock. All 16 axis reads were `16`, all 8 intervening raw
+window-manager responses were `D`, and all 16 scan-rotation reads were `1`.
+The time budget ended the trace before the maximum of 12 groups. No direction
+change was observed at those sample points. The readings do not timestamp
+the operator's movement, rule out changes in the gaps, or diagnose a lock or
+sensor fault. After the visit the operator reported missing the chat cue and
+not turning in time. **This is not a measurement during a confirmed turn.**
+Future assisted actions require a desktop notification, not a chat-only cue.
+
+Both visits checked protected state, closed, independently verified absence
+and released with the matching owner/token. Neither uploaded a candidate nor
+launched WeRead. Their `operations.json` receipts are in `pose-trace-runs/`
+under `/root/weread-assisted-shelf-20261121.BcM2UfxL` on `test-env`:
+`probe-egxo6o_z` (baseline) and `probe-_0s_6mdb` (trace).
+
+### Fixed-down Library touch
+
+**Human observation:** after acknowledging a Windows readiness dialog, the
+operator was notified again before the single tap. In a separate optional
+feedback dialog for this visit they confirmed all four items: held the pose,
+saw an upright populated shelf, tapped the bottom-right profile tab exactly
+once, and saw the profile page. The [operator record](fixed-down-operator.json)
+does not rely on an inferred route. This is an observed successful tap in
+the **fixed down** posture, not evidence for the opposite posture.
+
+**Machine observation:** label `b46b1217463d5290` ran from **16:04:43 to
+16:07:15**. The initial reference was `D:1`. In the frozen program, reaching
+`refused public_owner` required passing the two down calibration reads, ten
+down sensor checks, open request, first application frame submission, and
+the GUI identity and launch calibration checks. The error did not distinguish
+the checks before and after shelf sampling from a failure to publish that
+sample. The resulting archive contained only the batch label: **no digital
+shelf observation, final route or per-site reuse records**. No timing result
+or combined human-and-machine acceptance follows from this visit. The error
+does not contradict what the operator saw.
+
+Restore, collection, close and independent absence succeeded, followed by
+owner/token-verified release. The public receipts and archive are in
+`fixed-down-160145-0a4faa/batch-9ybcmwk_` under the same worker as the trace.
 
 ## Remaining gates
 
 The [software qualification](pose-qualification.md) does not replace a real
-turn. This visit did **not** qualify the opposite stable portrait, a turn
+turn. These visits did **not** qualify the opposite stable portrait, a turn
 between splash and the first business frame, a turn while asleep, or the
-subsequent physical touch mapping. Neither peer knew of a verified remotely
+subsequent physical touch mapping in those states. Neither peer knew of a verified remotely
 controlled turn/touch fixture. Do not book the device to wait for one, or
 replace it with an orientation override. Before another sleep experiment,
 check which wake property and type this firmware advertises and distinguish

@@ -219,8 +219,9 @@ def run(args, *, orientation_schedule=None, pose_visit_schedule=None, assisted_s
                         raise ValueError("Read-only starting portrait refused")
                     report["operator_cue_issued"] = stamp()
                     save()
-                    print("OPERATOR_CUE HOLD_STILL: Hold the confirmed target portrait steady. Once the public shelf appears, "
-                          "tap its rightmost profile/person tab once and leave it displayed.", flush=True)
+                    print("OPERATOR_CUE HOLD_STILL: Hold the device steady. Once the public bookshelf entries and bottom tabs "
+                          "are visible (cover placeholders are fine), wait about five seconds. Then tap the rightmost tab "
+                          "with the person icon once. Stay on the Profile page; do not go back.", flush=True)
                 if not args.admit_only:
                     attempted = True
                     if not call("stage"):

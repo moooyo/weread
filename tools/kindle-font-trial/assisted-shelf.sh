@@ -3,7 +3,7 @@ assisted_case() {
     prepare_case
     "$stage/pose-snapshot" 10 >"$out/sensor" || fail sensor_unavailable
     awk 'NF != 4 || $1 != NR || $2 !~ /^[1-9][0-9]*$/ || $3 !~ /^[1-9][0-9]*$/ || $4 !~ /^(15|16|17|18)$/ {bad=1} END{exit (bad || NR != 10)}' "$out/sensor" || fail sensor_format
-    if ! { grep -Fxq 'U:3' "$out/portrait" && awk '$4!=15 && $4!=17 {bad=1} END{exit bad}' "$out/sensor" && [ "$(portrait)" = 'U:3' ]; }; then
+    if ! { grep -Fxq '@PORTRAIT@' "$out/portrait" && awk '$4!=@RAW_FIRST@ && $4!=@RAW_SECOND@ {bad=1} END{exit bad}' "$out/sensor" && [ "$(portrait)" = '@PORTRAIT@' ]; }; then
         settled && same_state && portrait >"$out/portrait-return" || fail native_return
         printf 'not_started pose_gate\n' >"$out/observation"
         printf '%s\n' "$name" >"$out/complete"

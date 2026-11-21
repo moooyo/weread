@@ -86,9 +86,16 @@ released at 15:47:11 without uploading anything. The earlier ten sensor reads
 were from a separate lease, not the live turn window. Neither opposite-portrait
 startup nor a physical tap was observed; see the
 [follow-up](docs/review/startup-orientation-20261121/physical-pose-visit.md#native-only-follow-up).
-The worker now has a [native-only diagnostic](tools/kindle-font-trial/ORIENTATION.md#native-sensor-and-display-trace)
-for observing the sensor, window manager and scan rotation within one physical turn.
-It has not been used on the Scribe; do not treat its fixture results as device evidence.
+The [three-source physical trace](docs/review/startup-orientation-20261121/physical-pose-visit.md#physical-three-source-trace)
+released at 16:00:06. All eight groups returned the same values (sensor `16`,
+window manager `D`, scan rotation `1`). It did not open the app, observe an
+opposite posture or establish why the operator saw the stock text reorient;
+the operator subsequently confirmed they missed that turn cue. In a separate
+[fixed-down shelf visit](docs/review/startup-orientation-20261121/physical-pose-visit.md#fixed-down-library-touch),
+the operator saw an upright populated shelf and reached Profile with one
+physical tap. The collector did not preserve the digital shelf or final route.
+The device was restored and released at 16:07:15. Keep the optimization off
+by default. Provide an actual desktop notification before any assisted action.
 See the linked experiment for build results and remaining gates. The [power-observer
 investigation](docs/review/startup-orientation-20261121/power-wait.md) keeps
 the two-second wait unchanged. Neither changes the measured font result.

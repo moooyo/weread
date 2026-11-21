@@ -5,15 +5,15 @@ import json
 from pathlib import Path
 import re
 
-from assisted_shelf import CONTRACT, verify_plan, verify_recovery
+from assisted_shelf import contract_for, verify_plan, verify_recovery
 from run import run, transport
 
 
 def schedule_for_shelf(plan):
-    if (not isinstance(plan, dict) or any(plan.get(key) != value for key, value in CONTRACT.items())
-            or not isinstance(plan.get('label'), str) or not re.fullmatch('[a-f0-9]{16}', plan['label'])):
+    if (not isinstance(plan, dict) or not isinstance(plan.get('label'), str)
+            or not re.fullmatch('[a-f0-9]{16}', plan['label'])):
         raise ValueError('Not a prepared operator-assisted public shelf visit')
-    return ['B-library']
+    return contract_for(plan)['schedule']
 
 
 def execute(args):
@@ -25,7 +25,8 @@ def execute(args):
     schedule_for_shelf(config)
     transport((plan / 'device.sh').read_text(encoding='ascii'), 'admit', config['label'], 'none')
     if args.preflight:
-        print(json.dumps({'label': config['label'], 'validated': True, 'device_accessed': False, 'lease_requested': False}))
+        print(json.dumps({'label': config['label'], 'purpose': config['purpose'], 'expected_calibration': config['expected_calibration'],
+                          'validated': True, 'device_accessed': False, 'lease_requested': False}))
         return 0
     if not args.owner or not args.lease_tool or (not args.recover and not args.operator_ready):
         raise ValueError('An owner, lease utility and present operator are required for an assisted visit')

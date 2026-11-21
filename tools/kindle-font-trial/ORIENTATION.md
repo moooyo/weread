@@ -225,6 +225,14 @@ This separate single-visit plan opens a **public offline Library** using the
 orientation-reuse candidate. It does not use the installed daily card, put
 the device to sleep or time startup. Agree on the two actions with a present
 operator while off-device; do not ask them to touch a peer's running visit.
+Use a visible Windows readiness dialog **before taking a lease**, and a second
+desktop notification **before the actual action**. Chat output alone does not
+notify this operator reliably. Use `show-operator-notice.ps1` with `-Title`,
+`-Message` and a bounded `-TimeoutSeconds`; add `-Confirm` for readiness. It
+reports an acknowledgment, cancellation or timeout and has no device access.
+Dismissing a notification does not prove that
+the operator performed the action. If readiness expires, stop without taking
+the device. If the action window has ended, never request a retroactive tap.
 
 1. Freeze a new plan with `assisted_shelf.py`. Preflight both worker commands:
    `live_pose_reference.py --work WORK --plan PLAN --lease-tool LEASE --preflight`
@@ -253,6 +261,11 @@ operator while off-device; do not ask them to touch a peer's running visit.
    the operator saw. Restore, verify absence, and release before discussing
    results. This does not qualify the other touch targets, a turn during
    startup, held-gesture cancellation or wake after turning in sleep.
+
+For a separate test at the known down posture, freeze a **new** plan using
+`assisted_shelf.py freeze --fixed-down`. Only this plan accepts native `D:1`
+and ten prelaunch samples in `16/18`. Do not turn for it. A successful tap
+in this posture cannot be used to accept the opposite-portrait optimization.
 
 The frozen collector measures file-open request to first Library `SEND`.
 The [current primary metric](../../docs/PHYSICAL_TESTING.md#library-first-frame-startup)
