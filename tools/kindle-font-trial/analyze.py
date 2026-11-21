@@ -16,6 +16,10 @@ TRACE = re.compile(r"WEREAD_STARTUP ([0-9]+)\.([0-9]{9}) ([a-z0-9_]+)")
 QUERY_OUTCOMES = ("success", "failed", "unavailable", "timeout")
 
 
+class ImpossibleOrientationTrace(ValueError):
+    pass
+
+
 def request_ns(request):
     match = re.fullmatch(r"REQUEST ([0-9]+)\.([0-9]{9})\s*", request)
     if not match:
@@ -31,6 +35,8 @@ def metrics(request, trace, *, outcomes=QUERY_OUTCOMES):
         match = TRACE.fullmatch(line)
         if not match:
             raise ValueError("Malformed native timing record")
+        if match[3] == 'splash_orientation_reconciled' or (match[3] == 'event_loop_orientation_reconciled' and 'reconciled' not in outcomes):
+            raise ImpossibleOrientationTrace('Reconciliation is only valid in the event loop of the verified experimental B plan')
         stamp = int(match[1]) * 10**9 + int(match[2])
         if stamp < previous or match[3] in times:
             raise ValueError("Repeated stage, mixed clock or out-of-order time")
@@ -81,7 +87,7 @@ def picture(reader, name):
     return software, aligned, {"aligned_degrees": turn, "driver_software_body_mae": score, "opposite_body_mae": other}
 
 
-def analyze(path, qualifications=False, *, parse_sample=metrics, verify_archive=None):
+def analyze(path, qualifications=False, *, parse_sample=None, verify_archive=None):
     with tarfile.open(path, "r:gz") as archive:
         if verify_archive is not None:
             verify_archive(archive)
@@ -116,7 +122,8 @@ def analyze(path, qualifications=False, *, parse_sample=metrics, verify_archive=
             return result
         for case in SCHEDULE[4:]:
             lane = case[0]
-            row = parse_sample(read(case, "request").decode(), read(case, "markers").decode())
+            request, trace = read(case, "request").decode(), read(case, "markers").decode()
+            row = metrics(request, trace) if parse_sample is None else parse_sample(request, trace, lane=case[0])
             actual = thumb(case)
             right = mae(actual, references[lane + "-library"])
             wrong = mae(actual, references[lane + "-reader"])

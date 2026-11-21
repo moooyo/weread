@@ -33,8 +33,13 @@ def require_closed_trial(plan, operations):
         raise ValueError("Missing, repeated, failed or out-of-order operation; retain the failed attempt")
 
 
-def orientation_sample(request, trace):
-    result = metrics(request, trace, outcomes=(*QUERY_OUTCOMES, "reused"))
+def orientation_sample(request, trace, *, lane=None, allow_reconciliation=False):
+    if lane not in (None, 'A', 'B'):
+        raise ValueError('Unknown orientation experiment arm')
+    outcomes = QUERY_OUTCOMES if lane == 'A' else (*QUERY_OUTCOMES, 'reused')
+    if allow_reconciliation and lane == 'B':
+        outcomes += ('reconciled',)
+    result = metrics(request, trace, outcomes=outcomes)
     result["request_ns"] = request_ns(request)
     stages = list(result["t_from_request_ns"])
     for site, start, end in [("splash", "main_enter", "startup_feedback_ready"),
@@ -78,7 +83,7 @@ def report(plan, operations, archive):
                 raise ValueError(f"{case}: observed portrait differs from the independent control reference")
 
         for case in SCHEDULE[:4]:
-            row = orientation_sample(read(case, "request").decode("ascii"), read(case, "markers").decode("ascii"))
+            row = orientation_sample(read(case, "request").decode("ascii"), read(case, "markers").decode("ascii"), lane=case[0])
             if any((row[site]["outcome"] == "reused") != (case[0] == "B") for site in SITES):
                 raise ValueError(f"{case}: qualification pictures do not exercise the declared orientation path")
             qualifications[case] = row
@@ -95,8 +100,6 @@ def report(plan, operations, archive):
         previous_send = row["request_ns"] + row["t_from_request_ns"]["first_application_frame_send"]
         for site in SITES:
             outcome = row[site]["outcome"]
-            if case[0] == "A" and outcome == "reused":
-                raise ValueError(f"{case}: reuse in the control arm")
             if case in SCHEDULE[6:]:
                 counts[case[0]][site][outcome] += 1
     result["orientation_outcomes"] = counts

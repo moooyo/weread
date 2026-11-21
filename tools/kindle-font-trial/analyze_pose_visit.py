@@ -10,7 +10,7 @@ import tarfile
 
 from PIL import Image, ImageChops
 
-from analyze import cropped, mae, picture
+from analyze import ImpossibleOrientationTrace, cropped, mae, picture
 from analyze_orientation import orientation_sample
 from run_pose_visit import schedule_for_visit
 
@@ -136,6 +136,8 @@ def analyze_visit(plan, receipt, path):
     try:
         sample = orientation_sample(inputs["request"].decode("ascii"), inputs["markers"].decode("ascii"))
         report["orientation_queries"] = {site: sample[site]["outcome"] for site in ("splash", "event_loop")}
+    except ImpossibleOrientationTrace:
+        raise
     except (ValueError, KeyError):
         sample = None
     report["splash"] = splash_evidence(inputs.get("splash", b""), inputs.get("splash-status"), sample, startup)

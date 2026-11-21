@@ -145,7 +145,7 @@ case_admission() {
 }
 export_markers() {
     plain "$log" || return 1
-    awk '$1=="WEREAD_STARTUP" {if(NF!=3 || $2 !~ /^[0-9]+\.[0-9]+$/ || $3 !~ /^(main_enter|platform_ready|startup_feedback_(ready|paused|resumed|finished)|fonts_loaded|backend_ready|window_created|fonts_registered|application_attach_begin|application_attached|software_ready|backend_event_loop_enter|touch_opened|portrait_opened|first_application_frame_send|(splash|event_loop)_orientation_(begin|timeout|success|unavailable|failed|reused))$/ || ++count>40)exit 1;print $1,$2,$3} END{if(!count)exit 1}' "$log" >"$out/markers"
+    awk @EXPERIMENT_ARM@'$1=="WEREAD_STARTUP" {if(NF!=3 || $2 !~ /^[0-9]+\.[0-9]+$/ || @EXPERIMENT_OUTCOME@$3 !~ /^(main_enter|platform_ready|startup_feedback_(ready|paused|resumed|finished)|fonts_loaded|backend_ready|window_created|fonts_registered|application_attach_begin|application_attached|software_ready|backend_event_loop_enter|touch_opened|portrait_opened|first_application_frame_send|(splash|event_loop)_orientation_(begin|timeout|success|unavailable|failed|reused))$/ || ++count>40)exit 1;print $1,$2,$3} END{if(!count)exit 1}' "$log" >"$out/markers"
 }
 finish_case() {
     settled && same_state && portrait >"$out/portrait-return" && cmp -s "$out/portrait" "$out/portrait-return" || fail native_return

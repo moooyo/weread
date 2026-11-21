@@ -1127,7 +1127,7 @@ impl PortraitRuntime {
         let reuse = || {
             let current = || Some(*request.lock().ok()?);
             let launch = current()?;
-            let (controller, observer) = confirmed_launch_controller(
+            let (controller, observer, path) = confirmed_event_loop_launch(
                 launch,
                 current,
                 || framebuffer.portrait_rotation(),
@@ -1136,22 +1136,34 @@ impl PortraitRuntime {
                     let pose = observer.snapshot().ok()??;
                     Some((pose.into(), observer))
                 },
+                #[cfg(feature = "startup-orientation-reconcile")]
+                |observer| observer.quiet_pose().map(Into::into),
+                #[cfg(not(feature = "startup-orientation-reconcile"))]
+                |_| None,
             )?;
-            Some(Self {
-                controller,
-                observer: Some(observer),
-                attempted: true,
-                snapshot_pending: false,
-                seen_request: launch.sequence,
-                generation: 1,
-            })
+            Some((
+                Self::from_launch(controller, observer, launch.sequence),
+                path,
+            ))
         };
         #[cfg(not(feature = "startup-orientation-reuse"))]
         let reuse = || {
             let _ = (request, framebuffer);
             None
         };
-        resolve_launch_orientation("event_loop", reuse, legacy_render_offset, Self::new)
+        resolve_launch_orientation_path("event_loop", reuse, legacy_render_offset, Self::new)
+    }
+
+    #[cfg(feature = "startup-orientation-reuse")]
+    fn from_launch(controller: PortraitController, observer: GyroObserver, sequence: u64) -> Self {
+        Self {
+            controller,
+            observer: Some(observer),
+            attempted: true,
+            snapshot_pending: false,
+            seen_request: sequence,
+            generation: 1,
+        }
     }
 
     fn new(legacy_render_offset: u32) -> Self {
@@ -1194,24 +1206,7 @@ impl PortraitRuntime {
         let request = *shared_request.lock().map_err(|_| {
             PlatformError::Other("the native orientation request is unavailable".into())
         })?;
-        let mut changed = false;
-        if request.sequence != self.seen_request {
-            self.seen_request = request.sequence;
-            match framebuffer.portrait_rotation().and_then(|rotation| {
-                self.controller
-                    .apply_request(request, rotation)
-                    .map_err(io::Error::other)
-            }) {
-                Ok(applied) => {
-                    changed |= applied;
-                    self.pause();
-                }
-                Err(error) => {
-                    // Optional calibration failure preserves the old startup map.
-                    log::warn!("native portrait calibration was not applied: {error}");
-                }
-            }
-        }
+        let mut changed = self.apply_new_request(request, || framebuffer.portrait_rotation());
         if self.controller.calibrated() && !self.attempted {
             self.attempted = true;
             match GyroObserver::open() {
@@ -1228,6 +1223,31 @@ impl PortraitRuntime {
             changed |= self.refresh_snapshot(framebuffer)?;
         }
         Ok(changed)
+    }
+
+    fn apply_new_request(
+        &mut self,
+        request: OrientationRequest,
+        rotation: impl FnOnce() -> io::Result<u32>,
+    ) -> bool {
+        if request.sequence == self.seen_request {
+            return false;
+        }
+        self.seen_request = request.sequence;
+        match rotation().and_then(|rotation| {
+            self.controller
+                .apply_request(request, rotation)
+                .map_err(io::Error::other)
+        }) {
+            Ok(applied) => {
+                self.pause();
+                applied
+            }
+            Err(error) => {
+                log::warn!("native portrait calibration was not applied: {error}");
+                false
+            }
+        }
     }
 
     fn refresh_snapshot(&mut self, framebuffer: &Framebuffer) -> Result<bool, PlatformError> {
@@ -1541,29 +1561,55 @@ fn confirmed_launch_mapping<Resource>(
 }
 
 #[cfg(feature = "startup-orientation-reuse")]
-fn confirmed_launch_controller<Observer>(
+fn confirmed_event_loop_launch<Observer>(
     launch: OrientationRequest,
     current: impl FnOnce() -> Option<OrientationRequest>,
-    rotation: impl FnMut() -> io::Result<u32>,
+    mut rotation: impl FnMut() -> io::Result<u32>,
     snapshot: impl FnOnce() -> Option<(NativePortraitOrientation, Observer)>,
-) -> Option<(PortraitController, Observer)> {
+    confirm: impl FnOnce(&Observer) -> Option<NativePortraitOrientation>,
+) -> Option<(PortraitController, Observer, LaunchOrientationPath)> {
     let calibration = launch.calibration?;
-    if launch.sequence != 1 || calibration.holding != calibration.scanout {
+    let anchor = calibration.raw_rotation;
+    if launch.sequence != 1
+        || calibration.holding != calibration.scanout
+        || anchor > 3
+        || rotation().ok()? != anchor
+    {
         return None;
     }
-    let (mapping, observer) = confirmed_launch_mapping(
-        Some((calibration.scanout, calibration.raw_rotation)),
-        rotation,
-        snapshot,
-    )?;
+    let (holding, observer) = snapshot()?;
+    let path = if holding == calibration.holding {
+        LaunchOrientationPath::Reused
+    } else {
+        #[cfg(feature = "startup-orientation-reconcile")]
+        {
+            if rotation().ok()? != anchor || confirm(&observer)? != holding {
+                return None;
+            }
+            LaunchOrientationPath::Reconciled
+        }
+        #[cfg(not(feature = "startup-orientation-reconcile"))]
+        {
+            let _ = confirm;
+            return None;
+        }
+    };
+    if rotation().ok()? != anchor {
+        return None;
+    }
     if current()? != launch {
         return None;
     }
-    let mut controller = PortraitController::new(mapping.render_offset());
+    let mut controller = PortraitController::new(0);
     controller
-        .apply_request(launch, calibration.raw_rotation)
+        .apply_request(launch, anchor)
         .ok()?
-        .then_some((controller, observer))
+        .then_some(())?;
+    #[cfg(feature = "startup-orientation-reconcile")]
+    if path == LaunchOrientationPath::Reconciled {
+        controller.observe(holding, anchor).ok()?.then_some(())?;
+    }
+    Some((controller, observer, path))
 }
 
 fn legacy_render_offset() -> Result<u32, OrientationQueryError> {
@@ -1582,15 +1628,46 @@ enum OrientationQueryError {
     Failed,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LaunchOrientationPath {
+    Reused,
+    #[cfg(feature = "startup-orientation-reconcile")]
+    Reconciled,
+}
+
+impl LaunchOrientationPath {
+    fn phase(self) -> &'static str {
+        match self {
+            Self::Reused => "reused",
+            #[cfg(feature = "startup-orientation-reconcile")]
+            Self::Reconciled => "reconciled",
+        }
+    }
+}
+
 fn resolve_launch_orientation<Value>(
     site: &'static str,
     reuse: impl FnOnce() -> Option<Value>,
     query: impl FnOnce() -> Result<u32, OrientationQueryError>,
     from_legacy: impl FnOnce(u32) -> Value,
 ) -> Value {
+    resolve_launch_orientation_path(
+        site,
+        || reuse().map(|value| (value, LaunchOrientationPath::Reused)),
+        query,
+        from_legacy,
+    )
+}
+
+fn resolve_launch_orientation_path<Value>(
+    site: &'static str,
+    reuse: impl FnOnce() -> Option<(Value, LaunchOrientationPath)>,
+    query: impl FnOnce() -> Result<u32, OrientationQueryError>,
+    from_legacy: impl FnOnce(u32) -> Value,
+) -> Value {
     crate::startup_timing::mark_orientation(site, "begin");
-    if let Some(value) = reuse() {
-        crate::startup_timing::mark_orientation(site, "reused");
+    if let Some((value, path)) = reuse() {
+        crate::startup_timing::mark_orientation(site, path.phase());
         return value;
     }
     let result = query();
@@ -2603,15 +2680,17 @@ mod startup_orientation_reuse_tests {
                 );
                 assert_eq!((reads, offset), (2, 0));
 
-                let (mut controller, observer) = resolve_launch_orientation(
+                let (mut controller, observer) = resolve_launch_orientation_path(
                     "event_loop",
                     || {
-                        confirmed_launch_controller(
+                        confirmed_event_loop_launch(
                             request,
                             || Some(request),
                             || Ok(rotation),
                             || Some((direction, "retained observer")),
+                            |_| panic!("stable launches must not read a second pose"),
                         )
+                        .map(|(controller, observer, path)| ((controller, observer), path))
                     },
                     || panic!("An applied, observed controller does not need winmgr"),
                     |_| unreachable!(),
@@ -2706,16 +2785,17 @@ mod startup_orientation_reuse_tests {
             (initial, Some(initial), Some(Down)),
         ] {
             let mut queries = 0;
-            let controller = resolve_launch_orientation(
+            let controller = resolve_launch_orientation_path(
                 "event_loop",
                 || {
-                    confirmed_launch_controller(
+                    confirmed_event_loop_launch(
                         request,
                         || latest,
                         || Ok(3),
                         || pose.map(|direction| (direction, ())),
+                        |_| None,
                     )
-                    .map(|(controller, ())| controller)
+                    .map(|(controller, (), path)| (controller, path))
                 },
                 || {
                     queries += 1;
@@ -2732,6 +2812,10 @@ mod startup_orientation_reuse_tests {
         }
     }
 }
+
+#[cfg(all(test, feature = "startup-orientation-reconcile"))]
+#[path = "startup_reconcile_tests.rs"]
+mod startup_reconcile_tests;
 
 #[cfg(test)]
 mod orientation_tests {
@@ -2951,6 +3035,18 @@ mod orientation_tests {
                 resolve_launch_orientation(site, || Some(0), || panic!("Not queried"), |_| 180),
                 0
             );
+            #[cfg(feature = "startup-orientation-reconcile")]
+            if site == "event_loop" {
+                assert_eq!(
+                    super::resolve_launch_orientation_path(
+                        site,
+                        || Some((180, super::LaunchOrientationPath::Reconciled)),
+                        || panic!("a reconciled launch must not query winmgr"),
+                        std::convert::identity,
+                    ),
+                    180
+                );
+            }
             for (result, expected) in [
                 (Ok(0), 0),
                 (Ok(180), 180),
@@ -2986,6 +3082,11 @@ mod orientation_tests {
                     {
                         expected.push(format!("{site}_orientation_begin"));
                         expected.push(format!("{site}_orientation_reused"));
+                    }
+                    #[cfg(feature = "startup-orientation-reconcile")]
+                    if site == "event_loop" {
+                        expected.push("event_loop_orientation_begin".to_owned());
+                        expected.push("event_loop_orientation_reconciled".to_owned());
                     }
                     for outcome in ["success", "success", "timeout", "unavailable", "failed"] {
                         expected.push(format!("{site}_orientation_begin"));

@@ -299,6 +299,13 @@ the existing winmgr query. The fast path is not a wake path. The standard
 Kindle package enables it on every model; the experiment's control build
 explicitly omits it. See the [package decision and physical evidence](../../docs/review/startup-orientation-20261121/README.md#package-decision).
 
+The separate [`startup-orientation-reconcile` candidate](../../docs/review/startup-orientation-20261121/event-loop-reconcile.md)
+extends only event-loop entry to one confirmed opposite grip with unchanged
+raw scanout. It retains the same descriptor after two agreeing observations
+and reports `reconciled`, not `reused`. A queued event, changing scanout, or
+unconfirmed calibration keeps the old query. This feature is not selected
+by the standard packaging script.
+
 ## Verification boundary
 
 On 2026-11-12, the complete standalone backend suite passed 95 tests on

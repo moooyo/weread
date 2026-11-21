@@ -93,11 +93,7 @@ fn request(
 }
 
 fn launch(inverted: bool, changed_before_loop: bool) -> (PortraitRuntime, OwnedFd) {
-    let (holding, rotation, pressure) = if inverted {
-        (Down, 1, 16)
-    } else {
-        (Up, 3, 15)
-    };
+    let (holding, rotation, pressure) = if inverted { (Down, 1, 16) } else { (Up, 3, 15) };
     let initial = request(1, holding, rotation);
     let splash = resolve_launch_orientation(
         "splash",
@@ -119,10 +115,10 @@ fn launch(inverted: bool, changed_before_loop: bool) -> (PortraitRuntime, OwnedF
     let legacy_calls = Cell::new(0);
     let (mut probe, mut writer) = sensor();
     let sampled_fd = probe.fd();
-    let (controller, observer) = resolve_launch_orientation(
+    let mut runtime = resolve_launch_orientation_path(
         "event_loop",
         || {
-            confirmed_launch_controller(
+            confirmed_event_loop_launch(
                 initial,
                 || Some(initial),
                 || Ok(rotation),
@@ -130,30 +126,46 @@ fn launch(inverted: bool, changed_before_loop: bool) -> (PortraitRuntime, OwnedF
                     let pose = pose_report(&mut probe, &writer, pressure);
                     Some((pose.into(), probe))
                 },
+                |observer| {
+                    assert_eq!(observer.fd(), sampled_fd);
+                    assert!(observer.is_synchronized() && !observer.has_backlog());
+                    Some(if pressure == 16 { Down } else { Up })
+                },
             )
-            .map(|(controller, observer)| (controller, Some(observer)))
+            .map(|(controller, observer, path)| {
+                (
+                    PortraitRuntime::from_launch(controller, observer, initial.sequence),
+                    path,
+                )
+            })
         },
         || {
             legacy_calls.set(legacy_calls.get() + 1);
             Err(OrientationQueryError::TimedOut)
         },
-        |offset| (PortraitController::new(offset), None),
+        PortraitRuntime::new,
     );
-    assert_eq!(legacy_calls.get(), usize::from(changed_before_loop));
-    let mut runtime = PortraitRuntime::new(0);
-    runtime.controller = controller;
-    if let Some(observer) = observer {
-        assert_eq!(observer.fd(), sampled_fd);
-        runtime.observer = Some(observer);
+    assert_eq!(
+        legacy_calls.get(),
+        usize::from(changed_before_loop && !cfg!(feature = "startup-orientation-reconcile"))
+    );
+    if runtime.observer.is_some() {
+        assert!(
+            !runtime.apply_new_request(initial, || panic!("launch generation already applied"))
+        );
+        assert_eq!(runtime.observer.as_ref().unwrap().fd(), sampled_fd);
+        assert!(runtime.attempted && !runtime.snapshot_pending && !runtime.input_gated());
     } else {
         assert!(changed_before_loop);
         let (mut reopened, reopened_writer) = sensor();
         writer = reopened_writer;
         let pose = pose_report(&mut reopened, &writer, pressure);
         assert!(runtime.controller.apply_request(initial, rotation).unwrap());
-        assert!(runtime
-            .observe_pose_with(Some(pose), || Ok(rotation))
-            .unwrap());
+        assert!(
+            runtime
+                .observe_pose_with(Some(pose), || Ok(rotation))
+                .unwrap()
+        );
         runtime.observer = Some(reopened);
     }
     (runtime, writer)
@@ -240,7 +252,11 @@ impl Presentation {
         }));
         for (column, row, gray) in [(1626, 2404, 0), (232, 2404, 128), (234, 76, 255)] {
             let index = row * WIDTH as usize + column;
-            let pixel = pixels[if expect_turned { size - 1 - index } else { index }];
+            let pixel = pixels[if expect_turned {
+                size - 1 - index
+            } else {
+                index
+            }];
             assert_eq!((pixel.r, pixel.g, pixel.b), (gray, gray, gray));
         }
         self.frames += 1;
@@ -266,7 +282,10 @@ impl Presentation {
 
     fn turn_down(&mut self) {
         write_packet(&self.sensor_writer, 3, 0x18, 16);
-        assert_eq!(self.runtime.observer.as_mut().unwrap().poll().unwrap(), None);
+        assert_eq!(
+            self.runtime.observer.as_mut().unwrap().poll().unwrap(),
+            None
+        );
         assert!(self.runtime.input_gated());
         write_packet(&self.sensor_writer, 0, 0, 0);
         let pose = self.runtime.observer.as_mut().unwrap().poll().unwrap();
@@ -305,13 +324,19 @@ impl Presentation {
         };
         assert!(self.power.request(false));
         let (fresh, reopened) = touch_pipe_for_size(WIDTH, HEIGHT);
-        let resumed = begin_managed_resume(&self.power, &mut self.input, || Ok::<_, io::Error>(fresh));
+        let resumed =
+            begin_managed_resume(&self.power, &mut self.input, || Ok::<_, io::Error>(fresh));
         assert!(resumed.unwrap());
         self.writer = reopened;
         assert!(self.runtime.controller.apply_request(wake, 1).unwrap());
         let (mut observer, writer) = sensor();
         let pose = pose_report(&mut observer, &writer, 16);
-        assert!(!self.runtime.observe_pose_with(Some(pose), || Ok(1)).unwrap());
+        assert!(
+            !self
+                .runtime
+                .observe_pose_with(Some(pose), || Ok(1))
+                .unwrap()
+        );
         self.runtime.observer = Some(observer);
         self.sensor_writer = writer;
         motion(&self.writer, (234, 76));
@@ -362,11 +387,7 @@ fn scenario(case: &str) {
         session.wake_inverted();
     }
     for (index, (target, upright, inverted, logical)) in TARGETS.into_iter().enumerate() {
-        let raw = if case == "upright" {
-            upright
-        } else {
-            inverted
-        };
+        let raw = if case == "upright" { upright } else { inverted };
         let (actual, column, row) = session.tap(index, target, raw, logical);
         println!("POSE_TOUCH {case} {target} {actual} {column} {row}");
     }

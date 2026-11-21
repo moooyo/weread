@@ -15,10 +15,14 @@ Library/Reader pixels, private-data-preserving installation and normal
 file-open/exit checks. The Kindle packaging path enables the feature;
 the default desktop build and full custom-font checks are unchanged.
 
-The [November 21 orientation experiment](review/startup-orientation-20261121/README.md)
-tests reuse of independently confirmed launch calibration at splash and event-loop
-entry. It is not enabled in the ordinary Kindle package. Linux software checks
-and reanalysis of the previous font batch are distinct from a new on-device A/B.
+The [November 21 orientation tests and decision](review/startup-orientation-20261121/README.md#what-to-apply-from-these-tests)
+establish one Kindle package default: reuse independently confirmed, unchanged
+launch calibration at splash and event-loop entry; otherwise retain the old
+query. On Scribe 2022 / 5.19.5 all six fixed-grip pairs improved from indexed
+request to first Library submission (median paired saving 1.323 s). This is
+not a measured ordinary-tile saving or a deployment. A [separate changed-grip
+candidate](review/startup-orientation-20261121/event-loop-reconcile.md) extends
+only the event-loop decision; it is not included in that default or device result.
 
 The operator accepted the [winking-penguin launcher cover](../assets/branding/README.md)
 on 2026-11-17. The source launcher embeds its grayscale thumbnail in the Icon

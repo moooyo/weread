@@ -399,6 +399,26 @@ impl GyroObserver {
         self.state.is_synchronized() && self.filled == 0
     }
 
+    #[cfg(feature = "startup-orientation-reconcile")]
+    pub(crate) fn quiet_pose(&self) -> Option<NativePortrait> {
+        self.quiet_pose_with(current_pose)
+    }
+
+    #[cfg(feature = "startup-orientation-reconcile")]
+    fn quiet_pose_with(
+        &self,
+        query: impl FnOnce(&File) -> io::Result<Option<NativePortrait>>,
+    ) -> Option<NativePortrait> {
+        let first = self.state.current?;
+        if self.has_backlog() || !self.is_synchronized() || self.state.ready_sample {
+            return None;
+        }
+        if !descriptor_is_quiet(self.fd()) || query(&self.file).ok()?? != first {
+            return None;
+        }
+        descriptor_is_quiet(self.fd()).then_some(first)
+    }
+
     /// Discard an old queue before using a fresh current-value metadata sample.
     /// A saturated queue returns WouldBlock for the next readiness iteration;
     /// no cached orientation is published as a successful fresh sample.
@@ -468,6 +488,17 @@ impl GyroObserver {
     }
 }
 
+#[cfg(feature = "startup-orientation-reconcile")]
+fn descriptor_is_quiet(descriptor: RawFd) -> bool {
+    let mut entry = libc::pollfd {
+        fd: descriptor,
+        events: libc::POLLIN | libc::POLLPRI,
+        revents: 0,
+    };
+    let count = unsafe { libc::poll(&mut entry, 1, 0) };
+    count == 0 && entry.revents == 0
+}
+
 fn snapshot_backlog() -> io::Error {
     io::Error::new(
         io::ErrorKind::WouldBlock,
@@ -478,6 +509,96 @@ fn snapshot_backlog() -> io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "startup-orientation-reconcile")]
+    mod quiet_confirmation {
+        use super::*;
+        use crate::touch::tests::{event_pipe, write_packet};
+        use NativePortrait::{Down, Up};
+        use std::os::fd::OwnedFd;
+
+        fn stream() -> (GyroObserver, OwnedFd) {
+            let (input, writer) = event_pipe();
+            let mut observer = GyroObserver::from_test_stream(input.into());
+            observer.state.current = Some(Up);
+            (observer, writer)
+        }
+
+        fn turn(writer: &OwnedFd) {
+            write_packet(writer, EVENT_ABSOLUTE, PRESSURE_AXIS, 16);
+            write_packet(writer, EVENT_SYNC, SYNC_REPORT, 0);
+        }
+
+        #[test]
+        fn quiet_metadata_must_repeat_the_known_pose_on_the_same_file() {
+            let (observer, _writer) = stream();
+            assert_eq!(
+                observer.quiet_pose_with(|file| {
+                    assert_eq!(file.as_raw_fd(), observer.fd());
+                    Ok(Some(Up))
+                }),
+                Some(Up)
+            );
+            assert_eq!(observer.quiet_pose_with(|_| Ok(Some(Down))), None);
+            assert_eq!(observer.quiet_pose_with(|_| Ok(None)), None);
+            assert_eq!(observer.quiet_pose(), None);
+            assert_eq!(observer.state.current, Some(Up));
+        }
+
+        #[test]
+        fn data_on_either_side_of_the_query_is_left_for_the_event_loop() {
+            let (mut observer, writer) = stream();
+            turn(&writer);
+            assert_eq!(observer.quiet_pose_with(|_| panic!("queued input")), None);
+            assert_eq!(observer.poll().unwrap(), Some(Down));
+            let (mut observer, writer) = stream();
+            assert_eq!(
+                observer.quiet_pose_with(|_| {
+                    turn(&writer);
+                    Ok(Some(Up))
+                }),
+                None
+            );
+            assert_eq!(observer.state.current, Some(Up));
+            assert_eq!(observer.poll().unwrap(), Some(Down));
+        }
+
+        #[test]
+        fn closed_errored_or_invalid_descriptors_never_confirm() {
+            let (observer, writer) = stream();
+            drop(writer);
+            assert_eq!(observer.quiet_pose_with(|_| panic!("closed peer")), None);
+            let (reader, writer) = event_pipe();
+            drop(reader);
+            assert!(!descriptor_is_quiet(writer.as_raw_fd()));
+            assert!(!descriptor_is_quiet(i32::MAX));
+        }
+
+        #[test]
+        fn incomplete_or_unconsumed_observer_state_skips_the_query() {
+            let (mut observer, _writer) = stream();
+            let rejected = |input: &GyroObserver| {
+                assert_eq!(input.quiet_pose_with(|_| panic!("unsettled state")), None);
+            };
+            observer.backlog = true;
+            rejected(&observer);
+            observer.backlog = false;
+            observer.filled = 1;
+            rejected(&observer);
+            observer.filled = 0;
+            observer.state.dropped = true;
+            rejected(&observer);
+            observer.state.dropped = false;
+            observer.state.pending = Some(Down);
+            rejected(&observer);
+            observer.state.pending = None;
+            observer.state.ready_sample = true;
+            rejected(&observer);
+            observer.state.ready_sample = false;
+            observer.state.current = None;
+            rejected(&observer);
+        }
+    }
 
     #[test]
     fn a_second_validated_portrait_descriptor_remains_ambiguous() {

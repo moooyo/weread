@@ -106,6 +106,15 @@ after a new handoff. A failed gate does not change the daily installation.
   each followed by exactly one outcome for its site. Legacy queries produce
   `success`, `timeout`, `unavailable` or `failed`; only B can emit `reused`.
   Keep the original outcome when B falls back. Do not compare only its hits.
+- The separately built reconciliation experiment may also emit
+  `event_loop_orientation_reconciled`: the event loop accepted a changed
+  holding direction from fresh observations, rather than reusing an unchanged
+  mapping or executing the legacy query. Only the experimental B collector
+  accepts that exact marker. It is invalid for the splash or control arm,
+  never counts toward the fixed-portrait six-reuse gate, and does not by
+  itself prove a physical turn, a correct frame or a latency saving. The
+  single-turn report separates the software outcome from independent sensor
+  and first-draw evidence. Do not reinterpret an old timeout as reconciliation.
 - Use one public trial `label` (16 lowercase hex characters, **not** a lease
   token or device ID) in both the frozen plan and the final operations receipt.
   The collector must place that label plus one newline in `out/orientation-batch`
@@ -320,6 +329,12 @@ is not a reservation. The operator never needs to run a command.
    shelf has already appeared, do not turn. A missing or late acknowledgment
    ends the visit without launching the test case. The older pressure-only
    plan is an archived observation, not an executable first-draw plan.
+   For the [changed-grip candidate](../../docs/review/startup-orientation-20261121/event-loop-reconcile.md),
+   use the same sensor and scene, add `--reconciled` to `freeze`, and pass
+   `--build-result WORK/reconcile/result.json`. Choose a fresh `PLAN` in
+   that worker and preflight it with the same `run_pose_flip.py` command.
+   Freezing checks both actual Cargo builds but stages only B for this
+   correctness visit. Only this plan accepts the new event-loop marker.
 2. **Screen saver.** Freeze with `assisted_sleep_visit.py freeze --retained
    RETAINED --plan PLAN --sensor SENSOR --witness-window --finish FINISH`;
    preflight with `run_assisted_sleep.py --work WORK --plan PLAN --preflight`.

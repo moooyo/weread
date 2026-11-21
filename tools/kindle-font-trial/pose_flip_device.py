@@ -15,8 +15,8 @@ LEAVES = ('request', 'markers', 'sensor', 'sensor-ready', 'app-binding', 'sensor
 BASE_LEAVES = tuple(leaf for leaf in LEAVES if leaf not in ('portrait-return', 'shelf', 'final.metadata.json'))
 
 
-def device_program(candidate_bytes):
-    body = shelf_program(candidate_bytes, fixed_down=True)
+def device_program(candidate_bytes, *, reconciled=False):
+    body = shelf_program(candidate_bytes, fixed_down=True, reconciled=reconciled)
     body = once(body, 'portrait_opened|first_application_frame_send|',
                 'portrait_opened|first_application_frame_draw_begin_rot(0|90|180|270)|first_application_frame_send|')
     old = section(body, '        if absent "$entry/complete";', '        for leaf in $leaves;')

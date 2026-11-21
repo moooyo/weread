@@ -94,7 +94,10 @@ event-loop fallback query timed out after 557 ms. Do not treat this as two
 reuses or an ordinary-entry timing. The device was restored and its lease
 released at **17:33:11**. That visit did not alter the installed daily binary.
 The normal build now shares one reuse policy; no additional per-model
-physical qualification is required to enable it. Use a short live desktop
+physical qualification is required to enable it. The [changed-grip follow-up](docs/review/startup-orientation-20261121/event-loop-reconcile.md)
+is implemented as a separate event-loop candidate. It is not enabled in
+the normal package, installed on the Scribe, or timed from the stock tile.
+Use a short live desktop
 popup before each assisted action. The [power-observer
 investigation](docs/review/startup-orientation-20261121/power-wait.md) keeps
 the two-second wait unchanged. Neither changes the measured font result.

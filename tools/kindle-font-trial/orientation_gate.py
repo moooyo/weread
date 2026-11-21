@@ -69,7 +69,7 @@ def qualify(plan, archive, cases, expected_pose=None, alignment=None):
     thumbs = {}
     for case in cases:
         try:
-            sample = orientation_sample(read(case, "request").decode("ascii"), read(case, "markers").decode("ascii"))
+            sample = orientation_sample(read(case, "request").decode("ascii"), read(case, "markers").decode("ascii"), lane=case[0])
         except (UnicodeError, ValueError, KeyError):
             raise GateError(f"{case}: invalid orientation trace or device clock") from None
         if any((sample[site]["outcome"] == "reused") != (case[0] == "B") for site in SITES):

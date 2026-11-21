@@ -28,6 +28,16 @@ def elf(payload):
     return bytes(data) + payload
 
 
+def draw_receipt(app_bytes):
+    return dict(source='/work/src', lane='startup-first-draw', abi=draw.ABI, command=draw.COMMAND,
+                release_profile={'lto':'thin', 'codegen-units':1, 'strip':True}, application_features=sorted(draw.CANDIDATE),
+                backend_features=['startup-orientation-reuse'], local_dependencies=['i-slint-core','swash','zeno','zip'],
+                generated_receipts=FACES, both_recompiled=True, qemu_cpu='cortex-a8', version_output='weread 0.2.0',
+                runtime_policy='first-application-render-begin-v1',
+                toolchain={'rustc':'1.99.1','cargo':'1.99.1','cargo_zigbuild':'0.24.0','zig':'0.15.2'},
+                elf={'bytes':app_bytes,'elf_flags':'0x5000400','program_types':[1]})
+
+
 class FirstDrawFreeze(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
@@ -52,13 +62,7 @@ class FirstDrawFreeze(unittest.TestCase):
         self.sensor = self.work / 'sensor'; self.sensor.write_bytes(elf(b'new sensor'))
         self.scene = self.work / 'scene'; self.scene.write_bytes(elf(b'scene fixture'))
         self.plan = self.work / 'one-visit'
-        self.receipt = dict(source='/work/src', lane='startup-first-draw', abi=draw.ABI, command=draw.COMMAND,
-                            release_profile={'lto':'thin', 'codegen-units':1, 'strip':True}, application_features=sorted(draw.CANDIDATE),
-                            backend_features=['startup-orientation-reuse'], local_dependencies=['i-slint-core','swash','zeno','zip'],
-                            generated_receipts=FACES, both_recompiled=True, qemu_cpu='cortex-a8', version_output='weread 0.2.0',
-                            runtime_policy='first-application-render-begin-v1',
-                            toolchain={'rustc':'1.99.1','cargo':'1.99.1','cargo_zigbuild':'0.24.0','zig':'0.15.2'},
-                            elf={'bytes':self.app_bytes,'elf_flags':'0x5000400','program_types':[1]})
+        self.receipt = draw_receipt(self.app_bytes)
         self.result.write_text(json.dumps(self.receipt))
         self.enterContext(patch.object(assisted_shelf, 'public_seed'))
         self.probes = []

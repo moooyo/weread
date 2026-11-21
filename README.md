@@ -66,10 +66,12 @@ reusing a same-launch calibration instead of two timed-out queries improved
 indexed request-to-Library-SEND in every pair on Scribe 2022 / 5.19.5:
 **6.604 → 5.356 s median**, with a **1.323 s median paired saving**. This
 is not a daily tile-release measurement. The [Linux pose and touch tests](docs/review/startup-orientation-20261121/pose-qualification.md)
-passed. A [real candidate visit](docs/review/startup-orientation-20261121/physical-pose-visit.md)
-also verified the digital splash and Reader in that fixed portrait, not a
-physical turn, touch or wake. The feature remains off in Kindle packages;
-the launcher's two-second wait is unchanged.
+passed. [Subsequent Scribe visits](docs/review/startup-orientation-20261121/turn-and-wake-device.md)
+verified a physical Profile tap in both grips and the same Reader content
+after a screen-saver turn. The standard Kindle package enables reuse when
+the live pose matches the launch calibration. A [separate event-loop candidate](docs/review/startup-orientation-20261121/event-loop-reconcile.md)
+also handles a confirmed opposite grip; it is not in the standard package.
+Neither path shortens the launcher's two-second wait.
 
 A [separate launcher change](docs/review/startup-launcher-window-20261121/README.md)
 removes the startup window-tree scan for the retired Quick and Wi-Fi controls.

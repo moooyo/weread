@@ -39,7 +39,7 @@ process is replaced by a direct, silent `/bin/sleep 5` child. The parent
 does not inject a delay or skip retirement.
 
 - **A:** no reuse. Each lookup must time out, kill and wait for its own
-  child. **B:** use `confirmed_launch_mapping` and `confirmed_launch_controller`
+  child. **B:** use the splash and event-loop exact-pose checks
   with simulated matching upright pose, two rotation reads of `3`, and an
   unchanged initial calibration. No file, sensor or framebuffer is opened
   for these observations; the fake observer is `()`. Both hot sites must

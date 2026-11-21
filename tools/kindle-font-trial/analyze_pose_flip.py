@@ -6,14 +6,14 @@ from pathlib import Path
 import re
 import tarfile
 
-from analyze import TRACE, request_ns
+from analyze import TRACE, ImpossibleOrientationTrace, request_ns
 from analyze_assisted_shelf import final_route
 from analyze_orientation import orientation_sample
 from analyze_pose_visit import pose, timestamp
 from first_draw_evidence import assess_draw, split_draw_records
 from pose_flip_device import CASE, LEAVES
 from pose_window import HOLDING, MAX_NS, compare_bracket
-from prepare_pose_flip import CONTRACT, DRAW_CONTRACT, draw_schedule, schedule
+from prepare_pose_flip import CONTRACT, DRAW_CONTRACT, RECONCILED_CONTRACT, draw_schedule, reconciled_schedule, schedule
 
 
 LIMITS = dict(request=96, markers=4096, sensor=20000, shelf=128, portrait=4, observation=64)
@@ -138,9 +138,22 @@ def observed_turn(rows, request, times):
     return motion, turn
 
 
+def reconciliation_evidence(queries, times, rows, draw):
+    if queries is None:
+        return {'status': 'invalid_or_missing_site_trace'}
+    if queries['event_loop'] != 'reconciled':
+        return {'status': 'not_observed', 'event_loop_outcome': queries['event_loop']}
+    changes = [(old, new) for old, new in zip(rows, rows[1:]) if HOLDING[old[3]] != HOLDING[new[3]]]
+    begin = times.get('event_loop_orientation_begin')
+    before = bool(begin and len(changes) == 1 and changes[0][1][2] < begin)
+    return {'status': 'event_loop_marker_observed', 'one_change_observed_before_event_loop': before,
+            'first_draw_mapping_observation': draw.get('software_mapping', {}).get('status', 'not_assessed')}
+
+
 def analyze(plan, receipt, path):
-    diagnostic = plan.get('purpose') == DRAW_CONTRACT['purpose']
-    (draw_schedule if diagnostic else schedule)(plan)
+    reconciled_plan = plan.get('purpose') == RECONCILED_CONTRACT['purpose']
+    diagnostic = reconciled_plan or plan.get('purpose') == DRAW_CONTRACT['purpose']
+    (reconciled_schedule if reconciled_plan else draw_schedule if diagnostic else schedule)(plan)
     if (receipt.get('label') != plan['label'] or receipt.get('purpose') != plan['purpose'] or receipt.get('scope') != 'transaction_only'
             or receipt.get('owner_token_checked_on_release') is not True or receipt.get('recovery_required')
             or timestamp(receipt['released']) < timestamp(receipt['acquired'])):
@@ -206,10 +219,14 @@ def analyze(plan, receipt, path):
                                                      rows=rows, request=origin, initial=initial, native=native, launch=launch)
     motion, turn = observed_turn(rows, origin, times)
     try:
-        sample = orientation_sample(request, markers)
+        sample = orientation_sample(request, markers, lane='B', allow_reconciliation=reconciled_plan)
         queries = {site:sample[site]['outcome'] for site in ('splash','event_loop')}
+    except ImpossibleOrientationTrace:
+        raise
     except ValueError:
         queries = None
+    if reconciled_plan:
+        report['reconciliation_evidence'] = reconciliation_evidence(queries, times, rows, report['first_application_draw'])
     report.update(collection='pose_checkpoint_only_released' if partial else 'completed_and_released', startup_turn=turn,
                   sensor_direction=motion, initial_reference=initial, native_before=native, native_launch=launch,
                   launch_calibration=anchor, initial_reference_matches_before=initial==native,

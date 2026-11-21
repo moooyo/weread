@@ -52,19 +52,20 @@ fn sample(label: &str, lane: Lane, silent: bool) {
         std::convert::identity,
     );
     let after_splash = Instant::now();
-    let controller = resolve_launch_orientation(
+    let controller = resolve_launch_orientation_path(
         "event_loop",
         || {
             if lane == Lane::Control {
                 return None;
             }
-            let (controller, ()) = confirmed_launch_controller(
+            let (controller, (), path) = confirmed_event_loop_launch(
                 launch,
                 || Some(black_box(launch)),
                 rotation,
                 snapshot,
+                |_| panic!("the historical exact-only run must not resample the pose"),
             )?;
-            Some(controller)
+            Some((controller, path))
         },
         &mut legacy,
         PortraitController::new,

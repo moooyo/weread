@@ -30,6 +30,12 @@ trace. Optimize a demonstrated redundant wait and retain the existing path
 when live evidence is insufficient. The shared test device is for ready-to-run
 visits only; release it before changing code or analyzing results.
 
+The [changed-grip event-loop follow-up](event-loop-reconcile.md) compares the
+shared default against one additional path. It separates a confirmed new
+grip from reuse of the old grip, and host query cost from physical startup
+latency. Neither the existing fixed-grip result nor the recorded physical
+timeout is a measurement of this follow-up.
+
 ## Experiment results
 
 **Status, November 21:** after the [two-launch pilot](physical-pilot.md), the

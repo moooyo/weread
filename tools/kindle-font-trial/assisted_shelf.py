@@ -41,10 +41,10 @@ def device_program(*, fixed_down=False, bounded_up=False):
     return shelf_program(ARM_B, fixed_down=fixed_down, bounded_up=bounded_up)
 
 
-def shelf_program(candidate_bytes, *, fixed_down=False, bounded_up=False):
+def shelf_program(candidate_bytes, *, fixed_down=False, bounded_up=False, reconciled=False):
     if fixed_down and bounded_up:
         raise ValueError('Choose exactly one physical portrait for the visit')
-    body = render_device(ARM_A, candidate_bytes)
+    body = render_device(ARM_A, candidate_bytes, reconciled=reconciled)
     both = 'document measure seed.tar.gz A/launch.sh B/launch.sh A/app/weread B/app/weread A/app/weread-frame-guard B/app/weread-frame-guard A/app/weread-native-query B/app/weread-native-query'
     body = once(body, both, ' '.join(MEMBERS))
     body = once(body, 'NR!=11 || bytes>230686720', f'NR!={len(MEMBERS)} || bytes>127926272')
