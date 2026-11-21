@@ -31,6 +31,8 @@ class BatchFreezeTests(unittest.TestCase):
         self.assertEqual(result,freeze.verify_batch(self.work))
         self.assertEqual(result['selector_strategy'], 'single-file-bind-v1')
         self.assertEqual(freeze.configuration(result, result['schedule'][0])['selector_strategy'], result['selector_strategy'])
+        self.assertEqual(result['claim_protocol'], 'independent-stock-app-v1')
+        self.assertEqual(freeze.configuration(result, result['schedule'][0])['claim_protocol'], result['claim_protocol'])
         self.assertEqual(''.join(slot['lane'] for slot in result['schedule']), 'ABABBAABBAABBA')
         self.assertEqual([slot['pair'] for slot in result['schedule']], [0,0,1,1,2,2,3,3,4,4,5,5,6,6])
         self.assertEqual(len({slot['label'] for slot in result['schedule']}),14)
@@ -59,11 +61,13 @@ class BatchFreezeTests(unittest.TestCase):
         self.arms['A']['arm/app/weread'] = b'B'
         with self.assertRaisesRegex(ValueError,'Archive bytes differ'): freeze.verify_visit(self.work,first)
 
-    def test_old_series_metadata_does_not_authorize_the_new_selector(self):
+    def test_old_series_metadata_does_not_authorize_the_new_selector_or_claim(self):
         batch = freeze.freeze(self.work)
-        batch.pop('selector_strategy')
-        (self.root/'batch.json').write_text(json.dumps(batch))
-        with self.assertRaisesRegex(ValueError,'frozen stock A/B schedule'): freeze.verify_batch(self.work)
+        for field in ('selector_strategy', 'claim_protocol'):
+            with self.subTest(field=field):
+                old_batch = dict(batch); old_batch.pop(field)
+                (self.root/'batch.json').write_text(json.dumps(old_batch))
+                with self.assertRaisesRegex(ValueError,'frozen stock A/B schedule'): freeze.verify_batch(self.work)
 
     def test_helper_is_a_static_arm_binary_and_reports_the_bind_only_policy(self):
         inputs = self.work/'inputs'; inputs.mkdir()

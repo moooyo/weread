@@ -9,7 +9,7 @@ import re
 
 from qualified_submit import qualify
 from run_daily_render import CLOCK, LABEL, Refused
-from stock_ab_transaction import valid_stat
+from stock_ab_transaction import CLAIM_PROTOCOL, valid_stat
 
 
 PURPOSE = 'ordinary-stock-library-submit-ab'
@@ -18,7 +18,7 @@ MATRIX = [(0, 'warmup', lane) for lane in 'AB'] + [
 
 
 def checked_slots(batch):
-    if not isinstance(batch, dict) or batch.get('purpose') != PURPOSE:
+    if not isinstance(batch, dict) or batch.get('purpose') != PURPOSE or batch.get('claim_protocol') != CLAIM_PROTOCOL:
         raise Refused('unknown_stock_ab_plan')
     slots = batch.get('schedule')
     if not isinstance(slots, list) or len(slots) != len(MATRIX):
@@ -102,7 +102,8 @@ def summarize(batch, receipts):
         if not isinstance(receipt, dict) or any(type(receipt.get(key)) is not type(slot[key]) or receipt[key] != slot[key]
                                                 for key in ('label','lane','slot','pair','role')):
             raise Refused('foreign_or_reordered_attempt')
-        if (receipt.get('protocol') != 'isolated_stock_launch' or receipt.get('fixture') != 'disposable_public' or
+        if (receipt.get('protocol') != 'isolated_stock_launch' or receipt.get('claim_protocol') != batch['claim_protocol'] or
+                receipt.get('fixture') != 'disposable_public' or
                 receipt.get('measurement_build') != 'temporary_measurement_build' or receipt.get('purpose') != PURPOSE):
             raise Refused('unknown_stock_ab_scope')
         if (receipt.get('device_accessed') is not True or receipt.get('released') is not True or receipt.get('owner_and_token_checked') is not True or
@@ -230,10 +231,11 @@ def verified_report(work):
     source = batch.get('source_commit')
     if (not isinstance(source, str) or not re.fullmatch('[0-9a-f]{40}', source) or batch.get('device') != 'Kindle Scribe 2022'
             or batch.get('firmware') != '5.19.5' or batch.get('clock') != CLOCK or batch.get('entry') != 'ordinary_stock_weread_tile'
-            or batch.get('fixture') != 'public_normal_15' or batch.get('selector_strategy') != 'single-file-bind-v1'):
+            or batch.get('fixture') != 'public_normal_15' or batch.get('selector_strategy') != 'single-file-bind-v1'
+            or batch.get('claim_protocol') != CLAIM_PROTOCOL):
         raise Refused('unverified_stock_ab_source_or_scope')
     result.update(device='Kindle Scribe 2022', firmware='5.19.5', entry='ordinary_stock_weread_tile',
-                  fixture='public_normal_15', selector_strategy=batch['selector_strategy'],
+                  fixture='public_normal_15', selector_strategy=batch['selector_strategy'], claim_protocol=batch['claim_protocol'],
                   frozen_inputs_verified=True, shared_source_base_commit=source,
                   shared_application_features=['bundled-font-preflight','kindle','trial-library-frame'],
                   only_candidate_feature='startup-orientation-reuse', reconciliation_enabled=False)

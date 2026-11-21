@@ -184,11 +184,10 @@ receipt does not establish that the actual rejected token was `0`.
 On `test-env`, the revised native and ARM/QEMU helpers each passed four
 parser test groups and the original nine real-mount and recovery cases.
 The original 66,044-byte helper and the 14 unused visit plans were not
-modified. The revised 66,868-byte helper has **not** been run on this
-Kindle. The next hardware gate is a **fresh disposable-file probe**. Only
-if the independent session sees the mounted marker and handback reveals
-the original unchanged file can a new matching batch start its two
-untimed stock-card warmups. A worker preflight does not clear that gate.
+modified. At that point the revised 66,868-byte helper had not run on this
+Kindle. The next step was the [fresh disposable-file probe](#0445-revised-helper-passes-the-disposable-file-gate),
+which subsequently verified visibility and restoration. A worker preflight
+alone did not clear that gate.
 
 ## Acceptance and stopping rules
 
@@ -224,3 +223,39 @@ The [earlier stock-card observation](../library-startup-latency-20261119/daily-r
 was an upper bound from framebuffer memory. The [indexed comparison](../startup-orientation-20261121/physical-balanced.md)
 and [startup turn](../startup-orientation-20261121/event-loop-reconcile.md#november-22-physical-result-turn-after-draw)
 also have different endpoints. None supplies an A or B sample here.
+
+## 04:45: revised helper passes the disposable-file gate
+
+On November 22, **04:45:54.890–04:46:00.155 Asia/Shanghai**, the Scribe
+2022 on firmware 5.19.5 ran the revised **66,868-byte** helper. A second
+connection saw the bound marker. After unmounting, the original marker's
+file identity and bytes matched. The independent absence check and exact
+lease release both passed. The **5.27 seconds** span lease acquisition to
+release; they are not an application startup time. See the [device
+receipt](scratch-bind-parent-probe.json).
+
+This visit touched only the disposable markers. It did not mount the
+production launcher, press a stock card or start the on-demand handler or
+WeRead. It contributes **zero card releases, warmups or measured pairs**.
+The 14 unused plans frozen with the **66,044-byte** helper are a separate
+series; they do not inherit this gate result. An ordinary-card measurement
+requires a new series frozen with the verified helper and evidence from
+the actual selector and GUI in each visit.
+
+## Bound warmups and the successor series
+
+The [first two bound warmups](first-bound-warmups.md) established the full
+endpoint for the A arm. B reached its isolated application but lacked a
+derived launcher acknowledgement. No timed pair resulted. The site of the
+missing acknowledgement was reproduced on the worker, not established as
+the cause of that physical visit. After ownership and handback were
+verified, that series stopped; neither warmup carries forward.
+
+The successor uses the same application binaries, helper, public shelf and
+clock. Its collector uses two matching observations of the four-process
+launch chain, the exact executable, public data path and original request.
+A missing optional launcher acknowledgement is not the end timestamp: only
+the application's own submission on the same request qualifies. An existing
+wrong acknowledgement or a missing state-open record still prevents timing.
+The full protocol and all 14 new visit slots were frozen before either arm
+was run.

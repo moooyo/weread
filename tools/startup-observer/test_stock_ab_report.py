@@ -4,10 +4,11 @@ from pathlib import Path
 import tempfile
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from qualified_submit import ISOLATED_SEQUENCE, Refused, qualify
-from stock_ab_report import PURPOSE, classify, lower_upper_median, private_record, read_receipts, summarize
-from stock_ab_transaction import STATES, drive, fresh_journal, initial
+from stock_ab_report import PURPOSE, classify, lower_upper_median, private_record, read_receipts, summarize, verified_report
+from stock_ab_transaction import CLAIM_PROTOCOL, STATES, drive, fresh_journal, initial
 from test_qualified_submit import receipt
 
 
@@ -23,7 +24,7 @@ def examples():
             schedule.append(slot)
             visit = receipt(scope='temporary_measurement_build')
             visit.update(**{key:slot[key] for key in ('label','lane','slot','role','pair')}, device_accessed=True,
-                         purpose=PURPOSE, fixture='disposable_public', protocol='isolated_stock_launch',
+                         purpose=PURPOSE, fixture='disposable_public', protocol='isolated_stock_launch', claim_protocol=CLAIM_PROTOCOL,
                          started_at_utc=f'2026-11-22T01:{index:02d}:01+00:00', acquired_at_utc=f'2026-11-22T01:{index:02d}:02+00:00',
                          released_at_utc=f'2026-11-22T01:{index:02d}:30+00:00')
             ops = {step['mode']:step for step in visit['operations']}
@@ -50,15 +51,29 @@ def examples():
             visit['primary'] = 'qualified'
             visit['qualified'] = qualify(visit)
             visits.append(visit)
-    return dict(purpose=PURPOSE, schedule=schedule), visits
+    return dict(purpose=PURPOSE, claim_protocol=CLAIM_PROTOCOL, schedule=schedule), visits
 
 
 class StockAbReportTests(unittest.TestCase):
+    def test_current_verified_report_labels_the_claim_protocol_without_accepting_old_metadata(self):
+        from stock_ab_freeze import SCOPE
+
+        batch, _ = examples(); batch.update(SCOPE, source_commit='1'*40)
+        with tempfile.TemporaryDirectory() as temporary:
+            work = Path(temporary)
+            for slot in batch['schedule']: (work/'stock-library-ab'/slot['visit']).mkdir(parents=True)
+            with patch('stock_ab_freeze.verify_batch',return_value=batch):
+                report = verified_report(work)
+                self.assertEqual(report['claim_protocol'],'independent-stock-app-v1')
+                self.assertEqual(report['status'],'incomplete')
+                del batch['claim_protocol']
+                with self.assertRaisesRegex(Refused,'unknown_stock_ab_plan'): verified_report(work)
+
     def test_all_slots_accept_actual_host_transaction_output_with_fixture_transport(self):
         batch, templates = examples()
         real_reports = []
         for slot, template in zip(batch['schedule'], templates):
-            report = initial(slot | {'purpose': PURPOSE}, 'fixture-owner')
+            report = initial(slot | {'purpose': PURPOSE,'claim_protocol':CLAIM_PROTOCOL}, 'fixture-owner')
             report.update(device_accessed=True, started_at_utc=template['started_at_utc'], acquired_at_utc=template['acquired_at_utc'])
             records = {step['mode']:step['receipt'] for step in [*template['operations'], *template['guard_checks']] if 'receipt' in step}
             def line(mode):
@@ -224,7 +239,7 @@ class StockAbReportTests(unittest.TestCase):
                 read_receipts(root, batch)
 
     def test_foreign_protocol_and_overlapping_leases_cannot_be_paired(self):
-        for altered in ({'purpose':'indexed'}, {'protocol':'previous_trial'}, {'slot':True}, {'role':'warmup'},
+        for altered in ({'purpose':'indexed'}, {'protocol':'previous_trial'}, {'claim_protocol':'derived-ack'}, {'slot':True}, {'role':'warmup'},
                         {'measurement_build':'ordinary_installation'}, {'device_accessed':False},
                         {'started_at_utc':'2026-11-22T01:01:00Z','acquired_at_utc':'2026-11-22T01:01:10Z'}):
             batch, visits = examples()

@@ -20,7 +20,8 @@ from stock_ab_transaction import GUARDS, STATES, WireRefusal, checkpoint, checke
 from test_qualified_submit import LABEL, SENT, START, receipt
 
 
-CONFIG = dict(label=LABEL, lane='B', slot=3, role='measured', pair=1, purpose='ordinary-stock-library-submit-ab')
+CONFIG = dict(label=LABEL, lane='B', slot=3, role='measured', pair=1, purpose='ordinary-stock-library-submit-ab',
+              claim_protocol='independent-stock-app-v1')
 FIXED = dict(launch='1:2:300:755:0:0:1755:1', document='1:3:43:755:0:0:1', application='1:4:400:755:0:0:1752:1')
 ARM = next(row['receipt'] for row in receipt()['operations'] if row['mode']=='arm')
 MARKER = next(row['receipt'] for row in receipt()['operations'] if row['mode']=='library_submit')

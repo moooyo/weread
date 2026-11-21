@@ -54,7 +54,8 @@ def manifest(values, seed=False):
 
 def render_device(config):
     label, lane, size = config['label'], config['lane'], config['archive_bytes']
-    if (config.get('selector_strategy') != 'single-file-bind-v1' or not re.fullmatch('[0-9a-f]{16}', label)
+    if (config.get('selector_strategy') != 'single-file-bind-v1' or config.get('claim_protocol') != 'independent-stock-app-v1'
+            or not re.fullmatch('[0-9a-f]{16}', label)
             or lane not in ('A', 'B') or type(size) is not int or not 0 < size <= 180 * MIB):
         raise ValueError('Invalid frozen visit')
     members, seed = config['members'], config['seed_members']
@@ -83,8 +84,15 @@ def render_device(config):
     group = change(group, 'armed && tag tile-dispatch-intent && no_peer && account=$(lock_owner) &&',
                    'armed && tag tile-dispatch-intent && tag selector-service-view && tag selector-entered && no_peer && account=$(lock_owner) && [ "$account" = 0 ] &&')
     group = change(group, '    entry_birth=$birth\n', '    entry_birth=$birth\n    matches "$stage/selector-callback" "$label:$entry:$entry_birth" || return 1\n')
+    group = change(group, section(group, 'gui()', 'bind_group()'), 'gui() { stock_prove_gui timed; }\n')
     close = section(daily, 'retired()', 'restore()')
     close = change(close, '    observer_stopped || return 1', '    stock_request_cleanup && channel_idle || return 1')
+    close = change(close, 'drained() {\n', 'drained() {\n    stock_close_chain_retired || return 1\n')
+    close = change(close, 'if bind_gui; then current=$(gui) && matches "$stage/session" "$current" && ready=1',
+                   'if stock_close_session; then ready=1')
+    close = change(close, 'elif absent "$stage/session" && absent "$lock/application-pid"',
+                   'elif absent "$stage/session" && absent "$stage/stock-stop-session" && stock_no_trial_gui && absent "$lock/application-pid"')
+    close = change(close, 'write_tag term-intent && current=$(supervision)', 'stock_preterm_identity && write_tag term-intent && current=$(supervision)')
     close = change(close, 'absent "$stage/session" && absent "$stage/group"', 'absent "$stage/selector-entered" && absent "$stage/session" && absent "$stage/group"')
     close = change(close, '    armed && tag tile-dispatch-intent && start=$(seconds)', '''    if ! absent "$stage/quarantined"; then stock_quarantine_settled; return; fi
     if absent "$stage/selector-entered" && absent "$stage/group" && absent "$stage/launch-owner"; then
@@ -92,9 +100,11 @@ def render_device(config):
         tag selector-entered || return 1
     fi
     armed && tag tile-dispatch-intent && start=$(seconds)''')
-    text = '\n'.join((prefix, peer_data, peer, state, navigation, group, close,
+    stock = change(source('stock-ab-functions.sh'), '    pair_original && write_tag installed',
+                   '    trial_nodes=$(stock_trial_nodes) && record_once stock-trial-nodes "$trial_nodes" && pair_original && write_tag installed')
+    text = '\n'.join((prefix, peer_data, peer, state, navigation, group, close, source('stock-app-proof.sh'),
                       source('library-submit.sh'), source('stock-library-request.sh'), source('stock-unsurfaced-close.sh'),
-                      source('stock-ab-functions.sh')))
+                      stock))
     select = change(change(source('stock_ab_selector.sh'), 'label=@LABEL@', 'label=' + label), 'arm-name @LANE@', 'arm-name ' + lane)
     select = change(select, '@SELECTOR_GATE@', source('stock-selector-gate.sh').rstrip('\n'))
     substitutions = {'@SELECTOR@':select.rstrip('\n'), '@LABEL@':label, '@LANE@':lane, '@ARCHIVE_BYTES@':str(size),

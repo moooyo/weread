@@ -16,6 +16,7 @@ import tarfile
 import tempfile
 
 from prepare_daily_render import scan
+from stock_ab_transaction import CLAIM_PROTOCOL
 
 
 HERE = Path(__file__).resolve().parent
@@ -33,7 +34,8 @@ BATCH = 'stock-library-ab'
 PROFILE = {'device-profile': b'scribe\n', 'device-allowlist': b'scribe 5.19.5\n'}
 MATRIX = [(0, 'warmup', arm) for arm in 'AB'] + [(pair, 'measured', arm) for pair in range(1,7) for arm in ('AB' if pair % 2 else 'BA')]
 SCOPE = dict(purpose=PURPOSE, device='Kindle Scribe 2022', firmware='5.19.5', clock='CLOCK_MONOTONIC',
-             entry='ordinary_stock_weread_tile', fixture='public_normal_15', selector_strategy='single-file-bind-v1')
+             entry='ordinary_stock_weread_tile', fixture='public_normal_15', selector_strategy='single-file-bind-v1',
+             claim_protocol=CLAIM_PROTOCOL)
 CODE = ('weread-frame-guard', 'weread-native-query')
 
 
@@ -253,7 +255,7 @@ def schedule(labels):
 def configuration(batch, slot):
     bundle = batch['bundles'][slot['lane']]
     return dict(label=slot['label'], lane=slot['lane'], members=bundle['members'], archive_bytes=bundle['archive_bytes'],
-                seed_members=batch['seed_members'], selector_strategy=batch['selector_strategy'])
+                seed_members=batch['seed_members'], selector_strategy=batch['selector_strategy'], claim_protocol=batch['claim_protocol'])
 
 
 def visit_record(batch, slot):

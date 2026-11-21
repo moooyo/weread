@@ -15,7 +15,8 @@ IDENTITY_PREFIX = r'[0-9]{1,20}:[0-9]{1,20}:[0-9]{1,20}:[0-7]{1,5}:[0-9]{1,10}:[
 STAT = re.compile(IDENTITY_PREFIX + r'[0-9]{1,20}:[0-9]{1,8}')
 DOCUMENT_STAT = re.compile(IDENTITY_PREFIX + r'[0-9]{1,8}')
 GUARDS = ('original', 'audit_before', 'audit_after')
-METADATA = ('label', 'purpose', 'lane', 'slot', 'role', 'pair')
+CLAIM_PROTOCOL = 'independent-stock-app-v1'
+METADATA = ('label', 'purpose', 'lane', 'slot', 'role', 'pair', 'claim_protocol')
 
 
 class WireRefusal(Refused):

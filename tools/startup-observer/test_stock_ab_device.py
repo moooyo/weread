@@ -114,7 +114,7 @@ class StockDeviceFixture(unittest.TestCase):
         rows = [(name,body,0o644 if name in ('arm-seed.tar.gz','launch-reference','document-reference') or name.startswith('tile/models/') else 0o755)
                 for name,body in self.items.items()]
         self.payload = contents(entries if entries is not None else rows)
-        config = dict(label=daily.LABEL, lane=lane, selector_strategy='single-file-bind-v1', members={name:len(body) for name,body in self.items.items()},
+        config = dict(label=daily.LABEL, lane=lane, selector_strategy='single-file-bind-v1', claim_protocol='independent-stock-app-v1', members={name:len(body) for name,body in self.items.items()},
                       seed_members={name:len(body) for name,body in self.seed.items()}, archive_bytes=len(self.payload))
         self.config = config
         script = render_device(config)
@@ -255,6 +255,9 @@ class DeviceTests(StockDeviceFixture):
         subprocess.run(['umount',self.live],check=True); self.call('absent','absent')
 
     def test_missing_or_old_strategy_and_exchange_members_are_refused(self):
+        for protocol in (None, 'shell-marker-only'):
+            with self.subTest(protocol=protocol), self.assertRaises(ValueError):
+                render_device(self.config | {'claim_protocol':protocol})
         for strategy in (None,'atomic-exchange'):
             with self.assertRaises(ValueError): render_device(self.config|{'selector_strategy':strategy})
         with self.assertRaises(ValueError): render_device(self.config|{'members':self.config['members']|{'selector-exchange':42}})

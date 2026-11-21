@@ -23,6 +23,26 @@ python3 -B "$runner" --work "$W" --plan "$plan" --owner "$OWNER" --lease-tool "$
 
 `--preflight` checks the frozen visit, the install script and the two original-production reference files without reading a password, opening a Kindle connection or requesting a lease. A busy device returns immediately; an atomic acquisition race cannot cause a device connection. After a real attempt, the same slot is never launched again. The public synthetic shelf is the only permitted test data.
 
+## Contiguous ranges for the independent stock application proof
+
+Use a new verification worker and batch for `independent-stock-app-v1`. Do not feed the controller an earlier worker, warmup or recovery receipt. After the device shell has passed its offline rehearsals, freeze and verify the two payloads and all fourteen distinct visits. On that worker the preparation owner seals the unattempted schedule, using its exact directory and the first public label from the freeze receipt:
+
+```sh
+range="$W/src/tools/startup-observer/run_stock_ab_range.py"
+python3 -B "$range" --work "$W" --first-label "$FIRST_LABEL" seal
+python3 -B "$range" --work "$W" --first-label "$FIRST_LABEL" check --start 0 --end 13 --owner "$OWNER"
+```
+
+Neither command contacts the Kindle. Sealing does not reserve it or assert any timing result. The owner-only read-only manifest binds the original worker, all fourteen labels, source revision, claim protocol, and expected 66,868-byte size of the reviewed single-file bind helper. Every live range must match this manifest and the first label from the independent handoff. The range never resets an old slot. Slot `0` is the fresh A warmup, `1` the fresh B warmup, and `2` through `13` the six measured pairs. Each visit uses its own device lease; no lease is held between slots. Stop at the first failed or busy visit.
+
+```powershell
+& .\tools\startup-observer\Invoke-StockAbRange.ps1 -Worker $Worker -FirstLabel $FirstLabel -StartSlot 0 -EndSlot 13 -Owner $Owner -DevicePassword $DevicePassword
+```
+
+The Windows transport holds a private input pipe open while the range runs. On disconnect, complete any already-started visit's handback before stopping. To yield to another project, use `stop` with the same `--work` and `--first-label`. The request never revokes an active device lease. Clear it with `clear-stop` only when the controller has exited. Resuming requires a new explicit range starting at the first untouched slot; all preceding slots must have qualified on their own, returned under the same owner, and have no recovery or outstanding token.
+
+## Transport, timing and recovery for each visit
+
 Before acquiring the lease the live runner prepares a private stream containing the frozen shell header followed immediately by the unmodified archive. SSH receives a short command, not the shell body in its exec request. A bounded `dd bs=1 count=N` reads only the header; `sh -c` receives the remaining bytes as its standard input. A lone diagnostic sentinel means the transport consumed the header, **not** that the installer accepted the archive. A failure report keeps the local SSH return code when available and whether that sentinel was observed, not raw stderr. A timeout does not invent an SSH return code.
 
 The `request` SSH channel emits a monotonic arm receipt, keeps its original request file pinned during the independent stock-tile click and GUI ownership checks, then emits the submitted Library marker and the original tile receipt. Do not substitute a screenshot, full cover set, other launch, UTC timestamp, `Ready` log or manual input. The endpoint is the same GUI's accepted qualifying Library frame submission, not optical completion. For this populated fixture an empty shelf is not a timed result.
