@@ -16,6 +16,7 @@ resolver = "3"
 default = ["desktop"]
 desktop = ["slint/backend-winit", "slint/renderer-software"]
 kindle = ["dep:slint-backend-kindle"]
+trial-library-frame = []
 bundled-font-preflight = ["dep:anyhow", "dep:owned_ttf_parser", "dep:sha2"]
 startup-orientation-reuse = ["slint-backend-kindle?/startup-orientation-reuse"]
 startup-orientation-reconcile = ["startup-orientation-reuse", "slint-backend-kindle?/startup-orientation-reconcile"]

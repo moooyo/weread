@@ -69,8 +69,8 @@ interval, not a point. Missing or malformed records, rejected or ambiguous
 launches, and missed/expired frames are `not_timed`. A user-mode ARM smoke test
 or host fixture is not a physical Kindle or firmware-emulator result.
 
-`library-submit.sh` is the read side for a future authorized collector, not an
-installation or device runner. Its caller must keep the newly created directory
+`library-submit.sh` is the read side, not an installation or device runner.
+Its caller must keep the newly created directory
 and original request open on file descriptors 6 and 7 in the **same shell**,
 provide the ordinary transaction's stage and identity checks, and own cleanup.
 Before the card input, call `library_submit_arm DEADLINE_NS` directly (not in a
@@ -81,6 +81,20 @@ JSON objects as the `arm` and `library_submit` operation receipts. The qualifier
 compares the latter's saved tile release with the actual `tap` receipt. The
 unchanged external daily runner cannot keep these descriptors or select an
 instrumented app; those prerequisites are not implemented by this component.
+
+`stock-library-request.sh` supplies that descriptor lifetime for the isolated
+stock-card transaction. The `request` action owns a fresh root-private request,
+publishes it only if the fixed path is absent, and holds the original directory
+and file open across the stock tap and GUI ownership check. On that same channel
+send `collect` followed by LF and EOF for the application receipt, or `cancel`
+followed by LF and EOF for cleanup only. Bare EOF also cancels. No frame match
+or screen image from an external observer is needed. An occupied path, a wrong
+inode or a lost GUI generation is not a sample. The recovery action may remove
+only recorded original objects; final absence and the launcher's separate
+restoration must still be verified. The `isolated_stock_launch` qualifier uses
+the fresh arm receipt rather than the ordinary launch fence, and accepts only
+the temporary measurement build and disposable public fixture, not a timing of
+the untouched installation. An offline fixture pass is not a Kindle result.
 
 ## November 22 ordinary-card A/B preparation
 

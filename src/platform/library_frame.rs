@@ -10,6 +10,37 @@ const APPLICATION: &str = "/mnt/us/weread/app/weread";
 const DATA: &str = "/mnt/us/weread/data";
 const MAX_AGE_NS: u64 = 60_000_000_000;
 
+#[cfg(feature = "trial-library-frame")]
+#[path = "trial_library_frame.rs"]
+mod trial;
+
+enum Installation {
+    Daily,
+    #[cfg(feature = "trial-library-frame")]
+    Trial(trial::Identity),
+}
+
+impl Installation {
+    fn claim(_label: &str) -> Option<Self> {
+        if ordinary_installation() {
+            return Some(Self::Daily);
+        }
+        #[cfg(feature = "trial-library-frame")]
+        if let Some(identity) = trial::Identity::current(_label) {
+            return Some(Self::Trial(identity));
+        }
+        None
+    }
+
+    fn current(&self, _label: &str) -> bool {
+        match self {
+            Self::Daily => super::native_theme::owns_ordinary_first_generation(),
+            #[cfg(feature = "trial-library-frame")]
+            Self::Trial(claimed) => trial::Identity::current(_label).as_ref() == Some(claimed),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LibraryFrameContent {
     Entries,
@@ -31,6 +62,7 @@ pub struct LibraryFrameRequest {
     label: String,
     claimed: u64,
     deadline: u64,
+    installation: Installation,
 }
 
 fn monotonic_ns() -> Option<u64> {
@@ -107,13 +139,13 @@ fn parse_request(bytes: &[u8]) -> Option<(&str, u64)> {
 
 impl LibraryFrameRequest {
     pub fn claim() -> Option<Self> {
-        Self::claim_at(Path::new(ROOT), 0, ordinary_installation, monotonic_ns)
+        Self::claim_at(Path::new(ROOT), 0, Installation::claim, monotonic_ns)
     }
 
     fn claim_at(
         root: &Path,
         owner: u32,
-        ordinary: impl FnOnce() -> bool,
+        ordinary: impl FnOnce(&str) -> Option<Installation>,
         clock: impl FnOnce() -> Option<u64>,
     ) -> Option<Self> {
         let directory = OpenOptions::new()
@@ -145,9 +177,7 @@ impl LibraryFrameRequest {
         file.try_lock().ok()?;
         file.read_exact(&mut bytes[..size]).ok()?;
         let (label, deadline) = parse_request(&bytes[..size])?;
-        if !ordinary() {
-            return None;
-        }
+        let installation = ordinary(label)?;
         let claimed = clock()?;
         let remaining = deadline.checked_sub(claimed)?;
         if remaining == 0 || remaining > MAX_AGE_NS {
@@ -161,6 +191,7 @@ impl LibraryFrameRequest {
             label: label.into(),
             claimed,
             deadline,
+            installation,
         };
         if !request.current(metadata.len()) {
             return None;
@@ -181,21 +212,20 @@ impl LibraryFrameRequest {
     }
 
     pub fn submitted(self, content: LibraryFrameContent) {
-        self.finish(
-            content,
-            monotonic_ns,
-            super::native_theme::owns_ordinary_first_generation,
-        );
+        self.finish(content, monotonic_ns, Installation::current);
     }
 
     fn finish(
         self,
         content: LibraryFrameContent,
         clock: impl FnOnce() -> Option<u64>,
-        ordinary: impl FnOnce() -> bool,
+        ordinary: impl FnOnce(&Installation, &str) -> bool,
     ) {
         let Some(now) = clock() else { return };
-        if !(self.claimed..self.deadline).contains(&now) || !self.current(0) || !ordinary() {
+        if !(self.claimed..self.deadline).contains(&now)
+            || !self.current(0)
+            || !ordinary(&self.installation, &self.label)
+        {
             return;
         }
         let scene = match content {
@@ -233,17 +263,19 @@ mod tests {
     }
 
     fn claim(root: &Path, owner: u32) -> Option<LibraryFrameRequest> {
-        LibraryFrameRequest::claim_at(root, owner, || true, || Some(100))
+        LibraryFrameRequest::claim_at(root, owner, |_| Some(Installation::Daily), || Some(100))
     }
 
     #[test]
     fn absent_or_unrelated_requests_never_sample_the_clock() {
         let (_directory, root, owner) = setup();
         for path in [&root, &root.join("absent")] {
-            assert!(LibraryFrameRequest::claim_at(path, owner, || panic!(), || panic!()).is_none());
+            assert!(
+                LibraryFrameRequest::claim_at(path, owner, |_| panic!(), || panic!()).is_none()
+            );
         }
         let leaf = arm(&root);
-        assert!(LibraryFrameRequest::claim_at(&root, owner, || false, || panic!()).is_none());
+        assert!(LibraryFrameRequest::claim_at(&root, owner, |_| None, || panic!()).is_none());
         assert_eq!(fs::read_to_string(leaf).unwrap(), ARMED);
     }
 
@@ -272,7 +304,7 @@ mod tests {
             assert!(claim(&root, owner).is_none());
         }
         fs::write(&leaf, [b'a'; 81]).unwrap();
-        assert!(LibraryFrameRequest::claim_at(&root, owner, || panic!(), || panic!()).is_none());
+        assert!(LibraryFrameRequest::claim_at(&root, owner, |_| panic!(), || panic!()).is_none());
     }
 
     #[test]
@@ -313,7 +345,7 @@ mod tests {
         let request = claim(&root, owner).unwrap();
         assert_eq!(fs::read(&leaf).unwrap(), b"");
         assert!(claim(&root, owner).is_none());
-        request.finish(LibraryFrameContent::Entries, || Some(150), || true);
+        request.finish(LibraryFrameContent::Entries, || Some(150), |_, _| true);
         assert_eq!(
             fs::read_to_string(&leaf).unwrap(),
             format!("WEREAD_LIBRARY_SUBMITTED {LABEL} 150 entries\n")
@@ -328,35 +360,35 @@ mod tests {
             let leaf = arm(&root);
             claim(&root, owner)
                 .unwrap()
-                .finish(LibraryFrameContent::Empty, || now, || true);
+                .finish(LibraryFrameContent::Empty, || now, |_, _| true);
             assert!(fs::read(&leaf).unwrap().is_empty());
         }
         let leaf = arm(&root);
         let request = claim(&root, owner).unwrap();
         fs::write(&leaf, b"cancelled").unwrap();
-        request.finish(LibraryFrameContent::Entries, || Some(110), || true);
+        request.finish(LibraryFrameContent::Entries, || Some(110), |_, _| true);
         assert_eq!(fs::read(&leaf).unwrap(), b"cancelled");
         arm(&root);
         let request = claim(&root, owner).unwrap();
         let renamed = directory.path().join("old-request");
         fs::rename(&leaf, &renamed).unwrap();
         arm(&root);
-        request.finish(LibraryFrameContent::Empty, || Some(110), || true);
+        request.finish(LibraryFrameContent::Empty, || Some(110), |_, _| true);
         assert!(fs::read(&renamed).unwrap().is_empty());
         assert_eq!(fs::read_to_string(&leaf).unwrap(), ARMED);
         let request = claim(&root, owner).unwrap();
         fs::remove_file(&leaf).unwrap();
-        request.finish(LibraryFrameContent::Empty, || Some(110), || true);
+        request.finish(LibraryFrameContent::Empty, || Some(110), |_, _| true);
         assert!(!leaf.exists());
         arm(&root);
         claim(&root, owner)
             .unwrap()
-            .finish(LibraryFrameContent::Empty, || Some(115), || false);
+            .finish(LibraryFrameContent::Empty, || Some(115), |_, _| false);
         assert!(fs::read(&leaf).unwrap().is_empty());
         arm(&root);
         claim(&root, owner)
             .unwrap()
-            .finish(LibraryFrameContent::Empty, || Some(115), || true);
+            .finish(LibraryFrameContent::Empty, || Some(115), |_, _| true);
         assert_eq!(
             fs::read_to_string(leaf).unwrap(),
             format!("WEREAD_LIBRARY_SUBMITTED {LABEL} 115 empty\n")

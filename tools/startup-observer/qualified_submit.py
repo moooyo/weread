@@ -8,6 +8,8 @@ from run_daily_render import CLOCK, LABEL, Refused, release_bounds
 
 SEQUENCE = ('admit', 'stage', 'install', 'prepare', 'arm', 'observe_armed', 'tap', 'claim', 'observe',
             'witness', 'library_submit', 'stop', 'restore', 'close', 'absent')
+ISOLATED_SEQUENCE = ('admit', 'stage', 'install', 'prepare', 'activate', 'arm', 'request_armed', 'tap', 'claim',
+                     'witness', 'library_submit', 'stop', 'restore', 'close', 'absent')
 SUBMITTED = re.compile(r'WEREAD_LIBRARY_SUBMITTED ([0-9a-f]{16}) ([1-9][0-9]{0,18}) (entries|empty)\n')
 REQUEST_LIFETIME_NS = 60_000_000_000
 
@@ -24,14 +26,21 @@ def qualify(report):
         raise Refused('missing_same_frame_marker')
     if report.get('measurement_build') not in ('ordinary_installation', 'temporary_measurement_build'):
         raise Refused('unknown_build_scope')
+    isolated = report.get('protocol') == 'isolated_stock_launch'
+    if ('protocol' in report and not isolated or isolated and (report['measurement_build'] != 'temporary_measurement_build' or
+            report.get('fixture') != 'disposable_public' or 'observation' in report)):
+        raise Refused('unknown_stock_protocol')
+    sequence = ISOLATED_SEQUENCE if isolated else SEQUENCE
     steps = report.get('operations')
-    if not isinstance(steps, list) or len(steps) != len(SEQUENCE):
+    if not isinstance(steps, list) or len(steps) != len(sequence):
         raise Refused('incomplete_transaction')
-    for mode, step in zip(SEQUENCE, steps):
+    for mode, step in zip(sequence, steps):
         if (not isinstance(step, dict) or step.get('mode') != mode or type(step.get('status')) is not int or
                 step['status'] != 0 or step.get('reason') != ''):
             raise Refused('unexpected_operation')
     by_mode = {step['mode']: step for step in steps}
+    if isolated and by_mode['arm'].get('receipt') != {'state': 'armed'}:
+        raise Refused('unbound_arm')
     tap = by_mode['tap'].get('receipt')
     if not isinstance(tap, dict):
         raise Refused('missing_tile_receipt')
@@ -56,7 +65,7 @@ def qualify(report):
     if not match or match[1] != report['label']:
         raise Refused('unbound_library_submit')
     submitted = int(match[2])
-    request = by_mode['arm'].get('receipt')
+    request = by_mode['request_armed' if isolated else 'arm'].get('receipt')
     if (not isinstance(request, dict) or set(request) != {'state', 'label', 'request_clock', 'request_armed_ns', 'request_deadline_ns'} or
             request['state'] != 'armed' or request['label'] != report['label']):
         raise Refused('unbound_arm')

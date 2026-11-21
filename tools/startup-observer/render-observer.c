@@ -4,6 +4,8 @@
 #include <fcntl.h>
 #include <inttypes.h>
 #include <linux/fb.h>
+#include <linux/fs.h>
+#include <poll.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -180,7 +182,42 @@ static int output(struct observed_scene picture,uint64_t negative,uint64_t first
     return fflush(stdout) == 0 ? 0 : 1;
 }
 
+static int request_command(uint64_t deadline) {
+    char buffer[10]; size_t used=0;
+    for (;;) {
+        uint64_t sampled=now();
+        if (!sampled || deadline<=sampled || deadline-sampled>60*SECOND) return 1;
+        struct pollfd source={.fd=0,.events=POLLIN};
+        int ready=poll(&source,1,(int)((deadline-sampled+999999)/1000000));
+        if (ready<0 && errno==EINTR) continue;
+        if (ready!=1 || (source.revents&~(POLLIN|POLLHUP)) || now()>=deadline) return 1;
+        ssize_t count=read(0,buffer+used,sizeof buffer-used);
+        if (count<0 && errno==EINTR) continue;
+        if (count<0) return 1;
+        if (!count) {
+            if (used==8 && !memcmp(buffer,"collect\n",8)) return puts("collect")<0;
+            if (!used || (used==7 && !memcmp(buffer,"cancel\n",7))) return puts("cancel")<0;
+            return 1;
+        }
+        used+=(size_t)count;
+        if (used==sizeof buffer) return 1;
+    }
+}
+
 int main(int argc,char **argv) {
+    if (argc==3 && strcmp(argv[1],"--request-stdin")==0) {
+        uint64_t deadline;
+        return argv[2][0]=='0' || !numeric(argv[2],argv[2]+strlen(argv[2]),&deadline) || request_command(deadline);
+    }
+    if (argc==3 && strcmp(argv[1],"--publish-frame-request")==0) {
+        if (strlen(argv[2])!=16 || strspn(argv[2],"0123456789abcdef")!=16) return 1;
+        char draft[96];
+        snprintf(draft,sizeof draft,"/var/tmp/.weread-library-frame-%s",argv[2]);
+        struct stat pinned,named;
+        return fstat(6,&pinned) || !S_ISDIR(pinned.st_mode) || (pinned.st_mode&07777)!=0700 || pinned.st_uid ||
+            lstat(draft,&named) || !S_ISDIR(named.st_mode) || pinned.st_dev!=named.st_dev || pinned.st_ino!=named.st_ino ||
+            syscall(SYS_renameat2,AT_FDCWD,draft,AT_FDCWD,"/var/tmp/weread-library-frame",RENAME_NOREPLACE)!=0;
+    }
     if ((argc == 2 || argc == 3) && strcmp(argv[1],"--monotonic-ns") == 0) {
         uint64_t sampled = now(), deadline;
         if (argc == 3 && (argv[2][0] == '0' || !numeric(argv[2],argv[2]+strlen(argv[2]),&deadline) ||
