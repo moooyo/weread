@@ -163,8 +163,10 @@ def run(args, *, orientation_schedule=None, pose_visit_schedule=None, assisted_s
             if single_visit:
                 expected["absent"] = "absent"
             if assisted_shelf_schedule and mode == "reference" and code == 0:
-                if result.stdout in (b"U:3\n", b"D:1\n"):
+                if re.fullmatch(rb"[UD]:[0-3]\n", result.stdout):
                     report["initial_native_reference"] = stdout
+                    if stdout != config["expected_calibration"]:
+                        code, errors = 65, "refused initial_pose_gate"
                 else:
                     code, errors = 65, "refused unsupported_native_reference"
             if code == 0 and mode in expected and stdout != expected[mode]:
@@ -215,10 +217,9 @@ def run(args, *, orientation_schedule=None, pose_visit_schedule=None, assisted_s
                 if assisted_shelf_schedule:
                     if not call("reference"):
                         raise ValueError("Read-only starting portrait refused")
-                    action = "TURN_180" if report["initial_native_reference"] == "D:1" else "HOLD_STILL"
                     report["operator_cue_issued"] = stamp()
                     save()
-                    print(f"OPERATOR_CUE {action}: Hold the target portrait steady. Once the public shelf appears, "
+                    print("OPERATOR_CUE HOLD_STILL: Hold the confirmed target portrait steady. Once the public shelf appears, "
                           "tap its rightmost profile/person tab once and leave it displayed.", flush=True)
                 if not args.admit_only:
                     attempted = True
@@ -255,14 +256,25 @@ def run(args, *, orientation_schedule=None, pose_visit_schedule=None, assisted_s
                             closed = call("absent")
                 finally:
                     if closed:
-                        receipt = lease.release(request, native_restored_and_connections_closed=True)
-                        if not receipt["owner_and_token_checked"] or not receipt["only_owned_owner_json_removed_then_rmdir"]:
-                            raise RuntimeError("Release not confirmed")
-                        request.token_file.unlink()
-                        report["released"] = receipt["released_at_utc"]
-                        if single_visit:
-                            report["owner_token_checked_on_release"] = True
-                        print("Released exact physical lease.", flush=True)
+                        try:
+                            receipt = lease.release(request, native_restored_and_connections_closed=True)
+                            released = receipt["released_at_utc"]
+                            if (receipt["owner_and_token_checked"] is not True or receipt["only_owned_owner_json_removed_then_rmdir"] is not True
+                                    or not isinstance(released, str) or not released):
+                                raise RuntimeError("Release not confirmed")
+                        except (Exception, KeyboardInterrupt) as error:
+                            if not single_visit:
+                                raise
+                            closed = False
+                            report.update(recovery_required=True, release_error=getattr(error, "code", type(error).__name__))
+                            print("Release unconfirmed; retained the private token for recovery.", flush=True)
+                        else:
+                            report["released"] = released
+                            if single_visit:
+                                report["owner_token_checked_on_release"] = True
+                                save()
+                            request.token_file.unlink()
+                            print("Released exact physical lease.", flush=True)
                     else:
                         report["recovery_required"] = True
                     report["passed"] = completed and closed

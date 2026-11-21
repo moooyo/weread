@@ -30,7 +30,7 @@ class AssistedHostTests(unittest.TestCase):
                                     preflight=False, recover=None, operator_ready=True, wait=0, admit_only=False)
         self.calls = []
         self.output = io.StringIO()
-        self.start = b'D:1\n'
+        self.start = b'U:3\n'
         self.bad_absence = False
         self.lease = Mock()
         self.lease.LeaseRequest.side_effect = lambda _, token, owner, ident: SimpleNamespace(token_file=token, owner=owner, ident=ident)
@@ -80,27 +80,73 @@ class AssistedHostTests(unittest.TestCase):
         self.assertFalse(self.calls)
         self.lease.acquire.assert_not_called()
 
-    def test_down_prompts_one_turn_and_only_one_case(self):
-        self.assertEqual(self.execute(), 0)
-        self.assertEqual(self.calls, SEQUENCE + ['analyze-after-release'])
-        self.assertIn('OPERATOR_CUE TURN_180', self.output.getvalue())
-        attempt, = self.plan.glob('batch-*')
-        self.assertEqual(json.loads((attempt/'operations.json').read_text())['initial_native_reference'], 'D:1')
-        self.assertFalse((attempt/'private-token').exists())
-        with self.assertRaisesRegex(ValueError, 'new label'):
-            self.execute()
-
-    def test_up_prompts_no_turn(self):
-        self.start = b'U:3\n'
-        self.assertEqual(self.execute(), 0)
-        self.assertIn('OPERATOR_CUE HOLD_STILL', self.output.getvalue())
-        self.assertNotIn('TURN_180', self.output.getvalue())
-
-    def test_unrecognized_reference_never_prompts_or_stages(self):
-        self.start = b'FIXED:3\n'
+    def test_down_records_pose_and_releases_without_cue_or_upload(self):
+        self.start = b'D:1\n'
         self.assertEqual(self.execute(), 1)
         self.assertEqual(self.calls, [('admit','none'), ('reference','none'), 'analyze-after-release'])
         self.assertNotIn('OPERATOR_CUE', self.output.getvalue())
+        attempt, = self.plan.glob('batch-*')
+        receipt = json.loads((attempt/'operations.json').read_text())
+        self.assertEqual(receipt['initial_native_reference'], 'D:1')
+        self.assertEqual(receipt['operations'][-1]['diagnostic'], 'refused initial_pose_gate')
+        self.assertTrue(receipt['released'] and receipt['owner_token_checked_on_release'])
+        self.assertNotIn('operator_cue_issued', receipt)
+        self.assertFalse((attempt/'private-token').exists())
+
+    def test_up_prompts_no_turn(self):
+        self.assertEqual(self.execute(), 0)
+        self.assertEqual(self.calls, SEQUENCE + ['analyze-after-release'])
+        self.assertIn('OPERATOR_CUE HOLD_STILL', self.output.getvalue())
+        self.assertNotIn('TURN_180', self.output.getvalue())
+        with self.assertRaisesRegex(ValueError, 'new label'):
+            self.execute()
+
+    def test_unrecognized_reference_never_prompts_or_stages(self):
+        for name, source in [('fixed', b'FIXED:3\n'), ('duplicate', b'U:3\nU:3\n')]:
+            with self.subTest(name=name):
+                self.start = source
+                self.calls.clear()
+                self.assertEqual(self.execute(), 1)
+                self.assertEqual(self.calls, [('admit','none'), ('reference','none'), 'analyze-after-release'])
+                self.assertNotIn('OPERATOR_CUE', self.output.getvalue())
+                attempt, = self.plan.glob('batch-*')
+                receipt = json.loads((attempt/'operations.json').read_text())
+                self.assertNotIn('initial_native_reference', receipt)
+                self.assertTrue(receipt['owner_token_checked_on_release'])
+                attempt.rename(self.plan / ('invalid-' + name))
+
+    def test_other_bounded_references_are_retained_but_never_admitted(self):
+        for initial in ('U:1', 'D:3'):
+            self.start = (initial + '\n').encode('ascii')
+            with self.subTest(initial=initial):
+                self.calls.clear()
+                self.assertEqual(self.execute(), 1)
+                self.assertEqual(self.calls, [('admit','none'), ('reference','none'), 'analyze-after-release'])
+                attempt, = self.plan.glob('batch-*')
+                receipt = json.loads((attempt/'operations.json').read_text())
+                self.assertEqual(receipt['initial_native_reference'], initial)
+                self.assertNotIn('operator_cue_issued', receipt)
+                self.assertTrue(receipt['owner_token_checked_on_release'])
+                attempt.rename(self.plan / ('refused-' + initial.replace(':', '-')))
+
+    def test_uncertain_release_records_recovery_and_preserves_token(self):
+        for name, answer in [('exception', OSError('release interrupted')),
+                             ('unverified', self.lease.release.return_value | {'owner_and_token_checked': False})]:
+            with self.subTest(name=name):
+                self.start = b'U:3\n' if name == 'exception' else b'D:1\n'
+                self.calls.clear()
+                self.lease.release.side_effect = [answer]
+                self.assertEqual(self.execute(), 1)
+                self.assertEqual(self.calls, SEQUENCE if self.start == b'U:3\n' else [('admit','none'), ('reference','none')])
+                attempt, = self.plan.glob('batch-*')
+                receipt = json.loads((attempt/'operations.json').read_text())
+                self.assertTrue(receipt['recovery_required'])
+                self.assertFalse(receipt['passed'])
+                self.assertNotIn('released', receipt)
+                self.assertNotIn('owner_token_checked_on_release', receipt)
+                self.assertTrue((attempt/'private-token').is_file())
+                self.assertFalse((attempt/'operations.pending').exists())
+                attempt.rename(self.plan / ('unknown-' + name))
 
     def test_absence_failure_and_close_only_recovery(self):
         self.bad_absence = True

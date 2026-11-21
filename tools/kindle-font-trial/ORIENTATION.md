@@ -204,16 +204,21 @@ orientation-reuse candidate. It does not use the installed daily card, put
 the device to sleep or time startup. Agree on the two actions with a present
 operator while off-device; do not ask them to touch a peer's running visit.
 
-1. Freeze a new plan with `assisted_shelf.py` and run the worker-only
-   `run_assisted_shelf.py --work WORK --plan PLAN --preflight`. Use the live
-   runner with `--operator-ready`, the owner and lease utility only after
-   peer handoff and when an immediate visit is possible.
-2. Read the native reference **under the lease**. If it is `D:1`, tell the
-   operator to keep the screen facing them and turn it half a turn in its own
-   plane; if it is already `U:3`, ask them to hold it still. The operator does
-   not open any card. The candidate must not start unless the prelaunch
-   native calibration and the independent sensor readings agree on the
-   opposite portrait. An unmet gate is a skipped launch, not a pass.
+1. Freeze a new plan with `assisted_shelf.py`. Preflight both worker commands:
+   `live_pose_reference.py --work WORK --plan PLAN --lease-tool LEASE --preflight`
+   and `run_assisted_shelf.py --work WORK --plan PLAN --preflight`. Use the
+   live commands with `--owner OWNER --lease-tool LEASE --operator-ready` only
+   after peer handoff and when the operator and both stages are ready.
+2. Run `live_pose_reference.py` first. It uploads no candidate. On `TURN_NOW`,
+   the operator holds the screen upright and facing them, turns it a half turn
+   in its own plane and holds still. On `HOLD_STILL`, do not turn. Do not open
+   a card. The 28-second window records the native direction and framebuffer
+   rotation, not an independent sensor trace. Only two consecutive `U:3`
+   readings **and a verified release** qualify for the next stage. Stop on any
+   other result; do not infer that the operator failed to turn. Only then run
+   `run_assisted_shelf.py` under a fresh lease. If its own reference is no
+   longer `U:3`, it releases without uploading. After upload, the prelaunch
+   native calibration and ten independent sensor samples must still agree.
 3. When the complete shelf is visible, the operator waits about five seconds,
    taps the **rightmost bottom tab with the person icon** exactly once and
    leaves the resulting page visible. It is the profile tab, internally

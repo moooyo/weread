@@ -61,6 +61,30 @@ the next attempt, use the short standalone native probe to confirm the target
 portrait **before uploading** another candidate; keep the same-launch
 prelaunch gate as well.
 
+### Native-only follow-up
+
+- **15:40:32–15:40:38**, standalone stock probe `f9fdca5180b8ede2`:
+  both native calibrations were `D:1`; all ten independent evdev reads were
+  `16`. Protected state was unchanged; close, independent absence and exact
+  release passed. The operator reported that the stock Library text had
+  turned upright. That observation does not identify a numeric rotation or
+  establish when the physical movement occurred relative to this short probe.
+- **15:46:43–15:47:11**, live native reference: the first `D:1` triggered a
+  single turn cue. All **18/18** completed reads were `D:1`; none were `U:3`.
+  This window read the window manager's normalized direction and the
+  framebuffer's scan rotation, **not** the evdev axis. Its UTC stamps are
+  receipt times on the worker, not sample times on the Kindle. Do not combine
+  the two windows to claim a sensor reading during the turn. The read-only
+  lease was released with owner/token verified. There was **no candidate upload
+  or app launch** and no shelf or touch result. Do not repeat the same cue to
+  diagnose this.
+
+Worker receipts: `weread-physical-pose-20261121.Qb79xqcC/runs/probe-foiydu15/operations.json`
+and `weread-assisted-shelf-20261121.BcM2UfxL/live-reference-tnuztiw7/report.json`,
+both under `/root` on `test-env`. A useful next diagnostic would sample the
+sensor and native display readings within the **same** turn; neither an
+orientation lock nor a failed sensor has been established by these visits.
+
 ## Remaining gates
 
 The [software qualification](pose-qualification.md) does not replace a real

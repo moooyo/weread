@@ -81,8 +81,11 @@ restored and released at 13:28:38; no daily installation was changed.
 The [operator-assisted shelf visit](tools/kindle-font-trial/ORIENTATION.md#operator-assisted-opposite-portrait-and-shelf-tap)
 was attempted on the Scribe: the physical prelaunch reference remained `D:1`
 and the collector did not open the candidate. The device was released at
-15:36:49. Neither opposite-portrait startup nor a physical tap was observed;
-see the [assisted attempt](docs/review/startup-orientation-20261121/physical-pose-visit.md#assisted-opposite-portrait-attempt).
+15:36:49. A later read-only window returned `D:1` on all 18 native reads and
+released at 15:47:11 without uploading anything. The earlier ten sensor reads
+were from a separate lease, not the live turn window. Neither opposite-portrait
+startup nor a physical tap was observed; see the
+[follow-up](docs/review/startup-orientation-20261121/physical-pose-visit.md#native-only-follow-up).
 See the linked experiment for build results and remaining gates. The [power-observer
 investigation](docs/review/startup-orientation-20261121/power-wait.md) keeps
 the two-second wait unchanged. Neither changes the measured font result.
