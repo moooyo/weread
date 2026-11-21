@@ -88,7 +88,7 @@ The [native sensor and display trace](../../../tools/kindle-font-trial/ORIENTATI
 is prepared on the worker for a future motion window. It reads the dedicated
 sensor and scan rotation on both sides of the raw stock orientation query,
 using the Kindle clock, without starting WeRead. Its worker preflight and
-the 133-test Linux collector suite passed; the ARM helper was also exercised
+the 134-test Linux collector suite passed; the ARM helper was also exercised
 under QEMU with four valid rotations and eleven rejection cases. It has
 **not** been run on the physical Kindle, and cannot reconstruct the previous
 turn or change the default setting.
