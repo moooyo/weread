@@ -21,7 +21,7 @@ operator gesture, click, recording, library reset or change of grip is part
 of this test. Existing device caches are not reset; this is a warm-device
 comparison, not a cold-boot test.
 
-## Before device access
+## Original file-exchange series
 
 `test-env:/root/weread-ordinary-isolated-pair-20261122.onNveKIX/pair.json`
 records the same-source ARM builds. A is 95,242,368 bytes and B is
@@ -111,6 +111,53 @@ design, such as a temporary mount of *only* WeRead's own launcher, needs a
 separate decision and rehearsal. No such mount was attempted. An explicitly
 labeled temporary card would measure that entry, not the ordinary stock card.
 
+## Approved retry: a single-file bind
+
+The operator subsequently approved a disposable-file bind probe and, only
+if that passes, a temporary mount at `/mnt/us/weread/launch.sh`. The
+original launcher stays in place beneath the mount. The card, shared MIME
+handler, production executable and private shelf are not replacement
+targets. Unmounting must uncover the same original file, not a copy. This
+is a new series; neither failed exchange warmup counts toward it.
+
+The probe checks visibility using disposable files only. Even a successful
+probe cannot show that a future card activation went through the selector.
+Each warmup must establish that separately through the actual stock card,
+the visit's selector and the same GUI's submission. A helper test or a
+returned probe does not contribute a performance sample.
+
+The handback assumes the exclusive device lease is respected. On a kernel
+that supplies a nonreusable mount ID the selector checks it as well. On an
+older kernel, a privileged process that deliberately unmounts the test and
+rebinds its exact private source to the same target can, if the ordinary ID
+is reused, produce an indistinguishable mount. The test does not claim to
+defend against such a concurrent administrator. Observable foreign mounts
+are never forcibly or lazily detached.
+
+Before the device probe, `test-env` exercised actual Linux single-file
+mounts in isolated namespaces, including independent visibility, normal
+unmount, an interrupted caller and refusal to remove a foreign layer.
+The selector passed 9 native and 9 ARM/QEMU cases. The scratch wrapper
+passed 4 Linux integration cases; the complete stock transaction fixture
+later passed 21 cases under Ubuntu shell and 21 under BusyBox. These are
+worker recovery and integration results, not physical card timings.
+
+**Physical result: stop before mounting.** At **04:24:34–04:24:37 on
+November 22 (Asia/Shanghai)**, the Scribe accepted admission and the two
+disposable marker files. The `prepare` step returned `bind_mount_table`
+**before calling `mount`**. The independent session had no bound file to
+witness. The probe verified the marker identities and contents, removed
+its scratch files, confirmed absence independently and released the exact
+owner's lease. See the [public receipt](scratch-bind-probe.json).
+
+This is a failure to validate the device's mount table, not a failed mount
+syscall or proof that this Kindle does not support file binds. The receipt
+does not identify the exact field or table condition that was rejected.
+The production launcher was not accessed, the stock card was not pressed,
+and no A/B warmup or formal pair began. No speedup or regression can be
+reported for card release to frame submission. Do not rerun the same
+probe, relax the mount guard, or substitute the earlier indexed results.
+
 ## Acceptance and stopping rules
 
 - Start: the automatic button release on the uniquely recognized normal
@@ -137,6 +184,9 @@ labeled temporary card would measure that entry, not the ordinary stock card.
   click, substitute a previous result or replace a missing pair. An
   interrupted close is recovered without starting the app again. A complete
   six-pair comparison requires the full fixed series.
+- Count which position within each pair finished sooner, independently of
+  the A/B counts. If the first or second visit consistently wins, describe
+  that order effect; do not attribute it to orientation reuse.
 
 The [earlier stock-card observation](../library-startup-latency-20261119/daily-render-20261121.md)
 was an upper bound from framebuffer memory. The [indexed comparison](../startup-orientation-20261121/physical-balanced.md)

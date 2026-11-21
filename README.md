@@ -72,6 +72,10 @@ after a screen-saver turn. The standard Kindle package enables reuse when
 the live pose matches the launch calibration. A [separate event-loop candidate](docs/review/startup-orientation-20261121/event-loop-reconcile.md)
 also handles a confirmed opposite grip; it is not in the standard package.
 Neither path shortens the launcher's two-second wait.
+The [ordinary-card A/B](docs/review/stock-library-ab-20261122/README.md)
+has **zero measured pairs**: the November 22 disposable-file probe stopped
+before mounting or pressing the card. The indexed saving is not a result
+for the ordinary card.
 
 A [separate launcher change](docs/review/startup-launcher-window-20261121/README.md)
 removes the startup window-tree scan for the retired Quick and Wi-Fi controls.

@@ -19,7 +19,7 @@ import tempfile
 import time
 
 from run_daily_render import LABEL, SHARED, Refused, now, public_reason
-from stock_ab_transaction import METADATA, WireRefusal, checkpoint, drive, fresh_journal, initial, valid_journal
+from stock_ab_transaction import METADATA, WireRefusal, bind_syscall_refusal, checkpoint, drive, fresh_journal, initial, valid_journal
 
 
 TIMES = dict(install=240, prepare=120, tap=100, claim=40, stop=100, restore=125, close=60)
@@ -65,6 +65,9 @@ def transport_failure(mode, code, stderr):
     seen = HEADER_RECEIVED in raw.splitlines() if mode == 'install' else None
     reason = public_reason(raw)
     if reason == 'unconfirmed':
+        refusals = [line[8:].decode('ascii', 'replace') for line in raw.splitlines() if line.startswith(b'refused ')]
+        if len(refusals) == 1 and bind_syscall_refusal(refusals[0]):
+            return WireRefusal(refusals[0],code,seen)
         reason = ('transport_timeout' if code is None else 'ssh_transport_exit' if code == 255 else
                   'transport_signaled' if code < 0 else 'unconfirmed_after_header' if seen else
                   'install_header_unconfirmed' if mode == 'install' else 'unconfirmed')

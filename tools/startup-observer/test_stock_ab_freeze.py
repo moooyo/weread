@@ -2,6 +2,8 @@ import io
 import json
 from pathlib import Path
 import sqlite3
+import struct
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -16,7 +18,8 @@ class BatchFreezeTests(unittest.TestCase):
     def setUp(self):
         directory = tempfile.TemporaryDirectory(); self.addCleanup(directory.cleanup)
         self.work = Path(directory.name).resolve(); self.root = self.work/freeze.BATCH
-        self.arms = {lane:{'tile/models/eng.traineddata':b'public language','arm/app/weread':lane.encode()} for lane in 'AB'}
+        self.arms = {lane:{'tile/models/eng.traineddata':b'public language','arm/app/weread':lane.encode(),
+                           'selector-bind':b'bind-only'} for lane in 'AB'}
         pair = {'source_commit':'1'*40, 'lanes':{'baseline':{},'candidate':{}}}
         self.materials = self.enterContext(patch.object(freeze,'materials',return_value=(pair,self.arms,{'library.sqlite':23})))
         def shell(config):
@@ -26,6 +29,8 @@ class BatchFreezeTests(unittest.TestCase):
     def test_two_archives_fourteen_labels_and_six_fixed_balanced_pairs(self):
         result = freeze.freeze(self.work)
         self.assertEqual(result,freeze.verify_batch(self.work))
+        self.assertEqual(result['selector_strategy'], 'single-file-bind-v1')
+        self.assertEqual(freeze.configuration(result, result['schedule'][0])['selector_strategy'], result['selector_strategy'])
         self.assertEqual(''.join(slot['lane'] for slot in result['schedule']), 'ABABBAABBAABBA')
         self.assertEqual([slot['pair'] for slot in result['schedule']], [0,0,1,1,2,2,3,3,4,4,5,5,6,6])
         self.assertEqual(len({slot['label'] for slot in result['schedule']}),14)
@@ -53,6 +58,33 @@ class BatchFreezeTests(unittest.TestCase):
         batch = freeze.freeze(self.work); first = self.root/batch['schedule'][0]['visit']
         self.arms['A']['arm/app/weread'] = b'B'
         with self.assertRaisesRegex(ValueError,'Archive bytes differ'): freeze.verify_visit(self.work,first)
+
+    def test_old_series_metadata_does_not_authorize_the_new_selector(self):
+        batch = freeze.freeze(self.work)
+        batch.pop('selector_strategy')
+        (self.root/'batch.json').write_text(json.dumps(batch))
+        with self.assertRaisesRegex(ValueError,'frozen stock A/B schedule'): freeze.verify_batch(self.work)
+
+    def test_helper_is_a_static_arm_binary_and_reports_the_bind_only_policy(self):
+        inputs = self.work/'inputs'; inputs.mkdir()
+        path = inputs/'selector-bind'
+        image = bytearray(84); image[:7] = b'\x7fELF\x01\x01\x01'
+        struct.pack_into('<HH',image,16,2,40); struct.pack_into('<I',image,28,52); struct.pack_into('<I',image,36,0x05000400)
+        struct.pack_into('<HH',image,42,32,1); struct.pack_into('<I',image,52,1)
+        path.write_bytes(image); path.chmod(0o755)
+        with patch.object(freeze.subprocess,'run') as run:
+            run.return_value = subprocess.CompletedProcess([],0,b'selector-bind-v1\n',b'')
+            self.assertEqual(freeze.bind_helper(self.work),path)
+            self.assertEqual(run.call_args.args[0][-2:], ['/work/inputs/selector-bind','--policy'])
+            for code, stdout, stderr in [(0,b'selector-exchange-v1\n',b''),(0,b'selector-bind-v1\n',b'warning'),(1,b'',b'')]:
+                run.return_value = subprocess.CompletedProcess([],code,stdout,stderr)
+                with self.assertRaisesRegex(ValueError,'bind helper policy'): freeze.bind_helper(self.work)
+            run.reset_mock()
+            (inputs/'selector-exchange').write_bytes(b'old')
+            with self.assertRaisesRegex(ValueError,'separate input directory'): freeze.bind_helper(self.work)
+            (inputs/'selector-exchange').unlink(); path.write_bytes(b'#!/bin/sh\n')
+            with self.assertRaisesRegex(ValueError,'ELF32'): freeze.bind_helper(self.work)
+            run.assert_not_called()
 
     def test_seed_normalizes_public_directory_and_preserves_long_paths_and_bytes(self):
         bindings={'targets':[{'book_id':f'book-{index}','cover_url':f'https://example.invalid/{index}',

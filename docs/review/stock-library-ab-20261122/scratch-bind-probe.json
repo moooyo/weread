@@ -1,0 +1,24 @@
+{
+  "device": "Kindle Scribe 2022",
+  "firmware": "5.19.5",
+  "date": "2026-11-22",
+  "timezone": "Asia/Shanghai",
+  "scope": "Two disposable markers; no production launcher, card, application or private library access.",
+  "public_label": "3a578c34b99e748b",
+  "acquired_at_utc": "2026-11-21T20:24:34.465930+00:00",
+  "released_at_utc": "2026-11-21T20:24:37.267950+00:00",
+  "observation": {
+    "result": "not_qualified",
+    "stage": "prepare",
+    "original_identity_and_bytes_restored": true,
+    "on_demand_handler_observed": false,
+    "reason": "bind_mount_table",
+    "mount_call_not_reached": true
+  },
+  "operations": {"admit": 0, "probe": 0, "witness": 0, "close": 0, "absent": 0},
+  "scratch_gate_passed": false,
+  "owner_and_token_checked": true,
+  "lease_absent_at_release": true,
+  "formal_launches": 0,
+  "formal_pairs": 0
+}

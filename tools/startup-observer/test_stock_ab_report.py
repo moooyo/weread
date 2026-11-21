@@ -78,6 +78,7 @@ class StockAbReportTests(unittest.TestCase):
         self.assertEqual(report['status'], 'complete')
         self.assertEqual([pair['order'] for pair in report['pairs']], ['AB','BA','AB','BA','AB','BA'])
         self.assertEqual(report['pair_counts'], dict(B_faster=6, B_slower=0, overlap=0, not_timed=0))
+        self.assertEqual(report['order_counts'], dict(first_faster=3, second_faster=3, overlap=0, not_timed=0))
         for pair, row in enumerate(report['pairs'], 1):
             self.assertEqual(row['a_minus_b_ns'], [101-12*pair-7, 101-12*pair+3])
         self.assertEqual(report['median_ns']['A_minus_B'], [52,62])
@@ -92,6 +93,24 @@ class StockAbReportTests(unittest.TestCase):
                                  ([0, 1], 'overlap'), ([1, 9], 'B_faster')):
             self.assertEqual(classify(interval), result)
         self.assertEqual(lower_upper_median([[10,11], [-4,12], [-5,-5], [0,0], [-1,10], [-10,20]]), [-2.5,10.5])
+
+    def test_first_arm_advantage_is_not_mistaken_for_a_candidate_win(self):
+        batch, visits = examples()
+        for slot, visit in zip(batch['schedule'][2:], visits[2:]):
+            after = visit['synthetic_release_ns'][1]
+            delay = 1_000_000_000 if slot['slot'] % 2 == 0 else 1_120_000_000
+            submission = after + delay
+            witness = next(row['receipt'] for row in visit['operations'] if row['mode'] == 'library_submit')
+            witness.update(marker=f"WEREAD_LIBRARY_SUBMITTED {slot['label']} {submission} entries\n", observed_ns=submission+10)
+            visit['qualified'] = qualify(visit)
+        result = summarize(batch, visits)
+        self.assertEqual(result['pair_counts'], dict(B_faster=3, B_slower=3, overlap=0, not_timed=0))
+        self.assertEqual(result['order_counts'], dict(first_faster=6, second_faster=0, overlap=0, not_timed=0))
+        self.assertEqual(result['paired_median_result'], 'overlap')
+        visits[3] = None
+        partial = summarize(batch, visits)
+        self.assertEqual(partial['order_counts'], dict(first_faster=5, second_faster=0, overlap=0, not_timed=1))
+        self.assertIsNone(partial['median_ns'])
 
     def test_cannot_subtract_arm_medians_instead_of_paired_differences(self):
         batch, visits = examples()

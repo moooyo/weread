@@ -46,6 +46,10 @@ def contents(items, *, inner=False):
 
 class StockDeviceFixture(unittest.TestCase):
     def setUp(self):
+        if (os.geteuid() != 0 or not Path('/').samefile('/proc/1/root') or
+                not Path('/proc/self/ns/mnt').samefile('/proc/1/ns/mnt') or Path('/proc/1/comm').read_text().strip() in ('init','systemd') or
+                subprocess.check_output(['findmnt','-n','-o','FSTYPE,PROPAGATION','-T','/tmp'],text=True).split() != ['tmpfs','private']):
+            self.skipTest('Requires root in a disposable PID/mount namespace with a private tmpfs /tmp')
         self.device_shell = ['busybox','sh'] if os.getenv('WEREAD_TEST_BUSYBOX') else ['sh']
         self.base = daily.DeviceTests(methodName='runTest')
         self.base.setUp()
@@ -53,8 +57,11 @@ class StockDeviceFixture(unittest.TestCase):
         for key in ('root', 'volume', 'home', 'daily', 'stage', 'proc', 'lock', 'catalog', 'program'):
             setattr(self, key, getattr(self.base, key))
         self.live = self.home / 'launch.sh'
+        subprocess.run(['mount','--bind',self.volume,self.volume],check=True)
+        self.addCleanup(self.clear_fixture_mounts)
         self.fixed = self.root / 'var/tmp/weread-library-frame'
         self.fixed.parent.mkdir(mode=0o700)
+        self.authority = self.fixed.parent / 'weread-stock-selector-bind'
         self.selector_slot = self.stage / 'selector-original-slot'
         self.live.write_text('#!/bin/sh\nset -eu\n[ "$#" = 1 ] && [ "$1" = --library ] && [ "${WEREAD_API_KEY-unset}:${WEREAD_STARTUP_TIMING-unset}" = unset:unset ] || exit 1\nprintf "%s\\n" "$WEREAD_HOME" >"$WEREAD_HOME/../fixture-staged-entry"\n')
         self.live.chmod(0o755)
@@ -75,9 +82,9 @@ class StockDeviceFixture(unittest.TestCase):
             path = self.root / match[1].lstrip('/')
             path.parent.mkdir(exist_ok=True, parents=True)
             with path.open('wb') as output: output.truncate(int(match[2]))
-        exchange = self.root / 'selector-exchange'
-        subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-O2','-DEXCHANGE_TEST_USERSTORE='+json.dumps(str(self.volume)),
-                        daily.HERE/'launcher_exchange.c','-o',exchange], check=True)
+        helper = self.root / 'selector-bind'
+        subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-O2','-DBIND_TEST_USERSTORE='+json.dumps(str(self.volume)),
+                        '-DBIND_TEST_TMP='+json.dumps(str(self.fixed.parent)),daily.HERE/'launcher_file_bind.c','-o',helper], check=True)
         observer = self.root / 'render-observer'
         rendered = (daily.HERE / 'render-observer.c').read_text().replace('/var/tmp/', str(self.fixed.parent) + '/')
         native = self.root / 'observer.c'; native.write_text(rendered)
@@ -89,10 +96,15 @@ class StockDeviceFixture(unittest.TestCase):
         self.items = {name:body for name, body, _ in self.base.entries()} | {
             'arm/app/weread':b'isolated measurement application', 'arm/launch.sh':self.live.read_bytes(),
             'document-reference':self.daily.read_bytes(), 'launch-reference':self.live.read_bytes(),
-            'selector-exchange':exchange.read_bytes(), 'render-observer':observer.read_bytes(),
+            'selector-bind':helper.read_bytes(), 'render-observer':observer.read_bytes(),
             'arm/app/weread-frame-guard':(self.home/'app/weread-frame-guard').read_bytes(),
             'arm/app/weread-native-query':(self.home/'app/weread-native-query').read_bytes()}
         self.rebuild()
+
+    def clear_fixture_mounts(self):
+        for path in (self.live,self.volume):
+            while any(row.split()[4] == str(path) for row in Path('/proc/self/mountinfo').read_text().splitlines()):
+                subprocess.run(['umount',path],check=True)
 
     def rebuild(self, *, tile_script=None, entries=None, seed_entries=None, lane='A'):
         if tile_script is not None:
@@ -102,15 +114,18 @@ class StockDeviceFixture(unittest.TestCase):
         rows = [(name,body,0o644 if name in ('arm-seed.tar.gz','launch-reference','document-reference') or name.startswith('tile/models/') else 0o755)
                 for name,body in self.items.items()]
         self.payload = contents(entries if entries is not None else rows)
-        config = dict(label=daily.LABEL, lane=lane, members={name:len(body) for name,body in self.items.items()},
+        config = dict(label=daily.LABEL, lane=lane, selector_strategy='single-file-bind-v1', members={name:len(body) for name,body in self.items.items()},
                       seed_members={name:len(body) for name,body in self.seed.items()}, archive_bytes=len(self.payload))
         self.config = config
         script = render_device(config)
-        overrides = r'/mnt/us|/sys/class/input|/proc(?!/self)(?=[/\n])|/tmp(?=\))|/var/(?:local|tmp)|/etc/prettyversion\.txt'
+        overrides = r'/mnt/us|/sys/class/input|/proc(?=\n|/usid\b)|/tmp(?=\))|/var/(?:local|tmp)|/etc/prettyversion\.txt'
         script = re.sub(overrides, lambda match:str(self.root) + match[0],script)
         mocks = daily.MOCKS.replace('@ROOT@', shlex.quote(str(self.root))).replace('@ZEROS@','0 '*17)
+        mocks = mocks.replace('for stub in @ENTRY@ ', 'for stub in "$(cat "$fixture/mock-entry-pid")" ')
         for name in ('ENTRY','MASTER','RUNNER','GUI','MANAGER'):
             mocks = mocks.replace('@'+name+'@',str(getattr(daily,name)))
+        script = script.replace('\nretired() {', '\nfixture_retired() {')
+        mocks += '\nretired() ( case "$1" in "$(cat "$fixture/mock-entry-pid" 2>/dev/null || :)"|' + '|'.join(map(str,(daily.MASTER,daily.RUNNER,daily.GUI))) + ') ;; *) proc=/proc;; esac; fixture_retired "$@"; )\n'
         self.program.write_text(script.replace('lipc-get-prop','fixture_lipc').replace(daily.MAIN,mocks+'\n'+MOCK_SQL+'\n'+daily.MAIN))
 
     def run_mode(self, mode, data=b''):
@@ -137,18 +152,38 @@ class StockDeviceFixture(unittest.TestCase):
             'WEREAD_HOME':str(self.home),'WEREAD_API_KEY':'synthetic','WEREAD_STARTUP_TIMING':'synthetic'})
 
     def chain(self, **kwargs):
-        original = self.base.home,self.base.app
+        original = self.base.home,self.base.app,self.base.process
+        owner,entry,birth=(self.stage/'selector-callback').read_text().strip().split(':')
+        self.assertEqual(owner,daily.LABEL); entry=int(entry); offset=int(birth)-110
+        (self.root/'mock-entry-pid').write_text(f'{entry}\n')
+        def process(pid,parent,started,*args,**options):
+            original[2](entry if pid==daily.ENTRY else pid,entry if parent==daily.ENTRY else parent,started+offset,*args,**options)
         try:
-            self.base.home,self.base.app = self.stage/'arm',self.stage/'arm/app/weread'
+            self.base.home,self.base.app,self.base.process = self.stage/'arm',self.stage/'arm/app/weread',process
             self.base.chain(**kwargs)
+            if kwargs.get('generation',True):
+                (self.lock/'application-birth').write_text(f'{125+offset}\n')
+                (self.lock/'application-owned').write_text(f'1:{daily.NONCE}:{daily.GUI}:{125+offset}\n')
         finally:
-            self.base.home,self.base.app = original
+            self.base.home,self.base.app,self.base.process = original
 
     def handback(self, previous=None):
         self.call('stop','stopped'); self.call('restore','restored'); self.call('close','closed')
         observed = self.call('absent','absent'); self.call('audit','audited',data=self.reference)
         if previous is not None: self.assertEqual(observed,previous|{'state':'absent'})
-        self.assertFalse(self.stage.exists()); self.assertFalse(self.fixed.exists())
+        self.assertFalse(self.stage.exists()); self.assertFalse(self.fixed.exists()); self.assertFalse(self.authority.exists())
+
+    def tag(self, name):
+        (self.stage/name).write_text(daily.LABEL+'\n')
+
+    def prepare_authority(self):
+        self.tag('bind-intent'); self.authority.mkdir(mode=0o700); self.authority.chmod(0o700)
+        owner=self.authority/'owner'; owner.write_text(daily.LABEL+'\n'); owner.chmod(0o600)
+        for record,path in [('bind-directory',self.authority),('bind-owner',owner)]:
+            identity=path.stat(); (self.stage/record).write_text(f'{identity.st_dev}:{identity.st_ino}\n')
+
+    def helper(self, mode):
+        return subprocess.run([self.stage/'selector-bind',mode,'stock',daily.LABEL],check=True,capture_output=True).stdout
 
     def open_channel(self):
         child = subprocess.Popen([*self.device_shell,self.program,'request',daily.LABEL],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
@@ -162,14 +197,22 @@ class StockDeviceFixture(unittest.TestCase):
 
 class DeviceTests(StockDeviceFixture):
     def test_complete_original_entry_and_same_session_request(self):
-        previous = self.ready()
+        with self.live.open('rb') as underlying:
+            previous = self.ready()
+            self.assertEqual(os.fstat(underlying.fileno()).st_ino,int(previous['launch'].split(':')[1]))
+            self.assertEqual(underlying.read(),self.items['launch-reference'])
+        for proc_view in ('self','1'):
+            table=Path('/proc',proc_view,'mountinfo').read_text().splitlines()
+            self.assertEqual(sum(row.split()[4]==str(self.live) for row in table),1)
+            self.assertTrue(self.selector_slot.samefile(Path('/proc',proc_view,'root')/self.live.relative_to('/')))
         self.assertNotEqual(self.enter().returncode,0)
         self.call('tap',refused='uncertain_or_refused_tap')
         child, report = self.open_channel()
         self.assertEqual(report['state'],'armed'); self.assertFalse((self.stage/'tile-dispatch-intent').exists())
         self.call('stop',refused='unproven_close'); receipt = self.call('tap')
         self.assertNotEqual(self.enter('--offline').returncode,0)
-        self.assertEqual(self.enter().returncode,0); self.assertNotEqual(self.enter().returncode,0)
+        self.assertEqual(self.enter().returncode,0)
+        self.assertEqual((self.stage/'selector-service-view').read_text(),daily.LABEL+'\n')
         self.assertEqual((self.stage/'fixture-staged-entry').read_text(),str(self.stage/'arm')+'\n')
         self.chain(); self.call('claim','claimed'); self.call('witness','witnessed')
         marker = f'WEREAD_LIBRARY_SUBMITTED {daily.LABEL} {time.monotonic_ns()} entries\n'
@@ -179,24 +222,61 @@ class DeviceTests(StockDeviceFixture):
         self.assertEqual((result['marker'],result['tile_receipt']),(marker,receipt))
         self.handback(previous); self.assertEqual(self.base.signals(),[f'-TERM {daily.MASTER}'])
 
-    def test_interrupt_after_atomic_exchange_before_activation_record(self):
+    def test_interrupt_after_bind_before_activation_record(self):
         previous = self.ready(activate=False)
-        (self.stage/'swap-intent').write_text(daily.LABEL+'\n')
-        subprocess.run([self.stage/'selector-exchange','swap',daily.LABEL],check=True,capture_output=True)
+        self.prepare_authority(); self.assertEqual(self.helper('bind'),b'bound\n')
         self.assertFalse((self.stage/'selector-live').exists()); self.handback(previous)
 
-    def test_interrupt_before_exchange_does_not_exchange_original_again(self):
+    def test_interrupt_before_authority_never_binds(self):
         previous = self.ready(activate=False)
-        (self.stage/'swap-intent').write_text(daily.LABEL+'\n')
+        self.tag('bind-intent')
         self.handback(previous)
 
-    def test_lost_restore_ack_and_replaced_foreign_production_are_not_overwritten(self):
+    def test_lost_restore_ack_and_repeated_restore_never_bind(self):
         previous = self.ready(); self.call('stop','stopped')
-        known = self.root/'known-selector'; self.live.rename(known); self.live.write_bytes(known.read_bytes()); self.live.chmod(0o755)
-        self.call('restore',refused='native_restore'); self.assertTrue(self.live.is_file()); self.assertTrue(self.selector_slot.is_file())
-        self.live.unlink(); known.rename(self.live)
-        subprocess.run([self.stage/'selector-exchange','swap',daily.LABEL],check=True,capture_output=True)
+        self.assertEqual(self.helper('restore'),b'bind_restored\n'); self.assertFalse(self.live.samefile(self.selector_slot))
+        self.assertTrue((self.authority/'bind-active').is_file()); self.call('restore','restored')
+        self.assertFalse(self.authority.exists()); self.assertFalse(self.live.samefile(self.selector_slot))
         self.handback(previous)
+
+    def test_foreign_stacked_mount_and_authority_object_are_never_removed(self):
+        previous = self.ready(); self.call('stop','stopped'); foreign=self.root/'foreign-file'; foreign.write_text('retain\n')
+        subprocess.run(['mount','--bind',foreign,self.live],check=True)
+        self.call('restore',refused='stage_owner_or_busy'); self.assertTrue(foreign.samefile(self.live)); self.assertTrue(self.authority.exists())
+        subprocess.run(['umount',self.live],check=True)
+        unknown=self.authority/'unknown'; unknown.symlink_to(foreign)
+        self.call('restore',refused='native_restore'); self.assertTrue(unknown.is_symlink()); self.assertEqual(foreign.read_text(),'retain\n')
+        unknown.unlink(); draft=self.authority/'bind-journal.next'; draft.write_text('bind-v1 stock '+daily.LABEL+' invalid\n'); draft.chmod(0o600)
+        self.call('restore',refused='native_restore'); self.assertTrue(draft.exists()); draft.unlink(); self.handback(previous)
+
+    def test_unchanged_metadata_with_a_foreign_mount_is_not_an_independent_absence(self):
+        self.call('absent','absent'); subprocess.run(['mount','--bind',self.live,self.live],check=True)
+        self.call('absent',refused='absent'); self.call('audit',data=self.reference,refused='production_byte_audit')
+        subprocess.run(['umount',self.live],check=True); self.call('absent','absent')
+
+    def test_missing_or_old_strategy_and_exchange_members_are_refused(self):
+        for strategy in (None,'atomic-exchange'):
+            with self.assertRaises(ValueError): render_device(self.config|{'selector_strategy':strategy})
+        with self.assertRaises(ValueError): render_device(self.config|{'members':self.config['members']|{'selector-exchange':42}})
+
+    def test_another_service_view_declines_then_quarantines_without_sample_or_signal(self):
+        previous = self.ready(); child,_ = self.open_channel(); self.call('tap')
+        result=subprocess.run(['unshare','--mount','--propagation','private',*self.device_shell,self.live,'--library'],capture_output=True,timeout=8)
+        self.assertNotEqual(result.returncode,0); self.assertFalse((self.stage/'selector-service-view').exists())
+        self.assertFalse((self.stage/'selector-entered').exists()); self.assertTrue((self.stage/'selector-declined').is_file())
+        self.call('witness',refused='scene_identity'); self.assertEqual(child.communicate(b'cancel\n',timeout=6),(b'',b''))
+        self.call('stop','stopped'); self.assertTrue((self.stage/'quarantined').is_file()); self.assertFalse(self.base.signals())
+        self.handback(previous)
+
+    def test_lookalike_group_or_missing_service_witness_never_claims_a_gui(self):
+        previous = self.ready(); child,_ = self.open_channel(); self.call('tap'); self.assertEqual(self.enter().returncode,0)
+        self.chain(); callback=self.stage/'selector-callback'; accepted=callback.read_text()
+        for name,value in [('selector-callback',daily.LABEL+':871100:9\n'),('selector-service-view','foreign\n')]:
+            record=self.stage/name; saved=record.read_text(); record.write_text(value)
+            self.call('claim',refused='launch_identity'); self.call('witness',refused='scene_identity')
+            self.assertFalse((self.stage/'group').exists()); self.assertFalse((self.stage/'session').exists()); record.write_text(saved)
+        self.assertEqual(callback.read_text(),accepted); self.call('claim','claimed')
+        self.assertEqual(child.communicate(b'cancel\n',timeout=5),(b'',b'')); self.handback(previous)
 
     def test_malformed_seed_and_linked_archive_stop_before_navigation(self):
         rows = [(name,body,0o644) for name,body in self.seed.items()] + [('account-private',b'no',0o644)]
@@ -239,7 +319,7 @@ class DeviceTests(StockDeviceFixture):
         self.daily.write_bytes(edited); os.utime(self.daily,ns=(stamp.st_atime_ns,stamp.st_mtime_ns))
         self.call('restore',refused='native_restore'); self.assertEqual(self.daily.read_bytes(),edited)
         self.daily.write_bytes(original); os.utime(self.daily,ns=(stamp.st_atime_ns,stamp.st_mtime_ns))
-        previous_file = self.root/'original-document'; self.daily.rename(previous_file); self.daily.write_bytes(original)
+        previous_file = self.volume/'original-document'; self.daily.rename(previous_file); self.daily.write_bytes(original)
         self.daily.chmod(stamp.st_mode & 0o777); os.utime(self.daily,ns=(stamp.st_atime_ns,stamp.st_mtime_ns))
         self.call('restore',refused='native_restore'); self.daily.unlink(); previous_file.rename(self.daily)
         os.chown(self.daily,10,10)

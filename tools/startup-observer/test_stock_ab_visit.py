@@ -214,7 +214,13 @@ if IFS= read -r line; then exit 1; fi; printf '{"result":1}\\n' '''
                 (None,HEADER_RECEIVED+b'\nprivate path\n','transport_timeout',True),
                 (64,b'private path\n','install_header_unconfirmed',False),
                 (9,HEADER_RECEIVED+b'\nprivate path\n','unconfirmed_after_header',True),
-                (1,HEADER_RECEIVED+b'\nprivate path\nrefused install\n','install',True)]:
+                (1,HEADER_RECEIVED+b'\nprivate path\nrefused install\n','install',True),
+                (1,b'refused bind_mount_call_22\n','bind_mount_call_22',False),
+                (1,b'refused bind_unmount_call_16\n','bind_unmount_call_16',False),
+                (1,b'refused bind_mount_call_0\n','install_header_unconfirmed',False),
+                (1,b'refused bind_mount_call_4096\n','install_header_unconfirmed',False),
+                (1,b'refused bind_mount_call_13:/private\n','install_header_unconfirmed',False),
+                (1,b'refused bind_mount_call_16\nrefused bind_mount_call_22\n','install_header_unconfirmed',False)]:
             fixture=Fixture(); previous=fixture.call
             def call(mode):
                 if mode=='install': raise transport_failure(mode,code,raw)
@@ -224,6 +230,7 @@ if IFS= read -r line; then exit 1; fi; printf '{"result":1}\\n' '''
             failed=next(row for row in fixture.report['operations'] if row['mode']=='install')
             self.assertEqual(failed.get('ssh_returncode'),code); self.assertIs(failed['install_header_observed'],observed)
             self.assertEqual(failed['reason'],reason); self.assertNotIn('private',str(fixture.report)); self.assertTrue(fixture.report['released'])
+            self.assertEqual(fixture.report['refused'], 'install:'+reason)
 
     def test_no_install_wire_or_missing_header_sentinel_cannot_activate(self):
         with tempfile.TemporaryDirectory() as work:

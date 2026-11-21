@@ -138,6 +138,7 @@ def summarize(batch, receipts):
 
     pairs = []
     counts = dict(B_faster=0, B_slower=0, overlap=0, not_timed=0)
+    order_counts = dict(first_faster=0, second_faster=0, overlap=0, not_timed=0)
     for pair in range(1, 7):
         group = [sample for sample in samples if sample['pair'] == pair]
         lanes = {sample['lane']:sample for sample in group}
@@ -149,13 +150,18 @@ def summarize(batch, receipts):
             saving = [base[0] - candidate[1], base[1] - candidate[0]]
             row.update(a_ns=base, b_ns=candidate, a_minus_b_ns=saving, result=classify(saving))
         counts[row['result']] += 1
+        position = row['result']
+        if position in ('B_faster', 'B_slower'):
+            faster_arm = 'B' if position == 'B_faster' else 'A'
+            position = 'first_faster' if row['order'][0] == faster_arm else 'second_faster'
+        order_counts[position] += 1
         pairs.append(row)
     complete = all(sample['result'] == 'timed' for sample in samples)
     result = {'purpose': PURPOSE, 'status': 'complete' if complete else 'incomplete', 'clock': CLOCK,
               'measurement_build': 'temporary_measurement_build', 'start': 'synthetic_stock_library_card_release',
               'end': 'library_frame_send_accepted_application_marker', 'optical_completion_measured': False,
               'all_covers_required': False, 'cross_visit_same_boot_verified': False,
-              'samples': samples, 'pairs': pairs, 'pair_counts': counts,
+              'samples': samples, 'pairs': pairs, 'pair_counts': counts, 'order_counts': order_counts,
               'paired_median_result':'not_timed', 'median_ns': None}
     if complete:
         medians = {target:lower_upper_median([row[key] for row in pairs])
@@ -224,10 +230,11 @@ def verified_report(work):
     source = batch.get('source_commit')
     if (not isinstance(source, str) or not re.fullmatch('[0-9a-f]{40}', source) or batch.get('device') != 'Kindle Scribe 2022'
             or batch.get('firmware') != '5.19.5' or batch.get('clock') != CLOCK or batch.get('entry') != 'ordinary_stock_weread_tile'
-            or batch.get('fixture') != 'public_normal_15'):
+            or batch.get('fixture') != 'public_normal_15' or batch.get('selector_strategy') != 'single-file-bind-v1'):
         raise Refused('unverified_stock_ab_source_or_scope')
     result.update(device='Kindle Scribe 2022', firmware='5.19.5', entry='ordinary_stock_weread_tile',
-                  fixture='public_normal_15', frozen_inputs_verified=True, shared_source_base_commit=source,
+                  fixture='public_normal_15', selector_strategy=batch['selector_strategy'],
+                  frozen_inputs_verified=True, shared_source_base_commit=source,
                   shared_application_features=['bundled-font-preflight','kindle','trial-library-frame'],
                   only_candidate_feature='startup-orientation-reuse', reconciliation_enabled=False)
     return result

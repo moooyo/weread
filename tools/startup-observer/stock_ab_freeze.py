@@ -33,7 +33,7 @@ BATCH = 'stock-library-ab'
 PROFILE = {'device-profile': b'scribe\n', 'device-allowlist': b'scribe 5.19.5\n'}
 MATRIX = [(0, 'warmup', arm) for arm in 'AB'] + [(pair, 'measured', arm) for pair in range(1,7) for arm in ('AB' if pair % 2 else 'BA')]
 SCOPE = dict(purpose=PURPOSE, device='Kindle Scribe 2022', firmware='5.19.5', clock='CLOCK_MONOTONIC',
-             entry='ordinary_stock_weread_tile', fixture='public_normal_15')
+             entry='ordinary_stock_weread_tile', fixture='public_normal_15', selector_strategy='single-file-bind-v1')
 CODE = ('weread-frame-guard', 'weread-native-query')
 
 
@@ -197,6 +197,18 @@ def cargo_lane(work, lane, pair):
     return program
 
 
+def bind_helper(work):
+    require(not os.path.lexists(work/'inputs/selector-exchange'), 'Use a separate input directory for the bind series')
+    path = local(work,work/'inputs/selector-bind')
+    require(os.access(path,os.X_OK) and 0 < length(path) <= 1024**2, 'Unbounded or non-executable bind helper')
+    inspect = runpy.run_path(str(ROOT/'docs/review/library-startup-latency-20261119/rebuild-arm.py'))['inspect_elf']
+    inspect(path)
+    result = subprocess.run(['/opt/kindle-toolchain/ubuntu-run',str(work),'qemu-arm','-cpu','cortex-a8',
+                             '/work/inputs/selector-bind','--policy'], capture_output=True, timeout=15)
+    require(result.returncode == 0 and not result.stderr and result.stdout == b'selector-bind-v1\n', 'Unexpected bind helper policy')
+    return path
+
+
 def materials(work):
     pair = record(work, 'pair.json')
     require(pair.get('status') == 'ready_for_offline_freeze' and pair.get('diagnostic_feature') == WITNESS and
@@ -210,8 +222,8 @@ def materials(work):
             and fixture['public-default-scale']['local_account_file'] is False and fixture['empty-default-scale']['observed_route'] == 'login',
             'Missing ordinary-mode public Library and empty Login control evidence')
     data = seed(work); packed = io.BytesIO(); write_bundle(packed,data,inner=True)
-    common = release_references() | {'arm-seed.tar.gz':packed.getvalue()}
-    for name in (*CODE,'selector-exchange','render-observer'):
+    common = release_references() | {'arm-seed.tar.gz':packed.getvalue(), 'selector-bind':bind_helper(work)}
+    for name in (*CODE,'render-observer'):
         path = local(work,work/'inputs'/name)
         require(os.access(path,os.X_OK) and 0 < length(path) <= 1024**2, 'Unqualified executable helper')
         common['arm/app/'+name if name in CODE else name] = path
@@ -224,9 +236,6 @@ def materials(work):
     for name in CODE:
         require(helpers[name]['byte_compared_to_original'] is True and helpers[name]['size'] == length(common['arm/app/'+name]),
                 'Unexpected production helper')
-    policy = subprocess.run(['/opt/kindle-toolchain/ubuntu-run',str(work),'qemu-arm','-cpu','cortex-a8',
-                             '/work/inputs/selector-exchange','--policy'], capture_output=True, timeout=15)
-    require(policy.returncode == 0 and not policy.stderr and policy.stdout == b'selector-exchange-v1\n', 'Unexpected selector exchange policy')
     tile_path = local(work,work/'inputs/stock-tile-ocr.tgz')
     require(same(tile_path,local(TILE_WORK,TILE_WORK/'native-tile-qualified.tar.gz')), 'Not the qualified WeRead artwork selector kit')
     scan(tile_path, kit=True, accept=lambda name, value: common.update({name:value}))
@@ -244,7 +253,7 @@ def schedule(labels):
 def configuration(batch, slot):
     bundle = batch['bundles'][slot['lane']]
     return dict(label=slot['label'], lane=slot['lane'], members=bundle['members'], archive_bytes=bundle['archive_bytes'],
-                seed_members=batch['seed_members'])
+                seed_members=batch['seed_members'], selector_strategy=batch['selector_strategy'])
 
 
 def visit_record(batch, slot):

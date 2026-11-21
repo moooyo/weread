@@ -17,7 +17,7 @@ from pose_turn_cue import cue_program, streaming_probe
 from run import LEASE, UTIL, stamp, transport
 
 
-def transact(call, release, report, save, recovering=False, *, display_trace=False, decode=None):
+def transact(call, release, report, save, recovering=False, *, display_trace=False, decode=None, witness=False, qualifies=None):
     touched = recovering
     raw = None
     try:
@@ -25,6 +25,8 @@ def transact(call, release, report, save, recovering=False, *, display_trace=Fal
             call('admit', b'admitted')
             touched = True
             raw = call('probe', None)
+            if witness:
+                raw += call('witness', None)
     finally:
         try:
             if touched:
@@ -41,16 +43,23 @@ def transact(call, release, report, save, recovering=False, *, display_trace=Fal
     if raw is not None:
         report['observation'] = (decode(raw) if decode else
                                  parse_observation(raw.decode('ascii'), expected_label=report['label'], display_trace=display_trace))
-    report['passed'] = True
+    if qualifies is not None:
+        report['transaction_completed'] = True
+    report['passed'] = raw is None or qualifies is None or qualifies(report['observation'])
     save()
 
 
-def main(args, *, volume=False):
+def main(args, *, volume=False, bind=False):
     os.umask(0o077)
     if not Path('/opt/kindle-toolchain/ubuntu-run').is_file():
         raise ValueError('Use the designated worker host')
-    if volume:
-        from volume_diagnostic import observation, program
+    if volume or bind:
+        if volume and bind:
+            raise ValueError('Expected one scratch diagnostic')
+        if bind:
+            from scratch_bind import observation, program
+        else:
+            from volume_diagnostic import observation, program
         if args.display_trace or args.turn_cue or args.operator_ready:
             raise ValueError('The volume diagnostic never requests operator action')
     if args.recover and args.display_trace:
@@ -61,6 +70,8 @@ def main(args, *, volume=False):
     runs = args.runs.resolve(strict=True)
     if args.recover:
         mode, scope = 'recover', 'stage_cleanup_only'
+    elif bind:
+        mode, scope = 'scratch_bind', 'scratch_only_bind_and_current_views'
     elif volume:
         mode, scope = 'scratch_filesystem', 'scratch_filesystem_capabilities_only'
     elif args.display_trace:
@@ -72,9 +83,13 @@ def main(args, *, volume=False):
         if attempt.parent != runs or not (attempt / 'private-token').is_file():
             raise ValueError('No matching interrupted pose probe')
         volume_record = attempt / 'volume-diagnostic'
-        if ((volume_record.exists() != volume) or (volume and (volume_record.is_symlink() or
-                volume_record.read_text() != 'selector-diagnostic-v1\n'))):
+        if (volume_record.is_symlink() or volume_record.exists() != volume or
+                (volume and (not volume_record.is_file() or volume_record.read_text() != 'selector-diagnostic-v1\n'))):
             raise ValueError('The original probe type must match for cleanup')
+        bind_record = attempt / 'bind-diagnostic'
+        if (bind_record.is_symlink() or bind_record.exists() != bind or
+                (bind and (not bind_record.is_file() or bind_record.read_text() != 'selector-bind-v1\n'))):
+            raise ValueError('The original bind probe type must match for cleanup')
         label = (attempt / 'label').read_text().strip()
         if not re.fullmatch('[a-f0-9]{16}', label):
             raise ValueError('Invalid original probe label')
@@ -87,10 +102,10 @@ def main(args, *, volume=False):
         if helper[:7] != b'\x7fELF\x01\x01\x01' or int.from_bytes(helper[18:20], 'little') != 40:
             raise ValueError('Expected an ARM32 little-endian ELF')
         label = secrets.token_hex(8)
-        body = program(len(helper)) if volume else render_device(len(helper), display_trace=args.display_trace)
+        body = program(len(helper)) if (volume or bind) else render_device(len(helper), display_trace=args.display_trace)
         if turn_cue:
             body = cue_program(body)
-    for operation in ('admit', 'probe', 'close', 'absent'):
+    for operation in ('admit', 'probe', 'close', 'absent') + (('witness',) if bind else ()):
         transport(body, operation, label, 'none')
     trust = Path('/root/.config/kindle-physical')
     ssh = UTIL['ssh_command'](trust / 'ssh_config', trust / 'known_hosts', 'kindle-physical')
@@ -102,14 +117,17 @@ def main(args, *, volume=False):
     if not secret:
         raise ValueError('Missing private authentication; no acquisition attempted')
     if not args.recover:
-        attempt = Path(tempfile.mkdtemp(prefix='fs-probe-' if volume else 'probe-', dir=runs))
+        attempt = Path(tempfile.mkdtemp(prefix='bind-probe-' if bind else ('fs-probe-' if volume else 'probe-'), dir=runs))
         (attempt / 'label').write_text(label + '\n')
         (attempt / 'device.sh').write_text(body)
         if volume:
             (attempt / 'volume-diagnostic').write_text('selector-diagnostic-v1\n')
+        if bind:
+            (attempt / 'bind-diagnostic').write_text('selector-bind-v1\n')
     report = {'label': label, 'started': stamp(), 'operations': [], 'passed': False, 'mode': mode, 'scope': scope}
     output = attempt / ('recovery.json' if args.recover else 'operations.json')
-    request = lease.LeaseRequest(LEASE, attempt / 'private-token', args.owner, ('weread-fs-diag-' if volume else 'weread-native-pose-') + label)
+    prefix = 'weread-bind-diag-' if bind else ('weread-fs-diag-' if volume else 'weread-native-pose-')
+    request = lease.LeaseRequest(LEASE, attempt / 'private-token', args.owner, prefix + label)
 
     def save():
         pending = output.with_suffix('.next')
@@ -162,7 +180,8 @@ def main(args, *, volume=False):
                 report['acquired'] = lease.acquire(request)['acquired_at_utc']
             save()
             transact(call, lambda: lease.release(request, native_restored_and_connections_closed=True), report, save,
-                     args.recover, display_trace=args.display_trace, decode=observation if volume else None)
+                     args.recover, display_trace=args.display_trace, decode=observation if (volume or bind) else None, witness=bind,
+                     qualifies=(lambda result: result['result'] == 'current_views_verified') if bind else None)
         except (Exception, KeyboardInterrupt) as error:
             report['error'] = getattr(error, 'code', type(error).__name__)
             changes = getattr(error, 'details', {})

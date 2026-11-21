@@ -9,7 +9,7 @@ from prepare_daily_render import LIBRARY, REQUIRED
 HERE = Path(__file__).resolve().parent
 MIB = 1024 * 1024
 ARM = {'arm/launch.sh', 'arm/app/weread', 'arm/app/weread-native-query', 'arm/app/weread-frame-guard'}
-INPUT = ARM | REQUIRED | {'selector-exchange', 'document-reference', 'launch-reference', 'arm-seed.tar.gz'}
+INPUT = ARM | REQUIRED | {'selector-bind', 'document-reference', 'launch-reference', 'arm-seed.tar.gz'}
 SEED = {'library.sqlite', 'images/cache-index.sqlite3', 'covers/cache-index.sqlite3', 'device-profile', 'device-allowlist'}
 
 
@@ -54,7 +54,8 @@ def manifest(values, seed=False):
 
 def render_device(config):
     label, lane, size = config['label'], config['lane'], config['archive_bytes']
-    if not re.fullmatch('[0-9a-f]{16}', label) or lane not in ('A', 'B') or type(size) is not int or not 0 < size <= 180 * MIB:
+    if (config.get('selector_strategy') != 'single-file-bind-v1' or not re.fullmatch('[0-9a-f]{16}', label)
+            or lane not in ('A', 'B') or type(size) is not int or not 0 < size <= 180 * MIB):
         raise ValueError('Invalid frozen visit')
     members, seed = config['members'], config['seed_members']
     daily = source('daily_render_device.sh')
@@ -72,20 +73,30 @@ def render_device(config):
     peer = change(peer, '"$daily" /mnt/us/weread/launch.sh ', '')
     state = section(daily, 'state()', 'new_stage()')
     state = change(state, 'for file in "$home/launch.sh"', 'peer_state || return 12\n    for file in')
-    state = change(state, '    ready_volume ||', '    stock_clear && fresh_production && stock_request_absent || { admit_reason=stock_install_or_request; return 1; }\n    ready_volume ||')
+    state = change(state, '    ready_volume ||', '    stock_clear && absent "$authority" && fresh_production && stock_request_absent || { admit_reason=stock_install_or_request; return 1; }\n    ready_volume ||')
     state = change(state, '$4+0>=245760', '$4+0>=@FREE_KIB@')
     navigation = section(daily, 'tile()', 'observation_output()')
     navigation = change(navigation, 'tag installed && tag tile-prepared && origin_agrees && absent', 'selector_active && tag installed && tag tile-prepared && origin_agrees && absent')
     navigation = change(navigation, 'native_idle && tag observer-active', 'stock_request_active && selector_active && native_idle && tag observer-active')
+    navigation = change(navigation, '    printf \'%s\\n\' "$receipt"\n}', '    stock_note_release "$receipt" && printf \'%s\\n\' "$receipt"\n}')
     group = section(daily, 'supervision()', 'witness()').replace('$home/', '$trial/')
     group = change(group, 'armed && tag tile-dispatch-intent && no_peer && account=$(lock_owner) &&',
-                   'armed && tag tile-dispatch-intent && tag selector-entered && no_peer && account=$(lock_owner) && [ "$account" = 0 ] &&')
+                   'armed && tag tile-dispatch-intent && tag selector-service-view && tag selector-entered && no_peer && account=$(lock_owner) && [ "$account" = 0 ] &&')
+    group = change(group, '    entry_birth=$birth\n', '    entry_birth=$birth\n    matches "$stage/selector-callback" "$label:$entry:$entry_birth" || return 1\n')
     close = section(daily, 'retired()', 'restore()')
     close = change(close, '    observer_stopped || return 1', '    stock_request_cleanup && channel_idle || return 1')
     close = change(close, 'absent "$stage/session" && absent "$stage/group"', 'absent "$stage/selector-entered" && absent "$stage/session" && absent "$stage/group"')
+    close = change(close, '    armed && tag tile-dispatch-intent && start=$(seconds)', '''    if ! absent "$stage/quarantined"; then stock_quarantine_settled; return; fi
+    if absent "$stage/selector-entered" && absent "$stage/group" && absent "$stage/launch-owner"; then
+        stock_quarantine_no_group && return 0
+        tag selector-entered || return 1
+    fi
+    armed && tag tile-dispatch-intent && start=$(seconds)''')
     text = '\n'.join((prefix, peer_data, peer, state, navigation, group, close,
-                      source('library-submit.sh'), source('stock-library-request.sh'), source('stock-ab-functions.sh')))
+                      source('library-submit.sh'), source('stock-library-request.sh'), source('stock-unsurfaced-close.sh'),
+                      source('stock-ab-functions.sh')))
     select = change(change(source('stock_ab_selector.sh'), 'label=@LABEL@', 'label=' + label), 'arm-name @LANE@', 'arm-name ' + lane)
+    select = change(select, '@SELECTOR_GATE@', source('stock-selector-gate.sh').rstrip('\n'))
     substitutions = {'@SELECTOR@':select.rstrip('\n'), '@LABEL@':label, '@LANE@':lane, '@ARCHIVE_BYTES@':str(size),
                      '@FREE_KIB@':str((size + sum(members.values()) + sum(seed.values())) // 1024 + 102401),
                      '@DOCUMENT_BYTES@':str(members['document-reference']), '@LAUNCH_BYTES@':str(members['launch-reference']),

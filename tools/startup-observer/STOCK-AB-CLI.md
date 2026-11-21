@@ -4,6 +4,8 @@
 
 The first slots are warmups `00-A`, `01-B`; the remaining frozen slots represent six AB/BA pairs. Run only the next approved slot. On Windows, the wrapper uses `ssh test-env` via the configured agent. Supply a `SecureString` already held by the calling session. It is not an argument to SSH or Python, not written to disk, and must never be included in a transcript. Each invocation exits independently.
 
+For the single-file bind series, a separate closed disposable-file probe must first confirm that the mount becomes visible and can be removed without changing the original file. Never substitute `--preflight` for that physical result. The one permitted live mount target for a timed visit is `/mnt/us/weread/launch.sh`; do not bind a directory, edit the card, overwrite the launcher, or reopen a failed slot. Stop at the first failed warmup or measured visit and release after verified cleanup, before diagnosing code or preparing another test.
+
 ```powershell
 $visitTool = '.\tools\startup-observer\Invoke-StockAbVisit.ps1'
 & $visitTool -Worker $Worker -Visit '00-A' -Preflight

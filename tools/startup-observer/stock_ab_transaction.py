@@ -84,9 +84,16 @@ def checked(mode, raw, label):
     raise Refused('unexpected_' + mode + '_receipt')
 
 
+def bind_syscall_refusal(code):
+    match = re.fullmatch(r'bind_(?:un)?mount_call_([1-9][0-9]{0,3})', code)
+    return bool(match and int(match[1]) <= 4095)
+
+
 def public_error(error):
     code = str(error) if isinstance(error, Refused) else ''
-    if re.fullmatch(r'[a-z][a-z_]{0,64}(?::[a-z][a-z_]{0,64})?', code):
+    scope, separator, reason = code.partition(':')
+    if re.fullmatch(r'[a-z][a-z_]{0,64}(?::[a-z][a-z_]{0,64})?', code) or (
+            (not separator or re.fullmatch(r'[a-z][a-z_]{0,64}', scope)) and bind_syscall_refusal(reason if separator else scope)):
         return code
     return 'interrupted' if isinstance(error, KeyboardInterrupt) else 'transport_or_worker_error'
 
