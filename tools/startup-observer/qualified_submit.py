@@ -1,0 +1,67 @@
+"""Qualify a closed, instrumented stock-card launch; never access a device or join separate runs."""
+
+import json
+import re
+
+from run_daily_render import CLOCK, LABEL, Refused, release_bounds
+
+
+SEQUENCE = ('admit', 'stage', 'install', 'prepare', 'arm', 'observe_armed', 'tap', 'claim', 'observe',
+            'witness', 'library_submit', 'stop', 'restore', 'close', 'absent')
+SUBMITTED = re.compile(r'WEREAD_LIBRARY_SUBMITTED ([0-9a-f]{16}) ([1-9][0-9]{0,18}) (entries|empty)\n')
+REQUEST_LIFETIME_NS = 60_000_000_000
+
+
+def qualify(report):
+    """Use only one worker report. Arm records its device clock and request window; tap keeps its
+    checked receipt. The live collector must verify the request inode and claimed GUI before
+    recording the app's original line in library_submit. The external-only runner cannot qualify.
+    """
+    if not isinstance(report, dict) or not isinstance(report.get('label'), str) or not LABEL.fullmatch(report['label']):
+        raise Refused('unknown_batch')
+    if (report.get('released') is not True or report.get('owner_and_token_checked') is not True or
+            report.get('recovery_required') is not False or not isinstance(report.get('released_at_utc'), str) or
+            not report['released_at_utc'].strip() or 'error' in report or 'refused' in report):
+        raise Refused('unconfirmed_handback')
+    if report.get('primary_reason') == 'no_same_frame_completion_marker':
+        raise Refused('missing_same_frame_marker')
+    if report.get('measurement_build') not in ('ordinary_installation', 'temporary_measurement_build'):
+        raise Refused('unknown_build_scope')
+    steps = report.get('operations')
+    if not isinstance(steps, list) or len(steps) != len(SEQUENCE):
+        raise Refused('incomplete_transaction')
+    for mode, step in zip(SEQUENCE, steps):
+        if (not isinstance(step, dict) or step.get('mode') != mode or type(step.get('status')) is not int or
+                step['status'] != 0 or step.get('reason') != ''):
+            raise Refused('unexpected_operation')
+    by_mode = {step['mode']: step for step in steps}
+    tap = by_mode['tap'].get('receipt')
+    if not isinstance(tap, dict):
+        raise Refused('missing_tile_receipt')
+    try:
+        before, after = release_bounds(json.dumps(tap, separators=(',', ':'), allow_nan=False).encode('ascii'))
+    except (TypeError, ValueError):
+        raise Refused('invalid_tile_receipt') from None
+    stored = report.get('synthetic_release_ns')
+    if stored != [before, after] or any(type(value) is not int for value in stored):
+        raise Refused('unbound_release')
+    marker = by_mode['library_submit'].get('receipt')
+    match = SUBMITTED.fullmatch(marker) if isinstance(marker, str) and len(marker) < 100 else None
+    if not match or match[1] != report['label']:
+        raise Refused('unbound_library_submit')
+    submitted = int(match[2])
+    request = by_mode['arm']
+    armed, deadline = request.get('request_armed_ns'), request.get('request_deadline_ns')
+    if (request.get('request_clock') != CLOCK or type(armed) is not int or type(deadline) is not int or
+            not 0 < armed <= tap['down_before_ns'] <= before < deadline < 2**63):
+        raise Refused('unbound_request_window')
+    if deadline - armed > REQUEST_LIFETIME_NS or not after <= submitted < deadline:
+        raise Refused('unresolved_endpoint_order')
+    scene = report.get('observation')
+    if scene is not None and (not isinstance(scene, dict) or scene.get('clock') != CLOCK or
+                              scene.get('scene') not in (('grid', 'list') if match[3] == 'entries' else ('empty',))):
+        raise Refused('conflicting_scene')
+    return {'label': report['label'], 'measurement_build': report['measurement_build'], 'clock': CLOCK,
+            'start': 'synthetic_stock_library_card_release', 'end': 'library_frame_send_accepted_application_marker',
+            'content': match[3], 'synthetic_release_ns': [before, after], 'submitted_ns': submitted,
+            'elapsed_interval_ns': [submitted - after, submitted - before], 'optical_completion_measured': False}
