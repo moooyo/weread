@@ -52,7 +52,33 @@ static ARM application passed its Cortex-A8 QEMU version and trace-policy
 checks; five focused ARM orientation and fallback tests passed separately.
 The [standard Kindle verification](../../VERIFICATION.md#reproduce-on-the-remote-worker)
 now checks the resolved features of both crates before building the archive.
-The handoff did not install anything on a Kindle or produce new timings.
+The package handoff itself did not install anything or produce new timings.
+
+### Daily installation and cleanup
+
+On November 22, 2026, the operator authorized a persistent update on the Scribe
+2022 / 5.19.5. The worker packaged the same verified binaries with the Git
+versions of the public text files (LF endings). It backed up the 38 installed
+public files off-device and replaced only four: the application (95,137,176 →
+95,228,264 bytes), `weread/launch.sh` (137,861 → 137,236 bytes), the bundled
+README and the backend patch notes. All 38 files were read back and compared
+with the new package. The stock card (`documents/weread.sh`, 43,102 bytes),
+both helpers and the private data directory were not replaced.
+
+Before and after installation, inventories found no prior WeRead test stage,
+temporary test card or frame-request file in the checked locations. The update
+removed its own staging files and checked their absence; no user files were
+classified or deleted as test residue. The previous public files remain on
+`test-env` for rollback, not on the Kindle.
+
+Under a separate lease, an automated tap on the ordinary card launched the
+installed program with its existing data directory. The same GUI showed a
+populated grid shelf in two framebuffer observations. No screenshot, book
+title or private database was exported. The app was stopped, the original
+native view restored and the smoke-test stage independently confirmed absent.
+The final connection closed and the owner-checked lease was released at
+**07:42:22 Asia/Shanghai**. This was a functional installation check, not a new
+startup measurement.
 
 ## Question and scope
 

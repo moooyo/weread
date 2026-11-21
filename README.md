@@ -79,8 +79,10 @@ complete Library frame was about **9.43 s off vs. 8.10 s on**. Reuse was
 faster in **6/6** balanced pairs, with a within-pair median saving of
 **1.394–1.397 s (about 14.5%)**. Both arms used the same public 15-book
 shelf and software submission witness; this is not optical refresh time.
-All 14 visits restored the original launcher; the daily installation was
-not updated by this test.
+All 14 visits restored the original launcher. In a [separately authorized
+daily installation](docs/review/stock-library-ab-20261122/README.md#daily-installation-and-cleanup),
+the uninstrumented build replaced the previous version on that Scribe; the
+ordinary card then opened the existing populated shelf.
 
 A [separate launcher change](docs/review/startup-launcher-window-20261121/README.md)
 removes the startup window-tree scan for the retired Quick and Wi-Fi controls.
