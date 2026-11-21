@@ -1,5 +1,43 @@
 # Stock Library card to complete WeRead Library submission
 
+## Final result and package decision
+
+**Keep exact-pose orientation reuse enabled in the standard Kindle build.**
+On the Scribe 2022 / 5.19.5, the B build shortened ordinary-card release to
+complete Library frame submission in **all six formal pairs**. No pair's
+timing intervals overlapped. The median **within-pair** saving was
+**1.393832–1.396848 s**, or **14.49–14.52%** of the corresponding A time.
+Allowing for rounding, the arm medians were **9.426–9.427 s** (A, off) and
+**8.103–8.104 s** (B, on). Subtracting those arm medians does not reproduce
+the paired saving. These are release-bracket bounds, not population
+confidence intervals.
+
+| Formal pair | Order | A, seconds | B, seconds | A minus B, seconds |
+| --- | --- | ---: | ---: | ---: |
+| 1 | AB | 9.390–9.391 | 7.599–7.600 | 1.790–1.792 |
+| 2 | BA | 9.462–9.464 | 8.182–8.184 | 1.278–1.282 |
+| 3 | AB | 9.760–9.762 | 8.250–8.251 | 1.510–1.512 |
+| 4 | BA | 9.314–9.316 | 8.089–8.090 | 1.224–1.227 |
+| 5 | AB | 9.116–9.117 | 8.117–8.118 | 0.997–1.000 |
+| 6 | BA | 9.512–9.513 | 7.726–7.727 | 1.785–1.787 |
+
+B was faster in all three AB and all three BA pairs. The first visit won
+three times and the second visit won three times; a simple first-position
+advantage does not explain the result. Warmups were excluded. The two
+warmups and twelve formal visits each restored the original launcher and
+native state, verified absence and released the original owner's lease.
+The last release was **06:55:45 Asia/Shanghai on November 22, 2026**.
+The [public observations](physical-pairs.json) include the original release
+brackets and matching software submissions for independent recalculation.
+
+The decision is about the existing common build default, not a new
+per-model allowlist or a persistent device installation. Keep the existing
+fallback when orientation evidence is missing or no longer matches. Do
+not enable the separate experimental opposite-grip reconciliation on the
+strength of these samples. They cover a warm device, a shared public
+15-book shelf and an instrumented build, not cold boot, an untouched
+private shelf, physical display completion, or all covers being ready.
+
 ## Question and scope
 
 How much does the standard exact-pose orientation reuse change startup time
@@ -154,8 +192,8 @@ This is a failure to validate the device's mount table, not a failed mount
 syscall or proof that this Kindle does not support file binds. The receipt
 does not identify the exact field or table condition that was rejected.
 The production launcher was not accessed, the stock card was not pressed,
-and no A/B warmup or formal pair began. No speedup or regression can be
-reported for card release to frame submission. Do not rerun the same
+and no A/B warmup or formal pair began. This probe supplied no speedup or
+regression evidence for card release to frame submission. Do not rerun the same
 probe, relax the mount guard, or substitute the earlier indexed results.
 
 ### Read-only diagnosis on the same Scribe
@@ -170,7 +208,7 @@ did not record that row's path or numeric value, and did not exercise the
 C parser's stream rewind. It does not establish that the value was zero or
 that the other row was unrelated to the selector. The [read-only receipt](mount-table-observation.json)
 also records the independent native-state check and exact lease release.
-Bind support and ordinary-card performance remain unmeasured.
+This read-only visit measured neither bind support nor ordinary-card performance.
 
 **Selector change after diagnosis:** the revised parser accepts the exact
 parent token `0` only on an unrelated mount row or on a unique `/` row

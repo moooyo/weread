@@ -72,12 +72,15 @@ after a screen-saver turn. The standard Kindle package enables reuse when
 the live pose matches the launch calibration. A [separate event-loop candidate](docs/review/startup-orientation-20261121/event-loop-reconcile.md)
 also handles a confirmed opposite grip; it is not in the standard package.
 Neither path shortens the launcher's two-second wait.
-The [ordinary-card A/B](docs/review/stock-library-ab-20261122/README.md)
-uses a removable single-file mount, verified on the Scribe without changing
-the daily launcher or private library. The [first bound warmups](docs/review/stock-library-ab-20261122/first-bound-warmups.md)
-confirmed a stock-card-to-Library submission for A but did not establish
-a qualified B observation. Warmups and the earlier indexed saving are not
-an ordinary-card performance comparison.
+The [ordinary-card A/B](docs/review/stock-library-ab-20261122/README.md#final-result-and-package-decision)
+also supports keeping exact-pose reuse enabled. On Scribe 2022 / 5.19.5,
+the median time from releasing the ordinary card to submitting the first
+complete Library frame was about **9.43 s off vs. 8.10 s on**. Reuse was
+faster in **6/6** balanced pairs, with a within-pair median saving of
+**1.394–1.397 s (about 14.5%)**. Both arms used the same public 15-book
+shelf and software submission witness; this is not optical refresh time.
+All 14 visits restored the original launcher; the daily installation was
+not updated by this test.
 
 A [separate launcher change](docs/review/startup-launcher-window-20261121/README.md)
 removes the startup window-tree scan for the retired Quick and Wi-Fi controls.

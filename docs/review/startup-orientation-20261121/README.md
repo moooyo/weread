@@ -9,6 +9,12 @@ calibration; missing, changed or unreadable evidence takes the existing bounded
 `winmgr` query. This packaging decision does not establish deployment or extend
 the physical results beyond the Scribe 2022 / 5.19.5 tested here.
 
+The [complete ordinary-card A/B on November 22](../stock-library-ab-20261122/README.md#final-result-and-package-decision)
+confirmed this decision: exact-pose reuse was faster in six of six formal
+pairs, with a median within-pair saving of 1.394–1.397 seconds from stock
+card release to a complete Library frame submission. This is a separate
+measurement from the earlier indexed-start result.
+
 The standard build script produced the ARM bundle on `test-env` under
 `/root/weread-default-package-20261121.BXUqBfS5/src/dist/kindle/`. The ARM
 application ran its version and trace-policy queries under Cortex-A8 QEMU;
