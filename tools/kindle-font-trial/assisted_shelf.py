@@ -24,6 +24,7 @@ CONTRACT = dict(purpose='assisted-stable-shelf-touch', schedule=[CASE], clock='C
                 device=DEVICE, firmware=FIRMWARE, candidate_features=CANDIDATE,
                 expected_calibration='U:3', expected_target='settings')
 DOWN_CONTRACT = CONTRACT | dict(purpose='assisted-fixed-down-shelf-touch', expected_calibration='D:1')
+BOUNDED_UP_GUARD = 'bounded-opposite-portrait'
 MEMBERS = ('document', 'measure', 'seed.tar.gz', 'pose-snapshot', 'shelf-scene', 'B/launch.sh',
            'B/app/weread', *(f'B/app/{name}' for name in HELPERS))
 
@@ -36,7 +37,9 @@ def contract_for(plan):
     raise ValueError('Unrecognized assisted shelf purpose or calibration contract')
 
 
-def device_program(*, fixed_down=False):
+def device_program(*, fixed_down=False, bounded_up=False):
+    if fixed_down and bounded_up:
+        raise ValueError('Choose exactly one physical portrait for the visit')
     body = render_device(ARM_A, ARM_B)
     both = 'document measure seed.tar.gz A/launch.sh B/launch.sh A/app/weread B/app/weread A/app/weread-frame-guard B/app/weread-frame-guard A/app/weread-native-query B/app/weread-native-query'
     body = once(body, both, ' '.join(MEMBERS))
@@ -68,7 +71,7 @@ def device_program(*, fixed_down=False):
     target = DOWN_CONTRACT if fixed_down else CONTRACT
     first_raw, second_raw = ('16', '18') if fixed_down else ('15', '17')
     case = once(once(case, '@RAW_FIRST@', first_raw), '@RAW_SECOND@', second_raw).replace('@PORTRAIT@', target['expected_calibration'])
-    if fixed_down:
+    if fixed_down or bounded_up:
         common += '\n' + (HERE / 'assisted-fixed-foreground.sh').read_text(encoding='ascii').strip()
         collection = section(case, '    public_foreground || fail public_owner', '    for tick in $(seq 1 240)')
         case = once(case, collection, '    fixed_capture_shelf')
@@ -84,15 +87,21 @@ def verify_recovery(plan_dir):
     contract = contract_for(plan)
     if not isinstance(plan.get('label'), str) or not re.fullmatch(r'[0-9a-f]{16}', plan['label']):
         raise ValueError('Not a single supervised shelf plan')
+    bounded_up = 'foreground_guard' in plan
+    if bounded_up and (contract != CONTRACT or plan['foreground_guard'] != BOUNDED_UP_GUARD):
+        raise ValueError('Invalid foreground guard for this assisted shelf contract')
     script = plan_dir / 'device.sh'
-    frozen = device_program(fixed_down=contract == DOWN_CONTRACT).encode('ascii')
+    frozen = device_program(fixed_down=contract == DOWN_CONTRACT, bounded_up=bounded_up).encode('ascii')
     if script.is_symlink() or not script.is_file() or script.stat().st_size > 32768 or script.read_bytes() != frozen:
         raise ValueError('Incorrect frozen device program')
     return plan
 
 
 def verify_plan(plan_dir):
-    plan = verify_recovery(plan_dir)
+    return verify_payload(plan_dir, verify_recovery(plan_dir))
+
+
+def verify_payload(plan_dir, plan):
     sizes = plan['members']
     if (set(sizes) != set(MEMBERS) or sizes['B/app/weread'] != ARM_B or
             any(type(value) is not int or value <= 0 for value in sizes.values()) or sum(sizes.values()) > 127926272):
@@ -112,7 +121,14 @@ def verify_plan(plan_dir):
     return plan
 
 
-def freeze(retained, plan_dir, sensor, scene, *, fixed_down=False):
+def freeze(retained, plan_dir, sensor, scene, *, fixed_down=False, bounded_up=False):
+    contract = DOWN_CONTRACT if fixed_down else CONTRACT
+    guard = {'foreground_guard': BOUNDED_UP_GUARD} if bounded_up else {}
+    return freeze_shelf(retained, plan_dir, sensor, scene, contract | guard,
+                        device_program(fixed_down=fixed_down, bounded_up=bounded_up), verify_plan)
+
+
+def freeze_shelf(retained, plan_dir, sensor, scene, contract, device, verify):
     retained = retained.resolve(strict=True)
     helpers = retained / 'orientation-inputs/helpers'
     seed = retained / 'orientation-inputs/seed.tar.gz'
@@ -135,8 +151,7 @@ def freeze(retained, plan_dir, sensor, scene, *, fixed_down=False):
     entries = dict(zip(MEMBERS, [document, helpers / 'measure', seed, sensor, scene, supervisor,
                                  retained / arms['B']['executable'], *(helpers / name for name in HELPERS)], strict=True))
     sizes = {name: len(value) if isinstance(value, bytes) else value.stat().st_size for name, value in entries.items()}
-    contract = DOWN_CONTRACT if fixed_down else CONTRACT
-    device = device_program(fixed_down=fixed_down).encode('ascii')
+    device = device.encode('ascii')
     for script in (device, document, supervisor):
         subprocess.run(['sh', '-n'], input=script, check=True)
     plan_dir.mkdir(mode=0o700)
@@ -150,7 +165,7 @@ def freeze(retained, plan_dir, sensor, scene, *, fixed_down=False):
             with (io.BytesIO(value) if isinstance(value, bytes) else value.open('rb')) as stream:
                 archive.addfile(member, stream)
     publish(plan_dir / 'plan.json', contract | dict(label=label, members=sizes, archive_bytes=archive_path.stat().st_size))
-    return verify_plan(plan_dir)
+    return verify(plan_dir)
 
 
 if __name__ == '__main__':
@@ -160,8 +175,11 @@ if __name__ == '__main__':
     prep = commands.add_parser('freeze')
     for key in ('retained', 'plan', 'sensor', 'scene'):
         prep.add_argument('--' + key, type=Path, required=True)
-    prep.add_argument('--fixed-down', action='store_true', help='Qualify only the previously seen D:1 pose, not the opposite portrait.')
+    mode = prep.add_mutually_exclusive_group()
+    mode.add_argument('--fixed-down', action='store_true', help='Qualify only the previously seen D:1 pose, not the opposite portrait.')
+    mode.add_argument('--bounded-up', action='store_true', help='Use the bounded foreground checks for the U:3 opposite portrait.')
     commands.add_parser('verify').add_argument('--plan', type=Path, required=True)
     args = parser.parse_args()
-    plan = freeze(args.retained, args.plan, args.sensor, args.scene, fixed_down=args.fixed_down) if args.operation == 'freeze' else verify_plan(args.plan)
+    plan = (freeze(args.retained, args.plan, args.sensor, args.scene, fixed_down=args.fixed_down, bounded_up=args.bounded_up)
+            if args.operation == 'freeze' else verify_plan(args.plan))
     print(f"Ready: {plan['label']}, {plan['purpose']} at {plan['expected_calibration']}; no device access.")

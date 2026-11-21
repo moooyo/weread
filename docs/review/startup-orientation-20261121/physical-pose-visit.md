@@ -3,8 +3,8 @@
 **Result, November 21, 2026:** the isolated orientation-reuse candidate drew
 the startup lettering and the public Reader in the expected digital orientation
 on a Kindle Scribe 2022 / 5.19.5. The native reference was `D:1`, **the same
-portrait as the six-pair experiment**. The requested screen-saver cycle was
-**not run**. A [separate shelf retest](#confirmed-fixed-down-retest) qualified
+portrait as the six-pair experiment**. The screen-saver cycle was **not run
+in this visit**. A [separate shelf retest](#confirmed-fixed-down-retest) qualified
 one physical tap in `D:1`: the operator's report and independent same-visit
 shelf and final-route evidence agreed, with both orientation queries reused.
 Keep the feature off in the normal package. These visits did not measure
@@ -169,15 +169,15 @@ retains the allowlisted archive, operations, original machine-only result,
 and separate operator and combined reports. The Ubuntu collector suite passed
 **166/166** before the visit.
 
-## Remaining gates
+## Scope and later visits
 
-The [software qualification](pose-qualification.md) does not replace a real
-turn. These visits did **not** qualify the opposite stable portrait, a turn
-between splash and the first business frame, a turn while asleep, or the
-subsequent physical touch mapping in those states. Neither peer knew of a verified remotely
-controlled turn/touch fixture. Do not book the device to wait for one, or
-replace it with an orientation override. Before another sleep experiment,
-check which wake property and type this firmware advertises and distinguish
-a refusal while already active from a missing utility, timeout or unsupported
-operation. Do not substitute a blind power toggle. A physical pass would
-apply only to the tested model/firmware, not to all Kindle packages.
+The fixed-down visits above and the [software qualification](pose-qualification.md)
+are not evidence of a physical turn. The [subsequent assisted visits](turn-and-wake-device.md)
+separately qualified the opposite stable portrait and its Profile tap, observed
+a turn before the first submission log, and recovered the same Reader across a
+screen-saver cycle with changed holding. They did not establish the orientation
+of the first frame during a turn, the instant of physical movement while the
+Reader was stopped, or touch mapping after wake. No verified remotely controlled
+turn/touch fixture was identified. Do not substitute a software override or a
+blind power toggle. The physical evidence applies only to the tested Scribe
+and firmware.

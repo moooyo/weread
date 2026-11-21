@@ -116,9 +116,33 @@ static int display_sample(void) {
     return fflush(stdout) == 0 ? 0 : 2;
 }
 
+static int startup_flip(void) {
+    enum { count = 401 };
+    struct sample points[count];
+    const struct timespec interval = {.tv_nsec = 50000000};
+    int descriptor = discover();
+    if (descriptor < 0) return 2;
+    int valid = 1;
+    for (int index = 0; index < count && valid; ++index) {
+        valid = (!index || !nanosleep(&interval, NULL)) && sample(descriptor, &points[index]) &&
+            (!index || points[index].before > points[index - 1].after) &&
+            points[index].after - points[0].before <= UINT64_C(27000000000);
+        if (valid && !index)
+            valid = printf("READY %" PRIu64 " %" PRIu64 " %d\n", points[0].before, points[0].after, points[0].raw) > 0 && !fflush(stdout);
+    }
+    valid = valid && still_unique(descriptor);
+    close(descriptor);
+    if (!valid) return 2;
+    for (int index = 0; index < count; ++index)
+        if (printf("%d %" PRIu64 " %" PRIu64 " %d\n", index + 1, points[index].before, points[index].after, points[index].raw) < 0) return 2;
+    return fflush(stdout) == 0 ? 0 : 2;
+}
+
 int main(int argc, char **argv) {
     int count = 1;
     if (argc == 2) {
+        if (!strcmp(argv[1], "--flip-policy")) return puts("startup-flip 401 50000000 27000000000 CLOCK_MONOTONIC") < 0 || fflush(stdout) ? 2 : 0;
+        if (!strcmp(argv[1], "--startup-flip")) return startup_flip();
         if (!strcmp(argv[1], "--display-sample")) return display_sample();
         size_t length = strlen(argv[1]);
         if (length == 0 || length > 3 || argv[1][0] == '0' || strspn(argv[1], "0123456789") != length) return 64;

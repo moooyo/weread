@@ -95,6 +95,21 @@ def parse_observation(text, expected_label, *, display_trace=False):
             "reason": reason, "protected_state_unchanged": True}
 
 
+def parse_display_group(line, sequence, previous_end=0):
+    edge = r"([1-9][0-9]{0,18}) ([1-9][0-9]{0,18}) (1[5-8]) ([0-3])"
+    row = re.fullmatch(r"read ([1-9][0-9]?) " + edge + r" ([LRUD]|unknown) " + edge, line)
+    if not row or int(row[1]) != sequence:
+        raise ValueError("Invalid native display group")
+    left_start, left_end, left_raw, left_fb = map(int, row.groups()[1:5])
+    right_start, right_end, right_raw, right_fb = map(int, row.groups()[6:10])
+    if not previous_end < left_start <= left_end < right_start <= right_end <= MAX_NS:
+        raise ValueError("Native observations are not in device monotonic clock order")
+    return {"sequence": sequence,
+            "before": {"interval_ns": [left_start, left_end], "raw": left_raw, "framebuffer_rotation": left_fb},
+            "winmgr": {"raw": row[6], "interval_ns": [left_end, right_start]},
+            "after": {"interval_ns": [right_start, right_end], "raw": right_raw, "framebuffer_rotation": right_fb}}
+
+
 def parse_display_rows(lines, label):
     if (not 4 <= len(lines) <= TRACE_COUNT + 3 or lines[0] != "pose_display_trace " + label
             or lines[-1] != "protected_state unchanged" or lines[-2] not in ("trace_end complete", "trace_end budget")):
@@ -102,23 +117,11 @@ def parse_display_rows(lines, label):
     end = lines[-2].split()[1]
     if (len(lines) == TRACE_COUNT + 3) != (end == "complete"):
         raise ValueError("Unexpected trace count for its stopping condition")
-    edge = r"([1-9][0-9]{0,18}) ([1-9][0-9]{0,18}) (1[5-8]) ([0-3])"
-    pattern = re.compile(r"read ([1-9][0-9]?) " + edge + r" ([LRUD]|unknown) " + edge)
     groups = []
     previous_end = 0
     for sequence, line in enumerate(lines[1:-2], 1):
-        row = pattern.fullmatch(line)
-        if not row or int(row[1]) != sequence:
-            raise ValueError("Invalid native display group")
-        left_start, left_end, left_raw, left_fb = map(int, row.groups()[1:5])
-        right_start, right_end, right_raw, right_fb = map(int, row.groups()[6:10])
-        if not previous_end < left_start <= left_end < right_start <= right_end <= MAX_NS:
-            raise ValueError("Native observations are not in device monotonic clock order")
-        previous_end = right_end
-        groups.append({"sequence": sequence, "before": {"interval_ns": [left_start, left_end], "raw": left_raw,
-                                                       "framebuffer_rotation": left_fb},
-                       "winmgr": {"raw": row[6], "interval_ns": [left_end, right_start]},
-                       "after": {"interval_ns": [right_start, right_end], "raw": right_raw,
-                                 "framebuffer_rotation": right_fb}})
+        group = parse_display_group(line, sequence, previous_end)
+        previous_end = group['after']['interval_ns'][1]
+        groups.append(group)
     return {"label": label, "clock": "CLOCK_MONOTONIC", "classification": "display_diagnostic_only",
             "app_admitted": False, "trace_end": end, "samples": groups, "protected_state_unchanged": True}

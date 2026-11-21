@@ -79,8 +79,8 @@ printf '{{"route":"%s"}}' "$TARGET" >"$out/final.metadata.json"; echo 0 >"$out/s
                    'shelf-scene': b'#!/bin/sh\ntouch "$ROOT/scene-called"; if [ "${LOSE_TOUCH:-0}" = 1 ]; then rm "$ROOT/proc/60/fd/7"; fi; echo "SHELF 124000000000 124001000000 ${NATIVE#*:} grid"\n'}
         self.payload = archive([(key, entries.get(key, b'public')) for key in visit.MEMBERS])
 
-    def select_plan(self, fixed_down=False):
-        source = visit.device_program(fixed_down=fixed_down).replace(f'= {visit.ARM_B} ]', '= 6 ]')
+    def select_plan(self, fixed_down=False, bounded_up=False):
+        source = visit.device_program(fixed_down=fixed_down, bounded_up=bounded_up).replace(f'= {visit.ARM_B} ]', '= 6 ]')
         source = re.sub(r'/mnt/us|/sys/class/input|/proc/|/var/local|/tmp(?=[/)])', lambda match: str(self.root) + match[0], source)
         boundary = 'case "$mode" in\n    reference)'
         self.definitions, dispatch = source.split(boundary)
@@ -245,6 +245,49 @@ printf '{{"route":"%s"}}' "$TARGET" >"$out/final.metadata.json"; echo 0 >"$out/s
         for mixed in (plan | {'expected_calibration': 'U:3'}, plan | {'purpose': visit.CONTRACT['purpose']}):
             with self.assertRaisesRegex(ValueError, 'contract'):
                 visit.contract_for(mixed)
+
+    def test_explicit_bounded_up_qualifies_both_up_pressures_and_the_same_launch(self):
+        self.select_plan(bounded_up=True)
+        self.env['SECOND_RAW'] = '17'
+        self.stage_visit()
+        self.step('case', 'B-library')
+        results = self.collect()
+        self.assertEqual(results['out/B-library/portrait-launch'], b'U:3\n')
+        self.assertEqual(results['out/B-library/shelf'], b'SHELF 124000000000 124001000000 3 grid\n')
+        self.assertEqual(json.loads(results['out/B-library/final.metadata.json'])['route'], 'settings')
+        self.close_visit()
+
+    def test_bounded_up_still_refuses_one_down_read_before_launch(self):
+        self.select_plan(bounded_up=True)
+        self.env['SECOND_RAW'] = '16'
+        self.check_gate()
+
+    def test_bounded_up_discards_a_read_when_foreground_is_lost(self):
+        self.select_plan(bounded_up=True)
+        self.env['LOSE_TOUCH'] = '1'
+        self.stage_visit()
+        result = self.step('case', 'B-library', check=False)
+        self.assertEqual((result.returncode, result.stderr), (1, b'refused post_touch\n'))
+        self.assertFalse((self.out / 'shelf.next').exists())
+        self.assertEqual(set(self.collect()), {'out/orientation-batch'})
+        self.close_visit()
+
+    def test_bounded_up_metadata_and_script_must_match_without_relabelling_either_pose(self):
+        original = visit.CONTRACT | {'label': LABEL}
+        marked = original | {'foreground_guard': visit.BOUNDED_UP_GUARD}
+        for plan, script, ok in [(original, visit.device_program(), True), (marked, visit.device_program(bounded_up=True), True),
+                                 (marked, visit.device_program(), False), (original, visit.device_program(bounded_up=True), False),
+                                 (marked | visit.DOWN_CONTRACT, visit.device_program(fixed_down=True), False),
+                                 (marked | {'foreground_guard': 'unknown'}, visit.device_program(bounded_up=True), False)]:
+            (self.root / 'plan.json').write_text(json.dumps(plan))
+            (self.root / 'device.sh').write_text(script)
+            if ok:
+                self.assertEqual(visit.verify_recovery(self.root), plan)
+            else:
+                with self.assertRaises(ValueError):
+                    visit.verify_recovery(self.root)
+        with self.assertRaises(ValueError):
+            visit.device_program(fixed_down=True, bounded_up=True)
 
 
 if __name__ == '__main__':

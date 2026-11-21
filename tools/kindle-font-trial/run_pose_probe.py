@@ -13,6 +13,7 @@ import sys
 import tempfile
 
 from pose_probe import parse_observation, render_device
+from pose_turn_cue import cue_program, streaming_probe
 from run import LEASE, UTIL, stamp, transport
 
 
@@ -49,6 +50,9 @@ def main(args):
         raise ValueError('Use the designated worker host')
     if args.recover and args.display_trace:
         raise ValueError('Recovery is cleanup only, not a display trace')
+    turn_cue = args.turn_cue
+    if turn_cue and (not args.display_trace or args.recover or (not args.preflight and not args.operator_ready)):
+        raise ValueError('A turn cue requires a display trace and a present operator; no lease was requested')
     runs = args.runs.resolve(strict=True)
     if args.recover:
         mode, scope = 'recover', 'stage_cleanup_only'
@@ -73,6 +77,8 @@ def main(args):
             raise ValueError('Expected an ARM32 little-endian ELF')
         label = secrets.token_hex(8)
         body = render_device(len(helper), display_trace=args.display_trace)
+        if turn_cue:
+            body = cue_program(body)
     for operation in ('admit', 'probe', 'close', 'absent'):
         transport(body, operation, label, 'none')
     trust = Path('/root/.config/kindle-physical')
@@ -112,11 +118,15 @@ def main(args):
                 raise ValueError('ownership_changed')
             remote, header = transport(body, mode, label, 'none')
             tracing = args.display_trace and mode == 'probe'
-            if tracing:
+            if tracing and not turn_cue:
                 print('Native admission passed; the trace is about to start. Keep the current pose for now.', flush=True)
             try:
-                result = subprocess.run([*ssh, remote], input=header + (helper if mode == 'probe' else b''),
-                                        capture_output=True, env=env, timeout=40 if tracing else 30)
+                if tracing and turn_cue:
+                    result, report['operator_cue'] = streaming_probe([*ssh, remote], header + helper, env, label,
+                                                                    lambda action: print(action, flush=True))
+                else:
+                    result = subprocess.run([*ssh, remote], input=header + (helper if mode == 'probe' else b''),
+                                            capture_output=True, env=env, timeout=40 if tracing else 30)
                 code = result.returncode
                 refusal = re.search(rb'^refused ([a-z0-9_]{1,48})$', result.stderr, re.MULTILINE)
                 reason = refusal[1].decode() if refusal else 'transport_or_device'
@@ -163,5 +173,7 @@ if __name__ == '__main__':
     group.add_argument('--display-trace', action='store_true',
                        help='Read stock orientation, framebuffer rotation and evdev reports; make no turn or app-readiness decision')
     group.add_argument('--recover', type=Path)
+    parser.add_argument('--turn-cue', action='store_true', help='Emit one live cue only after the first complete stock display group')
+    parser.add_argument('--operator-ready', action='store_true', help='A present operator has acknowledged the readiness dialog')
     parser.add_argument('--preflight', action='store_true')
     raise SystemExit(main(parser.parse_args()))

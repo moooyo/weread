@@ -122,11 +122,11 @@ class DisplayTraceHostTests(unittest.TestCase):
             return {'classification': 'display_diagnostic_only', 'app_admitted': False, 'protected_state_unchanged': True}
         return {'classification': 'stable_native_reference', 'protected_state_unchanged': True}
 
-    def execute(self, *, preflight=False, recover=None):
+    def execute(self, *, preflight=False, recover=None, turn_cue=False):
         self.output = io.StringIO()
-        args = SimpleNamespace(display_trace=self.feature, preflight=preflight, recover=recover,
+        args = SimpleNamespace(display_trace=self.feature, turn_cue=turn_cue, operator_ready=turn_cue, preflight=preflight, recover=recover,
                                helper=self.helper, lease_tool=self.helper, owner='test-owner', runs=self.root)
-        render = Mock(return_value='exit 1\n')
+        render = Mock(return_value=runner.render_device(self.helper.stat().st_size, display_trace=True) if turn_cue else 'exit 1\n')
         regular = Path.is_file
         with patch.object(Path, 'is_file', lambda path: str(path) == '/opt/kindle-toolchain/ubuntu-run' or regular(path)), \
              patch.dict(runner.UTIL, load_lease=lambda *_: self.lease, ssh_command=lambda *_: ['simulated-ssh']), \
@@ -143,6 +143,26 @@ class DisplayTraceHostTests(unittest.TestCase):
     def attempt(self):
         directory, = self.root.glob('probe-*')
         return directory
+
+    def test_explicit_ready_trace_notifies_only_inside_probe_then_closes_before_analysis(self):
+        def wire(command, payload, env, label, announce):
+            self.assertEqual(self.calls, ['admit'])
+            self.assertIn(b'POSE_CUE %s read 1', payload)
+            self.assertTrue(payload.endswith(self.helper.read_bytes()))
+            self.assertNotIn('TURN_NOW', self.output.getvalue())
+            self.calls.append('probe')
+            announce('TURN_NOW')
+            return subprocess.CompletedProcess(command, 0, b'simulated receipt\n', b''), {'action': 'TURN_NOW'}
+
+        with patch.object(runner, 'streaming_probe', side_effect=wire) as streaming:
+            self.assertEqual(self.execute(turn_cue=True), 0)
+        streaming.assert_called_once()
+        self.assertEqual(self.calls, ['admit', 'probe', 'close', 'absent'])
+        self.assertEqual(self.output.getvalue().splitlines().count('TURN_NOW'), 1)
+        report = json.loads((self.attempt() / 'operations.json').read_text())
+        self.assertEqual(report['operator_cue'], {'action': 'TURN_NOW'})
+        self.assertTrue(report['passed'] and report['released'])
+        self.assertFalse(report['observation']['app_admitted'])
 
     def test_trace_reports_the_scope_and_only_announces_after_authenticated_admission(self):
         self.assertEqual(self.execute(), 0)

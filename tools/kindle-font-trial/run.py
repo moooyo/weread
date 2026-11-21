@@ -68,7 +68,8 @@ def close_transaction(call, archive):
     return closed, collected
 
 
-def run(args, *, orientation_schedule=None, pose_visit_schedule=None, assisted_shelf_schedule=None):
+def run(args, *, orientation_schedule=None, pose_visit_schedule=None, assisted_shelf_schedule=None, startup_flip_schedule=None,
+        assisted_sleep_schedule=None):
     if sys.platform != "linux" or not Path("/opt/kindle-toolchain/ubuntu-run").is_file():
         raise ValueError("Use the worker host, not the build userspace")
     os.umask(0o077)
@@ -78,7 +79,7 @@ def run(args, *, orientation_schedule=None, pose_visit_schedule=None, assisted_s
         raise ValueError("Expected this worker's private frozen plan")
     config = json.loads((plan / "plan.json").read_text())
     label = config["label"]
-    single_visit = assisted_shelf_schedule or pose_visit_schedule
+    single_visit = assisted_sleep_schedule or startup_flip_schedule or assisted_shelf_schedule or pose_visit_schedule
     if single_visit:
         rollout = False
         schedule = single_visit(config)
@@ -112,12 +113,14 @@ def run(args, *, orientation_schedule=None, pose_visit_schedule=None, assisted_s
         raise ValueError("Missing private authentication")
     if not args.recover:
         attempt = Path(tempfile.mkdtemp(dir=plan, prefix="admission-" if args.admit_only else "batch-"))
-    kind = ("weread-assisted-" if assisted_shelf_schedule else "weread-pose-wake-" if pose_visit_schedule
+    kind = ("weread-sleep-turn-" if assisted_sleep_schedule else "weread-startup-flip-" if startup_flip_schedule else "weread-assisted-" if assisted_shelf_schedule else "weread-pose-wake-" if pose_visit_schedule
             else "weread-orientation-" if orientation_schedule else "weread-indexed-")
     request = lease.LeaseRequest(LEASE, attempt / "private-token", args.owner, kind + label)
     report = {"label": label, "started": stamp(), "operations": [], "passed": False}
     if single_visit:
         report.update(purpose=config["purpose"], scope="transaction_only")
+    if assisted_sleep_schedule:
+        report["operator_phases"] = []
     report_path = attempt / ("recovery.json" if args.recover else "operations.json")
 
     def save():
@@ -136,6 +139,23 @@ def run(args, *, orientation_schedule=None, pose_visit_schedule=None, assisted_s
         env = dict(os.environ, SSH_ASKPASS=str(askpass), SSH_ASKPASS_REQUIRE="force", DISPLAY="unused",
                    WEREAD_TRANSIENT_PASSWORD=secret)
 
+        if assisted_sleep_schedule:
+            from sleep_turn_stream import CueGate, permitted, stream_case
+
+            def check_permit(phase, limit):
+                if not lease.status(request)["ownership_verified"]:
+                    raise RuntimeError("Physical lease ownership changed")
+                invocation, header = transport(script, "permit", label, phase)
+                return subprocess.run([*ssh, invocation], input=header, capture_output=True, env=env, timeout=limit)
+
+            def record_phase(phase, status):
+                report["operator_phases"].append({"phase": phase, "status": status, "at": stamp()})
+                save()
+                if status == "issued":
+                    print(f"SLEEP_CUE {label} {phase} {time.time_ns() // 1000000}", flush=True)
+
+            phase_gate = CueGate(label, lambda phase: permitted(label, phase, check_permit), record_phase)
+
         def call(mode, name="none", output=None):
             if not lease.status(request)["ownership_verified"]:
                 raise RuntimeError("Physical lease ownership changed")
@@ -149,8 +169,11 @@ def run(args, *, orientation_schedule=None, pose_visit_schedule=None, assisted_s
                 data.seek(0)
                 sink = output.open("wb") if output else None
                 try:
-                    result = subprocess.run(command, env=env, stdin=data, stdout=sink or subprocess.PIPE, stderr=subprocess.PIPE,
-                                            timeout={"stage": 450, "case": 125, "collect": 150, "restore": 180, "close": 60}.get(mode, 45))
+                    if assisted_sleep_schedule and mode == "case":
+                        result = stream_case(command, data, env, phase_gate)
+                    else:
+                        result = subprocess.run(command, env=env, stdin=data, stdout=sink or subprocess.PIPE, stderr=subprocess.PIPE,
+                                                timeout={"stage": 450, "case": 125, "collect": 150, "restore": 180, "close": 60}.get(mode, 45))
                     code = result.returncode
                     stdout = "" if sink else result.stdout.decode("ascii", "replace").strip()
                     errors = result.stderr.decode("ascii", "replace")
@@ -162,10 +185,11 @@ def run(args, *, orientation_schedule=None, pose_visit_schedule=None, assisted_s
             expected = {"admit": "admitted", "stage": "indexed", "case": f"completed {name}", "restore": "restored", "close": "closed"}
             if single_visit:
                 expected["absent"] = "absent"
-            if assisted_shelf_schedule and mode == "reference" and code == 0:
+            if (assisted_shelf_schedule or startup_flip_schedule) and mode == "reference" and code == 0:
                 if re.fullmatch(rb"[UD]:[0-3]\n", result.stdout):
                     report["initial_native_reference"] = stdout
-                    if stdout != config["expected_calibration"]:
+                    allowed = ("D:1", "U:3") if startup_flip_schedule else (config["expected_calibration"],)
+                    if stdout not in allowed:
                         code, errors = 65, "refused initial_pose_gate"
                 else:
                     code, errors = 65, "refused unsupported_native_reference"
@@ -214,14 +238,17 @@ def run(args, *, orientation_schedule=None, pose_visit_schedule=None, assisted_s
             if not args.recover:
                 if not call("admit"):
                     raise ValueError("Read-only admission refused")
-                if assisted_shelf_schedule:
+                if assisted_shelf_schedule or startup_flip_schedule:
                     if not call("reference"):
                         raise ValueError("Read-only starting portrait refused")
                     report["operator_cue_issued"] = stamp()
                     save()
-                    print("OPERATOR_CUE HOLD_STILL: Hold the device steady. Once the public bookshelf entries and bottom tabs "
-                          "are visible (cover placeholders are fine), wait about five seconds. Then tap the rightmost tab "
-                          "with the person icon once. Stay on the Profile page; do not go back.", flush=True)
+                    if startup_flip_schedule:
+                        print("OPERATOR_CUE STARTUP_TURN: Wait for the WeRead splash. Then turn the device half a turn once and hold still. Do not tap.", flush=True)
+                    else:
+                        print("OPERATOR_CUE HOLD_STILL: Hold the device steady. Once the public bookshelf entries and bottom tabs "
+                              "are visible (cover placeholders are fine), wait about five seconds. Then tap the rightmost tab "
+                              "with the person icon once. Stay on the Profile page; do not go back.", flush=True)
                 if not args.admit_only:
                     attempted = True
                     if not call("stage"):
@@ -282,7 +309,10 @@ def run(args, *, orientation_schedule=None, pose_visit_schedule=None, assisted_s
                     save()
     if single_visit and report.get("released") and not args.recover:
         rel = "/work/" + str(attempt.relative_to(work))
-        tool, output = ("analyze_assisted_shelf.py", "assisted-shelf.json") if assisted_shelf_schedule else ("analyze_pose_visit.py", "pose-visit.json")
+        tool, output = (("analyze_assisted_sleep.py", "assisted-sleep.json") if assisted_sleep_schedule else
+                        ("analyze_pose_flip.py", "startup-flip.json") if startup_flip_schedule else
+                        ("analyze_assisted_shelf.py", "assisted-shelf.json") if assisted_shelf_schedule else
+                        ("analyze_pose_visit.py", "pose-visit.json"))
         analyze_on_worker(tool, rel + "/../plan.json", rel + "/operations.json", rel + "/results.tgz", rel + "/" + output)
     elif report["passed"] and not args.admit_only and not rollout and not args.recover:
         rel = "/work/" + str(attempt.relative_to(work))

@@ -109,7 +109,7 @@ project fixtures: `python3 -B -m unittest discover -s tools/kindle-font-trial`.
 The bare host lacked dependencies and the initial slim source copy omitted
 tracked fixture inputs; neither was used for the reported 58-test result.
 
-## Remaining physical work
+## Physical follow-up
 
 The rebuilt worker has ARM user-mode QEMU, not a running Scribe or KPW6
 firmware guest or its documented guest/QMP tooling. KPW6 layout tests are not
@@ -117,13 +117,11 @@ firmware compatibility tests. No controllable physical turning and touch
 fixture was identified in the project or the worker tools inspected. An SSH
 orientation override, X11 click, or a Slint event does not supply that input.
 
-When a fixture is available, prepare the isolated candidate, public shelf,
-per-visit observer, pose references and restoration command **before** claiming
-the device. Acquire only when ready to run. Use the existing fixed `down`
-reference and qualify the opposite pose first, then the startup turn and the
-sleep turn; accept a correct fallback, not an unverified reuse. Record the
-actual sensor interval, independent asymmetric panel reference and target
-result in each applicable visit. Verify native return and release immediately
-after the visits, or before changing any code. No user tapping or recording
-is needed by the software tests. Any future default must be scoped to the
-model/firmware that passes; do not enable the Cargo feature for every Kindle.
+An operator subsequently supplied real input in the [fixed-down](physical-pose-visit.md#confirmed-fixed-down-retest)
+and [opposite-grip, startup-turn and screen-saver visits](turn-and-wake-device.md).
+Those reports distinguish physical input, software submission, raw frames and
+operator observations; see them for the outstanding gates. Prepare the complete
+isolated candidate, observation and restoration path before claiming the device.
+Return it before investigating missing evidence. Any future default must be
+scoped to the model/firmware that passes; do not enable the Cargo feature for
+every Kindle.

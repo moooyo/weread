@@ -44,6 +44,17 @@ def bound(receipt):
     return identity
 
 
+def compare_bracket(change, start, before_draw, sent):
+    earliest, latest, origin, destination = change
+    if start < earliest and latest < before_draw:
+        outcome = 'hit'
+    elif latest < start or sent < earliest:
+        outcome = 'missed'
+    else:
+        return {'coverage': 'insufficient', 'reason': 'boundary_overlap_or_post_draw'}
+    return {'coverage': outcome, 'from': origin, 'to': destination, 'observed_change_ns': [earliest, latest]}
+
+
 def classify(application, sensor):
     def insufficient(reason):
         return {"coverage": "insufficient", "reason": reason}
@@ -70,14 +81,7 @@ def classify(application, sensor):
         return insufficient("invalid_or_missing_input")
     if len(changes) != 1:
         return insufficient("no_single_observed_change")
-    earliest, latest, origin, destination = changes[0]
-    if start < earliest and latest < before_draw:
-        outcome = "hit"
-    elif latest < start or sent < earliest:
-        outcome = "missed"
-    else:
-        return insufficient("boundary_overlap_or_post_draw")
-    return {"coverage": outcome, "from": origin, "to": destination, "observed_change_ns": [earliest, latest]}
+    return compare_bracket(changes[0], start, before_draw, sent)
 
 
 if __name__ == "__main__":

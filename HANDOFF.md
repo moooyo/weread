@@ -71,36 +71,21 @@ pairs improved, with a median paired saving of 1.323 s. The two query sites
 explain 0.965 s of median paired saving within their measured intervals.
 Do not treat the rest as orientation-query time, or any of it as a measured
 saving from ordinary tile release. The [pose qualification](docs/review/startup-orientation-20261121/pose-qualification.md)
-checks screen/touch mappings and wake on the Linux worker. The opposite
-physical portrait, a turn during startup, and a turn across actual sleep/wake
-remain untested on the Scribe; leave the package flag off. In a separate
-[real candidate Reader visit](docs/review/startup-orientation-20261121/physical-pose-visit.md),
-the splash and Reader matched the expected digital orientation in the same
-`D:1` pose. The wake-command guard refused before sleep. The device was
-restored and released at 13:28:38; no daily installation was changed.
-The [operator-assisted shelf visit](tools/kindle-font-trial/ORIENTATION.md#operator-assisted-opposite-portrait-and-shelf-tap)
-was attempted on the Scribe: the physical prelaunch reference remained `D:1`
-and the collector did not open the candidate. The device was released at
-15:36:49. A later read-only window returned `D:1` on all 18 native reads and
-released at 15:47:11 without uploading anything. The earlier ten sensor reads
-were from a separate lease, not the live turn window. Neither opposite-portrait
-startup nor a physical tap was observed; see the
-[follow-up](docs/review/startup-orientation-20261121/physical-pose-visit.md#native-only-follow-up).
-The [three-source physical trace](docs/review/startup-orientation-20261121/physical-pose-visit.md#physical-three-source-trace)
-released at 16:00:06. All eight groups returned the same values (sensor `16`,
-window manager `D`, scan rotation `1`). It did not open the app, observe an
-opposite posture or establish why the operator saw the stock text reorient;
-the operator subsequently confirmed they missed that turn cue. In a separate
-[fixed-down shelf visit](docs/review/startup-orientation-20261121/physical-pose-visit.md#fixed-down-library-touch),
-the operator saw an upright populated shelf and reached Profile with one
-physical tap. The collector did not preserve the digital shelf or final route.
-The device was restored and released at 16:07:15. A [fresh retest](docs/review/startup-orientation-20261121/physical-pose-visit.md#confirmed-fixed-down-retest)
-then confirmed the populated grid, both reuse sites, and the final Profile
-route in the same visit as an independently confirmed physical tap. It
-released at 16:20:35. The fixed `D:1` single-tap gate is closed; the other
-portrait and real turn/sleep cases are not. Keep the optimization off by
-default. Provide an actual desktop notification before any assisted action.
-See the linked experiment for build results and remaining gates. The [power-observer
+checks screen/touch mappings and wake on the Linux worker. The Scribe now
+also passes the **fixed-portrait Library and physical Profile tap** in both
+[`D:1`](docs/review/startup-orientation-20261121/physical-pose-visit.md#confirmed-fixed-down-retest)
+and [`U:3`](docs/review/startup-orientation-20261121/turn-and-wake-device.md#stable-opposite-portrait-passed).
+In the [startup turn and screen-saver visits](docs/review/startup-orientation-20261121/turn-and-wake-device.md),
+the sensor changed before the first application frame's submission log and
+the operator saw an upright Library. The **first frame's orientation** is
+still unknown. Across the stock screen saver, the same Reader process resumed,
+the awake endpoints changed from up to down and the operator read the same
+page. A comparison of the two raw frames supports the same content at a
+relative 180 degrees; the sensor did not timestamp the move while stopped.
+Neither visit verified deep suspend or absolute optical orientation. Keep
+the optimization **off by default**. The last visit released at **16:59:42**;
+the production installation was not changed. Use a short live desktop popup
+before each assisted action. The [power-observer
 investigation](docs/review/startup-orientation-20261121/power-wait.md) keeps
 the two-second wait unchanged. Neither changes the measured font result.
 

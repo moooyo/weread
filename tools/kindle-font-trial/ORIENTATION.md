@@ -219,6 +219,20 @@ the diagnostic refuses rather than running unbounded. It restores and releases
 before analysis; a successful trace is **not** permission to launch or a pass
 for a physical turn, rotation lock, optical orientation or touch mapping.
 
+For an operator already waiting in the measured starting pose, the optional
+`--turn-cue --operator-ready` on `run_pose_probe.py --display-trace` streams
+**one** cue from the first complete group. Before claiming the device, use
+the Windows readiness dialog described below and arm the local notification.
+Keep the current pose until the action dialog appears. A fresh group matching
+the prior stock baseline exactly (axis `16` and rotation `1` on both sides of
+raw `D`) emits the standalone worker line `TURN_NOW`; use that line to show
+one short topmost instruction to rotate 180° in the screen plane and hold.
+`HOLD_STILL`, no cue, an expired notice, or a closed visit means **do not
+turn**. Do not show an action dialog from the admission message, a final JSON
+record or a prior attempt. The cue only records an instruction, not an
+observed movement. Cleanup, final trace validation and the independent
+opposite-portrait admission for a candidate are unchanged.
+
 ### Operator-assisted opposite portrait and shelf tap
 
 This separate single-visit plan opens a **public offline Library** using the
@@ -283,3 +297,42 @@ was observed. Cover placeholders are valid; no second click or recording is
 needed. Driver completion and optical settling are different events. Do not
 combine evidence from separate launches or store private screens. Passing
 the collector's timing gate never enables a feature or deploys a build.
+
+### Assisted startup turn and screen-saver turn
+
+These are two separate Scribe correctness visits, not startup benchmarks. On
+`test-env`, freeze and preflight each plan under a fresh label before taking
+its lease. At the Windows desktop, use `show-operator-notice.ps1 -Confirm`
+with one short readiness question. Cancel, timeout or no desktop means no
+acquisition. Start only after acknowledgment and peer handoff; a busy lease
+is not a reservation. The operator never needs to run a command.
+
+1. **Startup.** Freeze with `prepare_pose_flip.py freeze --retained RETAINED
+   --plan PLAN --sensor SENSOR --scene SCENE`; preflight with `run_pose_flip.py
+   --work WORK --plan PLAN --preflight`. For the live visit replace `--preflight`
+   with `--owner OWNER --lease-tool LEASE --operator-ready`. On the live
+   `OPERATOR_CUE STARTUP_TURN`, show one instruction: “When the WeRead splash
+   appears, turn the Kindle 180° in the plane of the screen and hold.” Do not
+   turn it face down, tap, or turn late if the splash was missed.
+2. **Screen saver.** Freeze with `assisted_sleep_visit.py freeze --retained
+   RETAINED --plan PLAN --sensor SENSOR --witness-window --finish FINISH`;
+   preflight with `run_assisted_sleep.py --work WORK --plan PLAN --preflight`.
+   Use `Invoke-SleepTurnBridge.ps1 -OperatorReady` with the frozen label,
+   worker, plan name, owner, lease tool, private authentication and one short
+   message per phase. The bridge checks fresh, ordered permits. Ask for one
+   power press only on `sleep` while the public Reader is visible. Ask for one
+   half turn only on `turn`, with the same Reader process confirmed stopped
+   and the stock screen saver actually visible; hold through wake. On `wake`
+   or `recover-wake`, press once only if the saver is **still** visible. If the
+   page has returned, the cue expires or the screen is unclear, do nothing.
+
+Restore, close, verify absence independently and release by owner/token before
+reading `startup-flip.json` or `assisted-sleep.json`. Report the same-launch
+device-clock sensor bracket separately from what the operator saw. A startup
+window hit is not the first frame's rendering angle; driver submission is not
+optical completion. Different awake readings do not locate a turn inside the
+screen saver. Compare sleep and wake frames from that cycle for relative
+orientation and content: the exit-time Reader screenshot is **not** an absolute
+0° reference. Record the operator's view separately. See the
+[device observations](../../docs/review/startup-orientation-20261121/turn-and-wake-device.md)
+before requesting another turn.

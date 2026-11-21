@@ -177,5 +177,10 @@ also lists the separate physical orientation, touch, wake and native recovery
 gates. Neither a digital capture nor a first-SEND timestamp establishes when
 the physical ink settled.
 
+The later [operator-assisted turn and wake results](turn-and-wake-device.md)
+cover a stable opposite grip, a measured turn during startup and the same
+public Reader resuming across a stock screen saver. These are correctness
+tests, not additional startup timings. The package flag remains off.
+
 The [power-observer readiness investigation](power-wait.md) is a separate
 question. Do not change `sleep 2` in either orientation arm.
