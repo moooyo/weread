@@ -10,9 +10,10 @@ from analyze import TRACE, request_ns
 from analyze_assisted_shelf import final_route
 from analyze_orientation import orientation_sample
 from analyze_pose_visit import pose, timestamp
+from first_draw_evidence import assess_draw, split_draw_records
 from pose_flip_device import CASE, LEAVES
 from pose_window import HOLDING, MAX_NS, compare_bracket
-from prepare_pose_flip import CONTRACT, schedule
+from prepare_pose_flip import CONTRACT, DRAW_CONTRACT, draw_schedule, schedule
 
 
 LIMITS = dict(request=96, markers=4096, sensor=20000, shelf=128, portrait=4, observation=64)
@@ -48,10 +49,11 @@ def binding(raw, label):
                 gui_birth=int(match[5]), clock='CLOCK_MONOTONIC')
 
 
-def trace_rows(raw, ready):
+def trace_rows(raw, ready, *, with_scanout=False):
     rows = []
+    pattern = rb'([1-9][0-9]{0,2}) ([1-9][0-9]{0,18}) ([1-9][0-9]{0,18}) (1[5-8])' + (rb' ([0-3])' if with_scanout else b'') + rb'\n'
     for index, line in enumerate(raw.splitlines(keepends=True), 1):
-        matched = re.fullmatch(rb'([1-9][0-9]{0,2}) ([1-9][0-9]{0,18}) ([1-9][0-9]{0,18}) (1[5-8])\n', line)
+        matched = re.fullmatch(pattern, line)
         if not matched:
             raise ValueError('Invalid sample from the independent pose descriptor')
         row = list(map(int, matched.groups()))
@@ -60,7 +62,7 @@ def trace_rows(raw, ready):
         rows.append(row)
     if len(rows) != CONTRACT['sensor_samples'] or rows[-1][2] - rows[0][1] > CONTRACT['sensor_budget_ns']:
         raise ValueError('Wrong physical sample count or budget')
-    if ready != ('READY %d %d %d\n' % tuple(rows[0][1:])).encode('ascii'):
+    if ready != ('READY '+ ' '.join(map(str, rows[0][1:])) +'\n').encode('ascii'):
         raise ValueError('READY is not backed by the first independent sensor read')
     return rows
 
@@ -137,7 +139,8 @@ def observed_turn(rows, request, times):
 
 
 def analyze(plan, receipt, path):
-    schedule(plan)
+    diagnostic = plan.get('purpose') == DRAW_CONTRACT['purpose']
+    (draw_schedule if diagnostic else schedule)(plan)
     if (receipt.get('label') != plan['label'] or receipt.get('purpose') != plan['purpose'] or receipt.get('scope') != 'transaction_only'
             or receipt.get('owner_token_checked_on_release') is not True or receipt.get('recovery_required')
             or timestamp(receipt['released']) < timestamp(receipt['acquired'])):
@@ -145,6 +148,7 @@ def analyze(plan, receipt, path):
     report = dict(label=plan['label'], device=plan['device'], firmware=plan['firmware'], released=receipt['released'],
                   collection='not_completed', startup_turn={'coverage':'insufficient','reason':'incomplete_transaction'},
                   touch='not_tested', visual_uprightness='not_established', first_frame_orientation='not_established')
+    report['first_application_draw'] = {'status':'not_assessed' if diagnostic else 'not_in_historical_plan'}
     operations = receipt.get('operations')
     if not isinstance(operations, list) or any(not isinstance(op,dict) or type(op.get('status')) is not int for op in operations):
         return report
@@ -162,6 +166,13 @@ def analyze(plan, receipt, path):
     initial = receipt['initial_native_reference']
     if initial not in CONTRACT['expected_start_references'] or not timestamp(receipt['acquired']) <= timestamp(receipt['operator_cue_issued']) <= timestamp(receipt['released']):
         raise ValueError('Missing initial reference or cue within the verified lease')
+    if diagnostic:
+        fields = (operations[2].get('at'), receipt['operator_cue_issued'], receipt.get('operator_cue_acknowledged'), operations[3].get('at'))
+        if not all(isinstance(field, str) for field in fields):
+            raise ValueError('Missing staged, acknowledged startup cue')
+        staged, issued, acknowledged, completed = map(timestamp,fields)
+        if not timestamp(receipt['acquired']) <= staged <= issued <= acknowledged <= completed <= timestamp(receipt['released']):
+            raise ValueError('The observed launch did not follow the staged, acknowledged startup cue')
     records = archive_records(path, plan['label'])
     if partial and not records:
         return report
@@ -183,11 +194,16 @@ def analyze(plan, receipt, path):
     if sensor_id != app_id:
         raise ValueError('Sensor and application do not identify the same boot, GUI and visit')
     request, markers = records['request'].decode('ascii'), records['markers'].decode('ascii')
-    rows = trace_rows(records['sensor'], records['sensor-ready'])
+    if diagnostic:
+        markers, draw_lines = split_draw_records(markers)
+    rows = trace_rows(records['sensor'], records['sensor-ready'], with_scanout=diagnostic)
     origin = request_ns(request)
     if not 0 < origin <= MAX_NS:
         raise ValueError('Invalid device request origin')
     times = event_times(markers, origin)
+    if diagnostic:
+        report['first_application_draw'] = assess_draw(draws=draw_lines, ordinary=markers, times=times,
+                                                     rows=rows, request=origin, initial=initial, native=native, launch=launch)
     motion, turn = observed_turn(rows, origin, times)
     try:
         sample = orientation_sample(request, markers)

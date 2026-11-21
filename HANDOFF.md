@@ -85,7 +85,10 @@ relative 180 degrees; the sensor did not timestamp the move while stopped.
 Neither visit verified deep suspend or absolute optical orientation. Keep
 the optimization **off by default**. The last visit released at **16:59:42**;
 the production installation was not changed. Use a short live desktop popup
-before each assisted action. The [power-observer
+before each assisted action. The [new first-draw candidate](docs/review/startup-orientation-20261121/first-draw-boundary.md)
+and its paired pose/scanout sampler are frozen and preflighted. The preparation
+dialog was not confirmed: no device was claimed and there is no new first-frame
+result. The [power-observer
 investigation](docs/review/startup-orientation-20261121/power-wait.md) keeps
 the two-second wait unchanged. Neither changes the measured font result.
 

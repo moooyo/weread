@@ -102,6 +102,11 @@ of that frame's draw on the same clock as the sensor, not ask the operator
 to repeat the same gesture against the present markers. No new Scribe or
 KPW6 startup-time claim follows from these visits.
 
+The [first-draw follow-up](first-draw-boundary.md) now has these markers, a
+paired pressure/scanout sampler and a preflighted ARM build. No operator
+confirmation was received at the initial readiness dialog: no lease or
+additional device observation resulted.
+
 Worker receipts: `weread-assisted-shelf-20261121.BcM2UfxL` holds the
 opposite-portrait and screen-saver visits, `weread-startup-turn-checkpoint-20261121.boU0XHJQ`
 the completed startup checkpoint. Each private worker under `/root` on

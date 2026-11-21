@@ -8,6 +8,8 @@ import os
 from pathlib import Path
 import re
 import runpy
+import secrets
+import select
 import shlex
 import shutil
 import signal
@@ -21,10 +23,69 @@ from freeze import ROOT, SCHEDULE
 
 UTIL = runpy.run_path(str(ROOT / "docs/review/library-startup-latency-20261119/arm-admission/cpu-batch.py"))
 LEASE = UTIL["LEASE"]
+STARTUP_NOTICE_SECONDS = 25
+STARTUP_READING_SECONDS = 5
 
 
 def stamp():
     return datetime.now(timezone.utc).isoformat()
+
+
+class StartupNoticeRefused(ValueError):
+    def __init__(self, reason):
+        self.reason = reason
+        super().__init__(f"Startup notice {reason}; no case started")
+
+
+def read_startup_password(stream):
+    source = getattr(stream, "buffer", stream)
+    line = getattr(source, "raw", source).readline(4096)
+    if isinstance(line, bytes):
+        line = line.decode("utf-8")
+    if not line.endswith("\n"):
+        raise ValueError("Incomplete private authentication line")
+    return line.removesuffix("\n").removesuffix("\r")
+
+
+def read_startup_reply(descriptor, label, challenge, started):
+    ack = f"STARTUP_ACK {label} {challenge}\n".encode("ascii")
+    cancel = f"STARTUP_CANCEL {label} {challenge}\n".encode("ascii")
+    response = b""
+    while True:
+        remaining = started + STARTUP_NOTICE_SECONDS - time.monotonic()
+        if remaining <= 0 or not select.select([descriptor], [], [], remaining)[0]:
+            raise StartupNoticeRefused("timed_out")
+        block = os.read(descriptor, len(cancel) + 1)
+        elapsed = time.monotonic() - started
+        if elapsed >= STARTUP_NOTICE_SECONDS:
+            raise StartupNoticeRefused("timed_out")
+        if not block:
+            if response != ack:
+                raise StartupNoticeRefused("disconnected")
+            return True
+        response += block
+        if response == cancel:
+            raise StartupNoticeRefused("canceled")
+        if not (ack.startswith(response) or cancel.startswith(response)):
+            raise StartupNoticeRefused("invalid_reply")
+        if response == ack and elapsed < STARTUP_READING_SECONDS:
+            raise StartupNoticeRefused("too_early")
+
+
+def startup_turn_ack(label, *, on_issued):
+    if not re.fullmatch(r"[0-9a-f]{16}", label) or sys.stdin.isatty():
+        raise StartupNoticeRefused("unavailable")
+    challenge = secrets.token_hex(16)
+    try:
+        descriptor = sys.stdin.fileno()
+        if select.select([descriptor], [], [], 0)[0]:
+            raise StartupNoticeRefused("unexpected_input")
+        on_issued()
+        started = time.monotonic()
+        print(f"STARTUP_CUE {label} {challenge} {time.time_ns() // 1_000_000}", flush=True)
+        return read_startup_reply(descriptor, label, challenge, started)
+    except OSError:
+        raise StartupNoticeRefused("unavailable") from None
 
 
 def transport(script, mode, label, name):
@@ -108,7 +169,12 @@ def run(args, *, orientation_schedule=None, pose_visit_schedule=None, assisted_s
             raise ValueError("No matching interrupted attempt")
     elif not args.admit_only and any(not not_operated(other) for other in plan.glob("batch-*")):
         raise ValueError("Use a new label after a write or an uncertain attempt")
-    secret = getpass.getpass("Device password (not saved): ") if sys.stdin.isatty() else sys.stdin.readline().rstrip("\r\n")
+    if startup_flip_schedule and not args.recover:
+        if sys.stdin.isatty():
+            raise ValueError("Use the interactive desktop bridge, not a worker terminal")
+        secret = read_startup_password(sys.stdin)
+    else:
+        secret = getpass.getpass("Device password (not saved): ") if sys.stdin.isatty() else sys.stdin.readline().rstrip("\r\n")
     if not secret:
         raise ValueError("Missing private authentication")
     if not args.recover:
@@ -131,7 +197,16 @@ def run(args, *, orientation_schedule=None, pose_visit_schedule=None, assisted_s
     def interrupt(*_args):
         raise KeyboardInterrupt
 
+    def progress(text):
+        try:
+            print(text, flush=True)
+        except BrokenPipeError:
+            if not startup_flip_schedule:
+                raise
+
     signal.signal(signal.SIGTERM, interrupt)
+    if startup_flip_schedule:
+        signal.signal(signal.SIGHUP, interrupt)
     with tempfile.TemporaryDirectory(dir=attempt) as local:
         askpass = Path(local) / "askpass"
         askpass.write_text('#!/bin/sh\nprintf "%s\\n" "$WEREAD_TRANSIENT_PASSWORD"\n')
@@ -199,7 +274,7 @@ def run(args, *, orientation_schedule=None, pose_visit_schedule=None, assisted_s
             report["operations"].append({"at": stamp(), "mode": mode, "case": name, "status": code,
                                          "diagnostic": message or ("transport_or_command_failed" if code else "")})
             save()
-            print(f"{mode} {name} {code} {message}", flush=True)
+            progress(f"{mode} {name} {code} {message}")
             if code and not single_visit:
                 (attempt / f"private-{mode}-{name}.stderr").write_text(errors[:4096])
             return code == 0
@@ -222,7 +297,7 @@ def run(args, *, orientation_schedule=None, pose_visit_schedule=None, assisted_s
         attempted = bool(args.recover)
         acquired = False
         completed = False
-        print(f"Private attempt: {attempt}", flush=True)
+        progress(f"Private attempt: {attempt}")
         try:
             if not args.recover:
                 if args.wait:
@@ -241,18 +316,34 @@ def run(args, *, orientation_schedule=None, pose_visit_schedule=None, assisted_s
                 if assisted_shelf_schedule or startup_flip_schedule:
                     if not call("reference"):
                         raise ValueError("Read-only starting portrait refused")
+                if assisted_shelf_schedule:
                     report["operator_cue_issued"] = stamp()
                     save()
-                    if startup_flip_schedule:
-                        print("OPERATOR_CUE STARTUP_TURN: Wait for the WeRead splash. Then turn the device half a turn once and hold still. Do not tap.", flush=True)
-                    else:
-                        print("OPERATOR_CUE HOLD_STILL: Hold the device steady. Once the public bookshelf entries and bottom tabs "
-                              "are visible (cover placeholders are fine), wait about five seconds. Then tap the rightmost tab "
-                              "with the person icon once. Stay on the Profile page; do not go back.", flush=True)
+                    print("OPERATOR_CUE HOLD_STILL: Hold the device steady. Once the public bookshelf entries and bottom tabs "
+                          "are visible (cover placeholders are fine), wait about five seconds. Then tap the rightmost tab "
+                          "with the person icon once. Stay on the Profile page; do not go back.", flush=True)
                 if not args.admit_only:
                     attempted = True
                     if not call("stage"):
                         raise ValueError("Temporary entry was not indexed")
+                    if startup_flip_schedule:
+                        def mark_issued():
+                            if not lease.status(request)["ownership_verified"]:
+                                raise RuntimeError("Physical lease ownership changed")
+                            report.update(operator_notice="issued", operator_cue_issued=stamp())
+                            save()
+
+                        try:
+                            if startup_turn_ack(label, on_issued=mark_issued) is not True or report.get("operator_notice") != "issued":
+                                raise StartupNoticeRefused("not_confirmed")
+                        except StartupNoticeRefused as error:
+                            report["operator_notice"] = error.reason
+                            save()
+                            raise
+                        if not lease.status(request)["ownership_verified"]:
+                            raise RuntimeError("Physical lease ownership changed")
+                        report.update(operator_notice="acknowledged", operator_cue_acknowledged=stamp())
+                        save()
                     for index, name in enumerate(schedule):
                         if not call("case", name):
                             raise ValueError("Case failed")
@@ -267,8 +358,10 @@ def run(args, *, orientation_schedule=None, pose_visit_schedule=None, assisted_s
                     "lease_directory_created", "private_token_created", "owner_record_created"))):
                     report["recovery_required"] = True
                 save()
-            print(str(error) if isinstance(error, ValueError) else report["error"], flush=True)
+            progress(str(error) if isinstance(error, ValueError) else report["error"])
         finally:
+            if startup_flip_schedule:
+                signal.signal(signal.SIGHUP, signal.SIG_IGN)
             if acquired:
                 closed = not attempted
                 try:
@@ -295,14 +388,14 @@ def run(args, *, orientation_schedule=None, pose_visit_schedule=None, assisted_s
                                 raise
                             closed = False
                             report.update(recovery_required=True, release_error=getattr(error, "code", type(error).__name__))
-                            print("Release unconfirmed; retained the private token for recovery.", flush=True)
+                            progress("Release unconfirmed; retained the private token for recovery.")
                         else:
                             report["released"] = released
                             if single_visit:
                                 report["owner_token_checked_on_release"] = True
                                 save()
                             request.token_file.unlink()
-                            print("Released exact physical lease.", flush=True)
+                            progress("Released exact physical lease.")
                     else:
                         report["recovery_required"] = True
                     report["passed"] = completed and closed

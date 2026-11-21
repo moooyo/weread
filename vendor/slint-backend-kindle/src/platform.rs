@@ -672,6 +672,7 @@ impl Platform for KindlePlatform {
             let mut dirty_region = None;
             let mut did_render = false;
             let mut observed_frame = None;
+            let mut draw_start = None;
             self.window.draw_if_needed(|renderer| {
                 did_render = true;
                 observed_frame = prepare_startup_frame(&mut startup_frame, || {
@@ -679,15 +680,24 @@ impl Platform for KindlePlatform {
                         && sleep_presentation_token.is_none()
                         && image_snapshot.regions.is_empty()
                 });
-                renderer.set_rendering_rotation(match render_rotation {
+                let rotation = match render_rotation {
                     90 => RenderingRotation::Rotate90,
                     180 => RenderingRotation::Rotate180,
                     270 => RenderingRotation::Rotate270,
                     _ => RenderingRotation::NoRotation,
-                });
+                };
+                renderer.set_rendering_rotation(rotation);
                 if force_full || observed_frame.is_some() {
                     renderer.set_repaint_buffer_type(RepaintBufferType::NewBuffer);
                 }
+                draw_start = crate::startup_timing::FirstDraw::begin(
+                    initial_scene_pending
+                        && !restore_full_frame
+                        && sleep_presentation_token.is_none()
+                        && image_snapshot.regions.is_empty(),
+                    applied_rotation,
+                    rotation,
+                );
                 let dirty = renderer.render(&mut rgb_buffer, width);
                 if force_full || observed_frame.is_some() {
                     renderer.set_repaint_buffer_type(RepaintBufferType::ReusedBuffer);
@@ -788,19 +798,19 @@ impl Platform for KindlePlatform {
                         || frame_buffer.wait_for_update_complete_checked(),
                     )?;
                 } else {
-                    submit_startup_frame(
-                        observed_frame,
-                        || {
-                            let panel = Some(PhysicalRect {
-                                x: 0,
-                                y: 0,
-                                width: panel_width,
-                                height: panel_height,
-                            });
-                            did_render && dirty_region == panel && written.region == panel
-                        },
-                        || frame_buffer.refresh_full_checked(),
-                    )
+                    let complete = || {
+                        let panel = Some(PhysicalRect {
+                            x: 0,
+                            y: 0,
+                            width: panel_width,
+                            height: panel_height,
+                        });
+                        did_render && dirty_region == panel && written.region == panel
+                    };
+                    let draw_start = draw_start.filter(|_| complete());
+                    submit_startup_frame(observed_frame, complete, || {
+                        frame_buffer.refresh_full_with_draw(draw_start)
+                    })
                     .map_err(|error| {
                         PlatformError::Other(format!(
                             "failed to restore the presentation frame: {error}"
@@ -1690,6 +1700,7 @@ fn retire_orientation_child(mut child: Child) {
 #[cfg(test)]
 mod initial_frame_tests {
     use super::*;
+    use crate::startup_timing::FirstDraw;
 
     struct Observer {
         waiting: bool,
@@ -1834,6 +1845,91 @@ mod initial_frame_tests {
         })
         .join()
         .unwrap();
+    }
+
+    #[test]
+    fn first_draw_trace_pairs_a_real_rotated_slint_draw_with_its_accepted_submission() {
+        use slint::ComponentHandle;
+
+        const CHILD: &str = "WEREAD_TEST_REAL_DRAW_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let thread = std::thread::current();
+            let output = Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", thread.name().unwrap(), "--nocapture"])
+                .env(CHILD, "1")
+                .env("WEREAD_STARTUP_TIMING", "1")
+                .output()
+                .unwrap();
+            let errors = String::from_utf8(output.stderr).unwrap();
+            assert!(output.status.success(), "{errors}");
+            let marks: Vec<_> = errors
+                .lines()
+                .filter(|line| line.starts_with("WEREAD_STARTUP "))
+                .map(|line| {
+                    let (time, stage) = line
+                        .strip_prefix("WEREAD_STARTUP ")
+                        .unwrap()
+                        .split_once(' ')
+                        .unwrap();
+                    let (seconds, nanos) = time.split_once('.').unwrap();
+                    assert_eq!(nanos.len(), 9);
+                    (
+                        (
+                            seconds.parse::<u64>().unwrap(),
+                            nanos.parse::<u32>().unwrap(),
+                        ),
+                        stage,
+                    )
+                })
+                .collect();
+            assert_eq!(marks.len(), 2);
+            assert_eq!(marks[0].1, "first_application_frame_draw_begin_rot180");
+            assert_eq!(marks[1].1, "first_application_frame_send");
+            assert!(marks[0].0 < marks[1].0);
+            return;
+        }
+        slint::slint! {
+            export component Scene inherits Window {
+                background: black;
+                Rectangle { x: 0px; y: 0px; width: 8px; height: 8px; background: white; }
+            }
+        }
+        struct TestPlatform(Rc<MinimalSoftwareWindow>);
+        impl Platform for TestPlatform {
+            fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, PlatformError> {
+                Ok(self.0.clone())
+            }
+        }
+        let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
+        slint::platform::set_platform(Box::new(TestPlatform(window.clone()))).unwrap();
+        assert!(!window.draw_if_needed(|_| panic!("no frame is eligible yet")));
+        crate::startup_timing::update_submitted(None);
+        let ui = Scene::new().unwrap();
+        window.set_size(slint::PhysicalSize::new(64, 64));
+        ui.show().unwrap();
+        let mut pixels = vec![Rgb8Pixel::default(); 64 * 64];
+        let mut draw = None;
+        assert!(window.draw_if_needed(|renderer| {
+            let rotation = RenderingRotation::Rotate180;
+            renderer.set_rendering_rotation(rotation);
+            draw = FirstDraw::begin(true, 0, rotation);
+            let dirty = renderer.render(&mut pixels, 64);
+            assert_eq!(dirty.bounding_box_size(), slint::PhysicalSize::new(64, 64));
+        }));
+        assert_eq!(pixels.first().unwrap().r, 0);
+        assert_eq!(pixels.last().unwrap().r, 255);
+        crate::startup_timing::arm_first_application_frame();
+        let draw = draw.unwrap();
+        submit_startup_frame(
+            None,
+            || true,
+            || {
+                crate::startup_timing::update_submitted(Some(&draw));
+                Ok::<_, ()>(())
+            },
+        )
+        .unwrap();
+        crate::startup_timing::update_submitted(None);
     }
 
     #[test]

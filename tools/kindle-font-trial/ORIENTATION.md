@@ -307,13 +307,18 @@ with one short readiness question. Cancel, timeout or no desktop means no
 acquisition. Start only after acknowledgment and peer handoff; a busy lease
 is not a reservation. The operator never needs to run a command.
 
-1. **Startup.** Freeze with `prepare_pose_flip.py freeze --retained RETAINED
-   --plan PLAN --sensor SENSOR --scene SCENE`; preflight with `run_pose_flip.py
-   --work WORK --plan PLAN --preflight`. For the live visit replace `--preflight`
-   with `--owner OWNER --lease-tool LEASE --operator-ready`. On the live
-   `OPERATOR_CUE STARTUP_TURN`, show one instruction: “When the WeRead splash
-   appears, turn the Kindle 180° in the plane of the screen and hold.” Do not
-   turn it face down, tap, or turn late if the splash was missed.
+1. **Startup.** Build a fresh ARM candidate with the guarded first-draw trace
+   and the paired pressure/scanout sensor. Freeze with `prepare_pose_flip.py
+   freeze --retained RETAINED --plan PLAN --sensor SENSOR --scene SCENE
+   --build-result WORK/candidate-final/result.json`; preflight with
+   `run_pose_flip.py --work WORK --plan PLAN --preflight`. Use the Windows
+   `Invoke-StartupTurnBridge.ps1` for the live visit. It asks for readiness
+   off-device and obtains a second, short acknowledgment **after staging**.
+   The gesture is triggered by the appearance of the WeRead splash, not by
+   a host timestamp: turn once in the plane of the screen and hold. If the
+   shelf has already appeared, do not turn. A missing or late acknowledgment
+   ends the visit without launching the test case. The older pressure-only
+   plan is an archived observation, not an executable first-draw plan.
 2. **Screen saver.** Freeze with `assisted_sleep_visit.py freeze --retained
    RETAINED --plan PLAN --sensor SENSOR --witness-window --finish FINISH`;
    preflight with `run_assisted_sleep.py --work WORK --plan PLAN --preflight`.
@@ -329,7 +334,8 @@ is not a reservation. The operator never needs to run a command.
 Restore, close, verify absence independently and release by owner/token before
 reading `startup-flip.json` or `assisted-sleep.json`. Report the same-launch
 device-clock sensor bracket separately from what the operator saw. A startup
-window hit is not the first frame's rendering angle; driver submission is not
+window hit is not the first frame's rendering angle. The [first-draw test](../../docs/review/startup-orientation-20261121/first-draw-boundary.md)
+records the effective software angle independently; driver submission is not
 optical completion. Different awake readings do not locate a turn inside the
 screen saver. Compare sleep and wake frames from that cycle for relative
 orientation and content: the exit-time Reader screenshot is **not** an absolute

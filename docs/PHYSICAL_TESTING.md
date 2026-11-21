@@ -60,6 +60,12 @@ It did not time a Library launch. The wake-command guard refused before
 sleep, so no resumed frame or physical turn is claimed. Native control was
 restored and the device released at 13:28:38 Asia/Shanghai on November 21.
 
+The [later turn and wake visits](review/startup-orientation-20261121/turn-and-wake-device.md)
+also exercised the opposite grip and changed holding across a stock screen
+saver. The [first-draw orientation test](review/startup-orientation-20261121/first-draw-boundary.md)
+has a separate correctness endpoint: it samples the renderer angle at draw
+begin, not ordinary tile release, complete Library readiness or optical ink.
+
 ## November 20 font admission and entry audit
 
 The [guarded CPU-only comparison](review/library-startup-latency-20261119/physical-20261120.md)

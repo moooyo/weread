@@ -12,7 +12,7 @@ from unittest.mock import Mock, patch
 import run
 import run_pose_flip
 from analyze_pose_flip import CASE, CHECKPOINT, SEQUENCE, analyze
-from prepare_pose_flip import CONTRACT
+from prepare_pose_flip import CONTRACT, DRAW_CONTRACT
 from test_orientation import records
 
 
@@ -141,13 +141,18 @@ class FlipRunnerTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(); self.addCleanup(temporary.cleanup)
         self.work = Path(temporary.name); self.plan = self.work / 'plan'; self.plan.mkdir()
-        self.config = CONTRACT | dict(label=LABEL)
+        self.config = DRAW_CONTRACT | dict(label=LABEL)
         (self.plan/'plan.json').write_text(json.dumps(self.config)); (self.plan/'device.sh').write_text('exit 1\n')
         (self.plan/'inputs.tgz').write_bytes(b'fixture')
         self.args = SimpleNamespace(work=self.work,plan=self.plan,lease_tool=self.plan/'device.sh',owner='test-owner',
                                     preflight=False,recover=None,operator_ready=True,wait=0,admit_only=False)
         self.lease=Mock(); self.calls=[]; self.reference = 'D:1'; self.bad = None
         self.output = io.StringIO()
+        def acknowledge(label, *, on_issued):
+            self.assertEqual(label, LABEL)
+            on_issued()
+            return True
+        self.ack = Mock(side_effect=acknowledge)
         self.lease.LeaseRequest.side_effect = lambda _,token,owner,ident: SimpleNamespace(token_file=token,owner=owner,ident=ident)
         def acquire(req):
             self.assertEqual(req.ident, 'weread-startup-flip-' + LABEL); req.token_file.touch(exist_ok=False)
@@ -172,6 +177,7 @@ class FlipRunnerTests(unittest.TestCase):
         with patch.object(run_pose_flip,'verify_plan',return_value=self.config), patch.object(run_pose_flip,'verify_recovery',return_value=self.config), \
              patch.object(Path,'is_file',lambda path: str(path)=='/opt/kindle-toolchain/ubuntu-run' or isfile(path)), \
              patch.object(run,'LEASE',self.work/'lock'), patch.dict(run.UTIL,ssh_command=lambda *_:['fixture-ssh'],load_lease=lambda *_:self.lease), \
+             patch.object(run,'startup_turn_ack',self.ack), \
              patch.object(run.sys,'stdin',io.StringIO('test-secret\n')), patch.object(run.signal,'signal'), \
              patch.object(run.subprocess,'run',side_effect=self.command), redirect_stdout(self.output):
             return run_pose_flip.execute(self.args)
@@ -183,7 +189,7 @@ class FlipRunnerTests(unittest.TestCase):
 
     def test_each_valid_initial_pose_may_start_exactly_once(self):
         self.reference='U:3'; self.assertEqual(self.execute(),0)
-        self.assertEqual(self.calls, [mode for mode,_ in SEQUENCE]+['analyze']); self.assertIn('OPERATOR_CUE STARTUP_TURN',self.output.getvalue())
+        self.assertEqual(self.calls, [mode for mode,_ in SEQUENCE]+['analyze']); self.ack.assert_called_once()
         self.assertNotIn('HOLD_STILL',self.output.getvalue())
         with self.assertRaisesRegex(ValueError,'new label'): self.execute()
 

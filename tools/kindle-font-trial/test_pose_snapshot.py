@@ -23,12 +23,13 @@ SHIM = r'''
 #include <unistd.h>
 
 enum { FRAME_FD = 400 };
-static int discovery_round, sampled, rotated, clock_reads;
+static int discovery_round, sampled, rotated, clock_reads, opened_frame;
 static int variant(const char *name) { return !strcmp(getenv("POSE_TEST"), name); }
+static int paired(void) { return getenv("POSE_DISPLAY") || getenv("POSE_DRAW_FIXTURE"); }
 
 int __wrap_open(const char *path, int flags, ...) {
     if (!strcmp(path, "/dev/fb0")) {
-        if (flags != (O_RDONLY | O_CLOEXEC | O_NOFOLLOW) || !getenv("POSE_DISPLAY")) _exit(75);
+        if (flags != (O_RDONLY | O_CLOEXEC | O_NOFOLLOW) || !paired() || opened_frame++) _exit(75);
         if (variant("no_screen")) { errno = ENOENT; return -1; }
         return FRAME_FD;
     }
@@ -55,13 +56,21 @@ int __wrap_fstat(int fd, struct stat *info) {
 }
 int __wrap_close(int fd) { if (fd < 100) _exit(71); return 0; }
 
+int __wrap_lstat(const char *path, struct stat *info) {
+    if (strcmp(path, "/dev/fb0") || !paired() || rotated != 401) _exit(80);
+    if (variant("fb_gone")) { errno = ENOENT; return -1; }
+    __wrap_fstat(FRAME_FD, info);
+    if (variant("fb_replaced")) ++info->st_rdev;
+    if (variant("fb_symlink")) info->st_mode = S_IFLNK;
+    return 0;
+}
+
 int __wrap_clock_gettime(clockid_t clock, struct timespec *value) {
     if (clock != CLOCK_MONOTONIC) _exit(76);
     ++clock_reads;
-    if (getenv("POSE_DISPLAY")) {
-        if (clock_reads == 1 && (sampled || rotated)) _exit(77);
-        if (clock_reads == 2 && (sampled != 1 || rotated != 1)) _exit(78);
-        if (clock_reads > 2) _exit(79);
+    if (paired()) {
+        if (sampled != clock_reads / 2 || rotated != clock_reads / 2) _exit(77);
+        if (getenv("POSE_DISPLAY") && clock_reads > 2) _exit(79);
     }
     value->tv_sec = 1;
     value->tv_nsec = variant("reversed") ? 9 - clock_reads : clock_reads;
@@ -74,10 +83,12 @@ int __wrap_ioctl(int fd, unsigned long request, ...) {
     void *data = va_arg(arguments, void *);
     va_end(arguments);
     if (fd == FRAME_FD) {
-        if (request != FBIOGET_VSCREENINFO || clock_reads != 1 || sampled != 1 || rotated++) _exit(74);
-        if (variant("bad_screen")) { errno = EIO; return -1; }
+        if (request != FBIOGET_VSCREENINFO || clock_reads != 2 * rotated + 1 || sampled != rotated + 1) _exit(74);
+        if (variant("bad_screen") || (variant("fb_error_mid") && rotated == 49)) { errno = EIO; return -1; }
+        ++rotated;
         struct fb_var_screeninfo *screen = data;
-        screen->rotate = variant("bad_rotate") ? 4U : (unsigned)atoi(getenv("POSE_ROTATE"));
+        const char *angle = getenv("POSE_ROTATE"), *change = getenv("POSE_ROTATE_3_AT");
+        screen->rotate = variant("bad_rotate") ? 4U : change && rotated >= atoi(change) ? 3U : angle ? (unsigned)atoi(angle) : 1U;
         return 0;
     }
     if (request == EVIOCGBIT(0, sizeof(unsigned long))) {
@@ -92,12 +103,19 @@ int __wrap_ioctl(int fd, unsigned long request, ...) {
     } else if (request == EVIOCGNAME(128)) {
         strcpy(data, variant("bma") ? "BMA4xY_feature" : variant("wrong_name") ? "KX1329 touch" : "I2C-Kx132 node");
     } else if (request == EVIOCGABS(ABS_PRESSURE)) {
-        if (fd != 102 || (getenv("POSE_DISPLAY") && clock_reads != 1)) _exit(72);
+        if (fd != 102 || (paired() && clock_reads != 2 * sampled + 1)) _exit(72);
         if (variant("unreadable_pressure")) { errno = ENODEV; return -1; }
         if (sampled && variant("read_error")) { errno = ENODEV; return -1; }
         ((struct input_absinfo *)data)->value = (sampled && variant("unknown")) || variant("unmapped") ? 19 : 15 + sampled % 4;
         ++sampled;
     } else _exit(73);
+    return 0;
+}
+'''
+
+NO_WAIT = '''int __wrap_nanosleep(const struct timespec *interval, struct timespec *remaining) {
+    (void)remaining;
+    if (interval->tv_sec != 0 || interval->tv_nsec != 50000000) _exit(81);
     return 0;
 }
 '''
@@ -110,21 +128,28 @@ class SnapshotTests(unittest.TestCase):
         cls.addClassCleanup(cls.temp.cleanup)
         root = Path(cls.temp.name)
         shim = root / "syscalls.c"
-        shim.write_text(SHIM)
+        shim.write_text(SHIM + NO_WAIT)
         cls.program = root / "snapshot"
         subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", str(HERE / "pose_snapshot.c"), str(shim),
-                        *("-Wl,--wrap=" + name for name in ("open", "ioctl", "close", "fstat", "clock_gettime")), "-o", cls.program],
+                        *("-Wl,--wrap=" + name for name in ("open", "ioctl", "close", "fstat", "lstat", "clock_gettime", "nanosleep")),
+                        "-o", cls.program],
                        check=True)
 
-    def invoke(self, variant, arguments, status, rotation=0):
+    def invoke(self, variant, arguments, status, rotation=0, change=None, ready_only=False):
         env = {"POSE_TEST": variant, "POSE_ROTATE": str(rotation)}
         if arguments == ["--display-sample"]:
             env["POSE_DISPLAY"] = "1"
+        if arguments == ["--startup-draw"]:
+            env["POSE_DRAW_FIXTURE"] = "1"
+        if change is not None:
+            env["POSE_ROTATE_3_AT"] = str(change)
         result = subprocess.run([self.program, *arguments], capture_output=True, text=True, timeout=4,
                                 env={**os.environ, **env})
         self.assertEqual(result.returncode, status, result.stderr)
         self.assertEqual(result.stderr, "")
-        if status:
+        if ready_only:
+            self.assertEqual(result.stdout, f"READY 1000000001 1000000002 15 {rotation}\n")
+        elif status:
             self.assertEqual(result.stdout, "")
         return result.stdout.splitlines()
 
@@ -164,6 +189,32 @@ class SnapshotTests(unittest.TestCase):
                         "bad_screen", "bad_rotate", "unreadable_pressure", "unmapped", "reversed"):
             with self.subTest(variant=variant):
                 self.invoke(variant, ["--display-sample"], 2)
+
+    def test_startup_draw_uses_paired_reads_on_the_held_descriptors(self):
+        self.assertEqual(self.invoke("kx132", ["--draw-policy"], 0),
+                         ["startup-draw 401 50000000 27000000000 CLOCK_MONOTONIC ABS_PRESSURE FBIOGET_VSCREENINFO"])
+        ready, *rows = self.invoke("kx132", ["--startup-draw"], 0, rotation=1, change=201)
+        self.assertEqual(len(rows), 401)
+        self.assertEqual(ready, "READY " + rows[0].split(" ", 1)[1])
+        for index, row in enumerate(rows):
+            before = 1000000001 + index * 2
+            self.assertEqual(row, f"{index + 1} {before} {before + 1} {15 + index % 4} {1 if index < 200 else 3}")
+
+    def test_startup_draw_never_substitutes_for_missing_or_rebound_framebuffer(self):
+        for variant in ("no_screen", "screen_file", "bad_screen", "bad_rotate", "ambiguous", "unmapped"):
+            with self.subTest(variant=variant):
+                self.invoke(variant, ["--startup-draw"], 2)
+        for variant in ("fb_error_mid", "fb_replaced", "fb_gone", "fb_symlink", "replaced", "late_ambiguity", "read_error"):
+            with self.subTest(variant=variant):
+                self.invoke(variant, ["--startup-draw"], 2, ready_only=True)
+
+    def test_original_startup_flip_remains_pressure_only(self):
+        self.assertEqual(self.invoke("kx132", ["--flip-policy"], 0),
+                         ["startup-flip 401 50000000 27000000000 CLOCK_MONOTONIC"])
+        ready, *rows = self.invoke("kx132", ["--startup-flip"], 0)
+        self.assertEqual(len(rows), 401)
+        self.assertEqual(ready, "READY " + rows[0].split(" ", 1)[1])
+        self.assertTrue(all(len(row.split()) == 4 for row in rows))
 
 
 if __name__ == "__main__":

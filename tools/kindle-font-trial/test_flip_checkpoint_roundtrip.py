@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from analyze_pose_flip import CASE, SEQUENCE, analyze
-from prepare_pose_flip import CONTRACT
+from prepare_pose_flip import DRAW_CONTRACT
 import test_pose_flip_device as device
 
 
@@ -38,13 +38,16 @@ class DeviceToReport(unittest.TestCase):
         path = Path(self.scratch.name)/'collector-output.tgz'; path.write_bytes(fixture.step('collect').stdout)
         fixture.step('close'); fixture.step('absent')
         label = device.shelf_fixture.LABEL
-        receipt=dict(label=label, purpose=CONTRACT['purpose'], scope='transaction_only', passed=not bool(case_reason),
+        receipt=dict(label=label, purpose=DRAW_CONTRACT['purpose'], scope='transaction_only', passed=not bool(case_reason),
                      owner_token_checked_on_release=True, acquired='2026-11-21T03:01:01Z', operator_cue_issued='2026-11-21T03:01:02Z',
-                     released='2026-11-21T03:02:01Z',initial_native_reference='D:1',operations=[
+                     operator_cue_acknowledged='2026-11-21T03:01:03Z',released='2026-11-21T03:02:01Z',initial_native_reference='D:1',operations=[
                          dict(mode=mode,case=case,status=result.returncode if mode=='case' else 0,
+                              at='2026-11-21T03:01:01Z' if mode=='stage' else '2026-11-21T03:01:50Z',
                               diagnostic='refused '+case_reason if case_reason and mode=='case' else '') for mode,case in SEQUENCE])
-        report=analyze(CONTRACT|dict(label=label),receipt,path)
+        report=analyze(DRAW_CONTRACT|dict(label=label),receipt,path)
         self.assertEqual(report['startup_turn']['coverage'],expected)
+        self.assertEqual(report['first_application_draw']['renderer_rotation_degrees'],180)
+        self.assertEqual(report['first_application_draw']['turn_relative_to_draw'], 'before_draw' if expected=='hit' else 'after_draw')
         self.assertEqual(report['launch_calibration']['comparison_to_before'],'different')
         self.assertEqual(report['touch'],'not_tested')
         if case_reason:

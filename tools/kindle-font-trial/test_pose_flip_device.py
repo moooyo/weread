@@ -15,7 +15,7 @@ from test_pose_snapshot import SHIM
 
 
 HERE = Path(__file__).resolve().parent
-WRAPS = ['-Wl,--wrap=' + name for name in ('open', 'ioctl', 'close', 'fstat', 'clock_gettime', 'nanosleep')]
+WRAPS = ['-Wl,--wrap=' + name for name in ('open', 'ioctl', 'close', 'fstat', 'lstat', 'clock_gettime', 'nanosleep')]
 PAUSE_SHIM = '''int __wrap_nanosleep(const struct timespec *requested, struct timespec *remaining) {
     (void)remaining;
     if (requested->tv_sec || requested->tv_nsec != 50000000) _exit(77);
@@ -68,7 +68,7 @@ class FlipDeviceTests(unittest.TestCase):
         boot = root / 'proc/sys/kernel/random/boot_id'
         boot.parent.mkdir(parents=True)
         boot.write_text('11111111-1111-1111-1111-111111111111\n')
-        source = flip.device_program().replace(f'= {shelf_fixture.visit.ARM_B} ]', '= 6 ]')
+        source = flip.device_program(6)
         source = re.sub(r'/mnt/us|/sys/class/input|/proc/|/var/local|/tmp(?=[/)])', lambda match: str(root) + match[0], source)
         source = source.replace(str(root) + '/proc/$flip_child/', '/proc/$flip_child/')
         self.fixture.definitions, dispatch = source.split(self.fixture.dispatch.split('reference)')[0] + 'reference)', 1)
@@ -79,6 +79,9 @@ class FlipDeviceTests(unittest.TestCase):
         log = self.fixture.stage / 'B/data/logs/application-bootstrap.log'
         (root / 'proc/60/fd/2').symlink_to(log)
         _, markers = records('B-library', 100)
+        markers = markers.replace('WEREAD_STARTUP 100.120000000 first_application_frame_send',
+                                  'WEREAD_STARTUP 100.115000000 first_application_frame_draw_begin_rot180\n'
+                                  'WEREAD_STARTUP 100.120000000 first_application_frame_send')
         measure = contents['measure'].decode()
         measure = measure.replace('echo \'WEREAD_STARTUP 123.000000000 first_application_frame_send\'',
                                   'printf \'%s\' \'' + markers + '\'')
@@ -116,7 +119,7 @@ fi
 '''
         contents.update({'pose-snapshot': self.program.read_bytes(), 'measure': measure.encode()})
         self.fixture.payload = archive(contents.items())
-        self.fixture.env.update(POSE_TEST='kx132')
+        self.fixture.env.update(POSE_TEST='kx132', POSE_DRAW_FIXTURE='1', POSE_ROTATE='1')
 
     def test_frozen_shell_and_sensor_child_join_before_closed_public_archive(self):
         self.fixture.stage_visit()

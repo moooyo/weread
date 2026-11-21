@@ -4,7 +4,7 @@ flip_sensor_bound() {
     flip_reason=sensor_identity; [ "$(awk '{print $4 ":" $22}' "/proc/$flip_child/stat" 2>/dev/null)" = "$$:$flip_birth" ] || return 1
     flip_reason=sensor_output; [ "$out/flip-stream" -ef "/proc/$flip_child/fd/1" ] || return 1
     flip_reason=sensor_argv; tr '\000' '\n' <"/proc/$flip_child/cmdline" >"$out/flip-args" &&
-        printf '%s\n' "$stage/pose-snapshot" --startup-flip | cmp -s - "$out/flip-args"
+        printf '%s\n' "$stage/pose-snapshot" --startup-draw | cmp -s - "$out/flip-args"
 }
 flip_reap() {
     if [ -n "${flip_child:-}" ]; then wait "$flip_child" 2>/dev/null || :; fi
@@ -59,7 +59,7 @@ flip_case() {
     flip_first_boot=$flip_boot_id
     trap flip_reap 0
     trap 'exit 1' HUP INT TERM
-    "$stage/pose-snapshot" --startup-flip </dev/null >"$out/flip-stream" 2>/dev/null &
+    "$stage/pose-snapshot" --startup-draw </dev/null >"$out/flip-stream" 2>/dev/null &
     flip_child=$!
     for tick in $(seq 1 60); do
         [ ! -s "$out/flip-stream" ] || break
@@ -67,7 +67,7 @@ flip_case() {
         usleep 50000
     done
     plain "$out/flip-stream" && head -n 1 "$out/flip-stream" >"$out/sensor-ready" &&
-        awk 'NF!=4 || $1!="READY" || $2!~/^[1-9][0-9]*$/ || $3!~/^[1-9][0-9]*$/ || $4!~/^(15|16|17|18)$/ {bad=1} END {exit bad || NR!=1}' "$out/sensor-ready" || fail flip_not_ready
+        awk 'NF!=5 || $1!="READY" || $2!~/^[1-9][0-9]*$/ || $3!~/^[1-9][0-9]*$/ || $4!~/^(15|16|17|18)$/ || $5!~/^[0-3]$/ {bad=1} END {exit bad || NR!=1}' "$out/sensor-ready" || fail flip_not_ready
     flip_birth=$(awk '{print $22}' "/proc/$flip_child/stat") || fail ready_sensor_identity
     flip_sensor_bound || fail "ready_$flip_reason"
     native && absent "$stage/armed" || fail launch_admission
@@ -101,7 +101,7 @@ flip_case() {
     cmp -s "$out/app-binding" "$out/log-check" && cmp -s "$out/app-binding" "$out/sensor-binding" || fail send_binding_changed
     wait "$flip_child" || fail flip_incomplete
     flip_child=''; trap - 0 HUP INT TERM
-    awk 'NR==1 {next} NF!=4 || $1!=NR-1 || $2!~/^[1-9][0-9]*$/ || $3!~/^[1-9][0-9]*$/ || $4!~/^(15|16|17|18)$/ {bad=1; exit} {print} END {exit bad || NR!=402}' "$out/flip-stream" >"$out/sensor" &&
+    awk 'NR==1 {next} NF!=5 || $1!=NR-1 || $2!~/^[1-9][0-9]*$/ || $3!~/^[1-9][0-9]*$/ || $4!~/^(15|16|17|18)$/ || $5!~/^[0-3]$/ {bad=1; exit} {print} END {exit bad || NR!=402}' "$out/flip-stream" >"$out/sensor" &&
         head -n 1 "$out/flip-stream" | cmp -s - "$out/sensor-ready" || fail flip_format
     flip_boot && [ "$flip_boot_id" = "$flip_first_boot" ] || fail closed_sensor_boot
     flip_checkpoint || fail checkpoint_publish

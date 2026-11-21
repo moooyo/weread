@@ -42,7 +42,7 @@ pub use refresh::{
 };
 pub use render_control::{NightModeConfig, RenderError, RenderHandle};
 pub use splash::{StartupImage, StartupImages, StartupSplash};
-pub use startup_timing::mark as record_startup_stage;
+pub use startup_timing::{STARTUP_DRAW_TRACE_POLICY, mark as record_startup_stage};
 
 use platform::KindlePlatform;
 use slint::platform::WindowAdapter;

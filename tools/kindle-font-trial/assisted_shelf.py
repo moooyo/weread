@@ -14,7 +14,7 @@ from freeze import launcher
 from orientation_contract import CANDIDATE
 from orientation_device import render_device, section
 from pose_visit import ARM_A, ARM_B, once
-from prepare_orientation import DEVICE, FIRMWARE, HELPERS, arm_inputs, public_seed, publish, read_record, trial_document
+from prepare_orientation import DEVICE, FIRMWARE, HELPERS, arm_inputs, local, public_seed, publish, read_record, trial_document
 
 
 HERE = Path(__file__).resolve().parent
@@ -38,16 +38,20 @@ def contract_for(plan):
 
 
 def device_program(*, fixed_down=False, bounded_up=False):
+    return shelf_program(ARM_B, fixed_down=fixed_down, bounded_up=bounded_up)
+
+
+def shelf_program(candidate_bytes, *, fixed_down=False, bounded_up=False):
     if fixed_down and bounded_up:
         raise ValueError('Choose exactly one physical portrait for the visit')
-    body = render_device(ARM_A, ARM_B)
+    body = render_device(ARM_A, candidate_bytes)
     both = 'document measure seed.tar.gz A/launch.sh B/launch.sh A/app/weread B/app/weread A/app/weread-frame-guard B/app/weread-frame-guard A/app/weread-native-query B/app/weread-native-query'
     body = once(body, both, ' '.join(MEMBERS))
     body = once(body, 'NR!=11 || bytes>230686720', f'NR!={len(MEMBERS)} || bytes>127926272')
     body = once(body, 'for arm in A B; do', 'for arm in B; do')
     first = body.index('    [ "$(stat -c %s "$stage/A/app/weread")')
     end = body.index('\n}', first)
-    body = body[:first] + f'    [ "$(stat -c %s "$stage/B/app/weread")" = {ARM_B} ] &&\n' + \
+    body = body[:first] + f'    [ "$(stat -c %s "$stage/B/app/weread")" = {candidate_bytes} ] &&\n' + \
         '        plain "$stage/pose-snapshot" && [ -x "$stage/pose-snapshot" ] && plain "$stage/shelf-scene" && [ -x "$stage/shelf-scene" ]' + body[end:]
     body = once(body, 'route=${name#*-}; dwell=12000', f'route=${{name#*-}}; dwell={DWELL}')
     body = once(body, ' && cmp -s "$out/portrait" "$out/portrait-return"', '')
@@ -98,12 +102,12 @@ def verify_recovery(plan_dir):
 
 
 def verify_plan(plan_dir):
-    return verify_payload(plan_dir, verify_recovery(plan_dir))
+    return verify_payload(plan_dir, verify_recovery(plan_dir), ARM_B)
 
 
-def verify_payload(plan_dir, plan):
+def verify_payload(plan_dir, plan, candidate_bytes, *, check_archive=None):
     sizes = plan['members']
-    if (set(sizes) != set(MEMBERS) or sizes['B/app/weread'] != ARM_B or
+    if (set(sizes) != set(MEMBERS) or sizes['B/app/weread'] != candidate_bytes or
             any(type(value) is not int or value <= 0 for value in sizes.values()) or sum(sizes.values()) > 127926272):
         raise ValueError('Invalid member manifest')
     archive_path, document = plan_dir / 'inputs.tgz', plan_dir / 'document.reference'
@@ -118,24 +122,27 @@ def verify_payload(plan_dir, plan):
                 raise ValueError('Unexpected member type, size or permissions')
         if archive.extractfile('document').read() != document.read_bytes():
             raise ValueError('The supervised document does not match the frozen plan')
+        if check_archive is not None:
+            check_archive(archive)
     return plan
 
 
 def freeze(retained, plan_dir, sensor, scene, *, fixed_down=False, bounded_up=False):
     contract = DOWN_CONTRACT if fixed_down else CONTRACT
     guard = {'foreground_guard': BOUNDED_UP_GUARD} if bounded_up else {}
-    return freeze_shelf(retained, plan_dir, sensor, scene, contract | guard,
-                        device_program(fixed_down=fixed_down, bounded_up=bounded_up), verify_plan)
-
-
-def freeze_shelf(retained, plan_dir, sensor, scene, contract, device, verify):
     retained = retained.resolve(strict=True)
-    helpers = retained / 'orientation-inputs/helpers'
-    seed = retained / 'orientation-inputs/seed.tar.gz'
-    source = retained / 'src'
     arms = arm_inputs(retained)
     if (arms['A']['bytes'], arms['B']['bytes']) != (ARM_A, ARM_B):
         raise ValueError('Unexpected physical comparison builds')
+    return freeze_shelf(retained, plan_dir, sensor, scene, retained / arms['B']['executable'], contract | guard,
+                        device_program(fixed_down=fixed_down, bounded_up=bounded_up), verify_plan)
+
+
+def freeze_shelf(retained, plan_dir, sensor, scene, candidate, contract, device, verify):
+    retained = retained.resolve(strict=True)
+    helpers = local(retained, retained / 'orientation-inputs/helpers', directory=True)
+    seed = local(retained, retained / 'orientation-inputs/seed.tar.gz')
+    source = local(retained, retained / 'src', directory=True)
     public_seed(source, seed)
     inspect_elf = runpy.run_path(str(source / 'docs/review/library-startup-latency-20261119/rebuild-arm.py'))['inspect_elf']
     for helper in (sensor, scene):
@@ -148,8 +155,8 @@ def freeze_shelf(retained, plan_dir, sensor, scene, contract, device, verify):
     document = once(document, 'WEREAD_TRIAL_DWELL=12000', f'WEREAD_TRIAL_DWELL={DWELL}')
     document = once(document, 'seq 1 65', 'seq 1 90').encode('ascii')
     supervisor = launcher((source / 'packaging/kindle/launch.sh').read_text()).encode('ascii')
-    entries = dict(zip(MEMBERS, [document, helpers / 'measure', seed, sensor, scene, supervisor,
-                                 retained / arms['B']['executable'], *(helpers / name for name in HELPERS)], strict=True))
+    entries = dict(zip(MEMBERS, [document, local(retained, helpers / 'measure'), seed, sensor, scene, supervisor,
+                                 candidate, *(local(retained, helpers / name) for name in HELPERS)], strict=True))
     sizes = {name: len(value) if isinstance(value, bytes) else value.stat().st_size for name, value in entries.items()}
     device = device.encode('ascii')
     for script in (device, document, supervisor):

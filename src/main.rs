@@ -137,6 +137,14 @@ struct Arguments {
     #[arg(long)]
     kindle: bool,
 
+    #[cfg(all(
+        feature = "kindle",
+        feature = "startup-orientation-reuse",
+        target_os = "linux"
+    ))]
+    #[arg(long, hide = true, exclusive = true)]
+    startup_draw_trace_policy: bool,
+
     /// Emit read-only native portrait capability and framebuffer metadata.
     #[arg(long, requires = "kindle", hide = true)]
     probe_native_portrait_framebuffer: bool,
@@ -314,6 +322,15 @@ fn query_native_calibration_probe(profile: DeviceProfile) -> Result<Option<Strin
 fn main() -> std::process::ExitCode {
     startup_mark("main_enter");
     let arguments = Arguments::parse();
+    #[cfg(all(
+        feature = "kindle",
+        feature = "startup-orientation-reuse",
+        target_os = "linux"
+    ))]
+    if arguments.startup_draw_trace_policy {
+        println!("{}", slint_backend_kindle::STARTUP_DRAW_TRACE_POLICY);
+        return std::process::ExitCode::SUCCESS;
+    }
     if let Some(result) = dispatch_native_calibration_probe(&arguments, || {
         query_native_calibration_probe(arguments.device)
     }) {
@@ -368,6 +385,22 @@ fn main() -> std::process::ExitCode {
 #[cfg(test)]
 mod native_portrait_probe_tests {
     use super::*;
+
+    #[test]
+    fn startup_draw_policy_is_exclusive_to_the_measurement_candidate() {
+        let probe = Arguments::try_parse_from(["weread", "--startup-draw-trace-policy"]);
+        assert_eq!(
+            probe.is_ok(),
+            cfg!(all(
+                feature = "kindle",
+                feature = "startup-orientation-reuse",
+                target_os = "linux"
+            ))
+        );
+        assert!(
+            Arguments::try_parse_from(["weread", "--startup-draw-trace-policy", "--demo"]).is_err()
+        );
+    }
 
     #[test]
     fn calibration_probe_is_exclusive_and_never_runs_during_ordinary_startup() {

@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from assisted_shelf import MEMBERS, device_program as shelf_program
+from assisted_shelf import shelf_program
 from orientation_device import section
 from pose_visit import once
 
@@ -15,8 +15,10 @@ LEAVES = ('request', 'markers', 'sensor', 'sensor-ready', 'app-binding', 'sensor
 BASE_LEAVES = tuple(leaf for leaf in LEAVES if leaf not in ('portrait-return', 'shelf', 'final.metadata.json'))
 
 
-def device_program():
-    body = shelf_program(fixed_down=True)
+def device_program(candidate_bytes):
+    body = shelf_program(candidate_bytes, fixed_down=True)
+    body = once(body, 'portrait_opened|first_application_frame_send|',
+                'portrait_opened|first_application_frame_draw_begin_rot(0|90|180|270)|first_application_frame_send|')
     old = section(body, '        if absent "$entry/complete";', '        for leaf in $leaves;')
     new = '''        if absent "$entry/pose-checkpoint"; then absent "$entry/complete" || fail public_output; continue; fi
         plain "$stage/$entry/pose-checkpoint" && printf 'bound pose capture\\n' | cmp -s - "$entry/pose-checkpoint" &&

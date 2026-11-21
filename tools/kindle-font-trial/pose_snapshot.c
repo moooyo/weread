@@ -70,7 +70,7 @@ invalid:
     return -1;
 }
 
-struct sample { uint64_t before, after; int raw; };
+struct sample { uint64_t before, after; int raw; unsigned rotation; };
 
 static int monotonic_ns(uint64_t *value) {
     struct timespec now;
@@ -79,12 +79,15 @@ static int monotonic_ns(uint64_t *value) {
     return *value > 0;
 }
 
-static int sample(int descriptor, struct sample *result) {
+static int sample(int descriptor, int frame, struct sample *result) {
     struct input_absinfo pressure;
+    struct fb_var_screeninfo screen;
     if (!monotonic_ns(&result->before) || ioctl(descriptor, EVIOCGABS(ABS_PRESSURE), &pressure) < 0 ||
+        (frame >= 0 && ioctl(frame, FBIOGET_VSCREENINFO, &screen) < 0) ||
         !monotonic_ns(&result->after) || result->before > result->after) return 0;
     result->raw = pressure.value;
-    return result->raw >= 15 && result->raw <= 18;
+    if (frame >= 0) result->rotation = screen.rotate;
+    return result->raw >= 15 && result->raw <= 18 && (frame < 0 || result->rotation <= 3);
 }
 
 static int still_unique(int descriptor) {
@@ -97,44 +100,61 @@ static int still_unique(int descriptor) {
     return same;
 }
 
+static int open_frame(void) {
+    int frame = open("/dev/fb0", O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    struct stat status;
+    if (frame < 0) return -1;
+    if (fstat(frame, &status) == 0 && S_ISCHR(status.st_mode)) return frame;
+    close(frame);
+    return -1;
+}
+
+static int current_frame(int frame) {
+    struct stat held, current;
+    return fstat(frame, &held) == 0 && lstat("/dev/fb0", &current) == 0 && S_ISCHR(current.st_mode) &&
+        held.st_dev == current.st_dev && held.st_ino == current.st_ino && held.st_rdev == current.st_rdev;
+}
+
 static int display_sample(void) {
     int sensor = discover();
     if (sensor < 0) return 2;
-    int frame = open("/dev/fb0", O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
-    struct stat status;
-    struct input_absinfo pressure;
-    struct fb_var_screeninfo screen;
-    uint64_t before, after;
-    int valid = frame >= 0 && fstat(frame, &status) == 0 && S_ISCHR(status.st_mode) &&
-        monotonic_ns(&before) && ioctl(sensor, EVIOCGABS(ABS_PRESSURE), &pressure) == 0 &&
-        ioctl(frame, FBIOGET_VSCREENINFO, &screen) == 0 && monotonic_ns(&after) && before <= after &&
-        pressure.value >= 15 && pressure.value <= 18 && screen.rotate <= 3 && still_unique(sensor);
+    int frame = open_frame();
+    struct sample result;
+    int valid = frame >= 0 && sample(sensor, frame, &result) && still_unique(sensor);
     if (frame >= 0) close(frame);
     close(sensor);
     if (!valid) return 2;
-    if (printf("sample %" PRIu64 " %" PRIu64 " %d %u\n", before, after, pressure.value, screen.rotate) < 0) return 2;
+    if (printf("sample %" PRIu64 " %" PRIu64 " %d %u\n", result.before, result.after, result.raw, result.rotation) < 0) return 2;
     return fflush(stdout) == 0 ? 0 : 2;
 }
 
-static int startup_flip(void) {
+static int emit(const struct sample *result, int paired) {
+    if (printf(" %" PRIu64 " %" PRIu64 " %d", result->before, result->after, result->raw) < 0) return 0;
+    if (paired && printf(" %u", result->rotation) < 0) return 0;
+    return putchar('\n') != EOF;
+}
+
+static int startup_stream(int paired) {
     enum { count = 401 };
     struct sample points[count];
     const struct timespec interval = {.tv_nsec = 50000000};
     int descriptor = discover();
     if (descriptor < 0) return 2;
-    int valid = 1;
+    int frame = paired ? open_frame() : -1;
+    int valid = !paired || frame >= 0;
     for (int index = 0; index < count && valid; ++index) {
-        valid = (!index || !nanosleep(&interval, NULL)) && sample(descriptor, &points[index]) &&
+        valid = (!index || !nanosleep(&interval, NULL)) && sample(descriptor, frame, &points[index]) &&
             (!index || points[index].before > points[index - 1].after) &&
             points[index].after - points[0].before <= UINT64_C(27000000000);
         if (valid && !index)
-            valid = printf("READY %" PRIu64 " %" PRIu64 " %d\n", points[0].before, points[0].after, points[0].raw) > 0 && !fflush(stdout);
+            valid = fputs("READY", stdout) >= 0 && emit(&points[0], paired) && !fflush(stdout);
     }
-    valid = valid && still_unique(descriptor);
+    valid = valid && still_unique(descriptor) && (!paired || current_frame(frame));
+    if (frame >= 0) close(frame);
     close(descriptor);
     if (!valid) return 2;
     for (int index = 0; index < count; ++index)
-        if (printf("%d %" PRIu64 " %" PRIu64 " %d\n", index + 1, points[index].before, points[index].after, points[index].raw) < 0) return 2;
+        if (printf("%d", index + 1) < 0 || !emit(&points[index], paired)) return 2;
     return fflush(stdout) == 0 ? 0 : 2;
 }
 
@@ -142,7 +162,10 @@ int main(int argc, char **argv) {
     int count = 1;
     if (argc == 2) {
         if (!strcmp(argv[1], "--flip-policy")) return puts("startup-flip 401 50000000 27000000000 CLOCK_MONOTONIC") < 0 || fflush(stdout) ? 2 : 0;
-        if (!strcmp(argv[1], "--startup-flip")) return startup_flip();
+        if (!strcmp(argv[1], "--draw-policy"))
+            return puts("startup-draw 401 50000000 27000000000 CLOCK_MONOTONIC ABS_PRESSURE FBIOGET_VSCREENINFO") < 0 || fflush(stdout) ? 2 : 0;
+        if (!strcmp(argv[1], "--startup-flip")) return startup_stream(0);
+        if (!strcmp(argv[1], "--startup-draw")) return startup_stream(1);
         if (!strcmp(argv[1], "--display-sample")) return display_sample();
         size_t length = strlen(argv[1]);
         if (length == 0 || length > 3 || argv[1][0] == '0' || strspn(argv[1], "0123456789") != length) return 64;
@@ -155,7 +178,7 @@ int main(int argc, char **argv) {
     const struct timespec pause = {.tv_nsec = 50000000};
     int valid = 1;
     for (int index = 0; index < count && valid; ++index) {
-        valid = (!index || !nanosleep(&pause, NULL)) && sample(descriptor, &samples[index]) &&
+        valid = (!index || !nanosleep(&pause, NULL)) && sample(descriptor, -1, &samples[index]) &&
             (!index || samples[index].before > samples[index - 1].after) &&
             samples[index].after - samples[0].before <= UINT64_C(8000000000);
     }

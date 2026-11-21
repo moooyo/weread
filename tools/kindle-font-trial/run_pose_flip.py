@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from prepare_pose_flip import schedule, verify_plan, verify_recovery
+from prepare_pose_flip import draw_schedule, verify_plan, verify_recovery
 from run import run, transport
 
 
@@ -14,14 +14,14 @@ def execute(args):
     if plan == work or not plan.is_relative_to(work):
         raise ValueError('Use a fresh private startup-turn plan in the designated worker')
     config = (verify_recovery if args.recover else verify_plan)(plan)
-    schedule(config)
+    draw_schedule(config)
     transport((plan / 'device.sh').read_text(encoding='ascii'), 'admit', config['label'], 'none')
     if args.preflight:
         print(json.dumps(dict(label=config['label'], validated=True, device_accessed=False, lease_requested=False)))
         return 0
     if not args.owner or not args.lease_tool or (not args.recover and not args.operator_ready):
         raise ValueError('A cooperating operator must be ready for the single turn before acquiring the device')
-    return run(args, startup_flip_schedule=schedule)
+    return run(args, startup_flip_schedule=draw_schedule)
 
 
 if __name__ == '__main__':

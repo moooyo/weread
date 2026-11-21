@@ -402,7 +402,7 @@ impl Framebuffer {
         if result < 0 {
             Err(std::io::Error::last_os_error())
         } else {
-            crate::startup_timing::update_submitted();
+            crate::startup_timing::update_submitted(None);
             Ok(())
         }
     }
@@ -491,12 +491,22 @@ impl Framebuffer {
     /// cache it, so later frames issue exactly one ioctl instead of retrying a
     /// known-failing one every refresh.
     fn send_update(&self, region: UpdateRect, waveform: u32, mode: u32) {
-        let _ = self.send_update_checked(region, waveform, mode);
+        let _ = self.send_update_checked(region, waveform, mode, None);
     }
 
-    fn send_update_checked(&self, region: UpdateRect, waveform: u32, mode: u32) -> bool {
+    fn send_update_checked(
+        &self,
+        region: UpdateRect,
+        waveform: u32,
+        mode: u32,
+        draw: Option<&crate::startup_timing::FirstDraw>,
+    ) -> bool {
         self.submit_update_with(|variant, marker| {
-            self.send_update_variant(variant, region, waveform, mode, marker)
+            let accepted = self.send_update_variant(variant, region, waveform, mode, marker);
+            if accepted {
+                crate::startup_timing::update_submitted(draw);
+            }
+            accepted
         })
     }
 
@@ -614,12 +624,7 @@ impl Framebuffer {
             return false;
         }
         // SAFETY: `update` outlives the ioctl and matches the kernel's struct.
-        let accepted =
-            unsafe { libc::ioctl(self.file.as_raw_fd(), request as _, update as *const _) != -1 };
-        if accepted {
-            crate::startup_timing::update_submitted();
-        }
-        accepted
+        unsafe { libc::ioctl(self.file.as_raw_fd(), request as _, update as *const _) != -1 }
     }
 
     fn mtk_update_request(
@@ -749,6 +754,13 @@ impl Framebuffer {
     /// Require acceptance of a full-frame presentation or resident wake update.
     /// This does not add an unbounded update-completion wait to the power handshake.
     pub(crate) fn refresh_full_checked(&self) -> std::io::Result<()> {
+        self.refresh_full_with_draw(None)
+    }
+
+    pub(crate) fn refresh_full_with_draw(
+        &self,
+        draw: Option<crate::startup_timing::FirstDraw>,
+    ) -> std::io::Result<()> {
         if self.last_issued_marker.get() == u32::MAX {
             return Err(std::io::Error::other(
                 "the EPDC update marker sequence is exhausted",
@@ -763,6 +775,7 @@ impl Framebuffer {
             },
             WAVEFORM_MODE_GC16,
             UPDATE_MODE_FULL,
+            draw.as_ref(),
         ) {
             Ok(())
         } else {
@@ -1102,6 +1115,56 @@ mod tests {
         framebuffer.last_submitted_marker.set(Some(7));
         assert!(framebuffer.wait_for_update_complete_checked().is_err());
         framebuffer.wait_for_update_complete();
+    }
+
+    #[test]
+    fn first_draw_witness_is_not_replayed_after_rejected_update_variants() {
+        use crate::startup_timing::{FirstDraw, arm_first_application_frame, update_submitted};
+        use slint::platform::software_renderer::RenderingRotation;
+
+        const CHILD: &str = "WEREAD_TEST_REJECTED_DRAW_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            let draw = FirstDraw::begin(true, 0, RenderingRotation::Rotate180).unwrap();
+            arm_first_application_frame();
+            let rejected = update_test_framebuffer(observed_night_mode(1, false, false));
+            assert!(rejected.refresh_full_with_draw(Some(draw)).is_err());
+            assert_eq!(rejected.last_submitted_marker.get(), None);
+            assert_eq!(
+                rejected.update_variant.get(),
+                Some(UpdateVariant::Unsupported)
+            );
+            let next = update_test_framebuffer(observed_night_mode(1, false, false));
+            let mut attempts = Vec::new();
+            assert!(next.submit_update_with(|variant, marker| {
+                attempts.push((variant, marker));
+                if variant == UpdateVariant::Mtk {
+                    update_submitted(None);
+                    true
+                } else {
+                    false
+                }
+            }));
+            assert_eq!(
+                attempts,
+                UpdateVariant::PROBE_ORDER.map(|variant| (variant, 1))
+            );
+            return;
+        }
+        let thread = std::thread::current();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", thread.name().unwrap(), "--nocapture"])
+            .env(CHILD, "1")
+            .env("WEREAD_STARTUP_TIMING", "1")
+            .output()
+            .unwrap();
+        let errors = String::from_utf8(output.stderr).unwrap();
+        assert!(output.status.success(), "{errors}");
+        let markers: Vec<_> = errors
+            .lines()
+            .filter(|line| line.starts_with("WEREAD_STARTUP "))
+            .collect();
+        assert_eq!(markers.len(), 1);
+        assert!(markers[0].ends_with(" first_application_frame_send"));
     }
 
     fn packed_marker(request: PackedUpdateRequest) -> u32 {
