@@ -15,6 +15,38 @@ dates remain attached to their own results.
   trials; the latest normal update preserves the existing current-layout data.
 - Scope: supervised device iterations and private daily-trial observations, separate from the Scribe 2022 firmware 5.20.1 VM experiments.
 
+## Library first-frame startup
+
+Measure **release of the ordinary WeRead tile in the stock Kindle Library to
+the first complete WeRead Library frame in that launch**. The frame must show
+the normal shelf layout and navigation, plus recognizable entries or the
+legitimate empty-library state. Covers may still be placeholders. A splash,
+blank frame, QR Login, route name or open input descriptor does not qualify.
+No second tap, sort change, manual observation or recording is required.
+
+- **Start:** activate the stock tile through its normal touch path. For
+  automation, record the device timestamp of the release event and label it
+  **synthetic touch release**, not human input. A native file-open request,
+  SSH command, shell start or host `GO` timestamp is a different origin.
+- **End:** associate the completed Library draw with that same launch and
+  record the actual end event. Label a software render-completion timestamp
+  **release to Library render complete**. If the measured event is the driver
+  accepting submission of that frame, label it **release to Library frame
+  submitted (`SEND`)**. When both exist, keep both columns. A bare first
+  display update or a screenshot observed later cannot identify the endpoint.
+- **Clock and scope:** use one device clock, such as `CLOCK_MONOTONIC`, for
+  release and the render/submission log. Record model, firmware, entry, shelf
+  and cache conditions. Keep A/B endpoints identical. Driver acceptance is
+  not driver update completion, and neither is optical settling of the ink.
+  First-page covers fully loaded is a separate, optional metric.
+
+If the release, same-launch frame identity or end timestamp is missing,
+report `not_timed` rather than infer a latency from another run. In particular,
+the November 20 file-open-request-to-first-Library-`SEND` measurements keep
+their original name. The November 21 operator retest confirmed responsive
+native return but did not time the shelf frame or a sort interaction; it
+remains an untimed functional observation under both definitions.
+
 ## November 20 font admission and entry audit
 
 The [guarded CPU-only comparison](review/library-startup-latency-20261119/physical-20261120.md)

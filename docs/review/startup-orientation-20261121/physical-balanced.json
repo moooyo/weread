@@ -1,0 +1,36 @@
+{
+  "batch_label": "36402ebb5e6aeeb1",
+  "pilot_label": "f297b8b406c0e5a5",
+  "device": "Kindle Scribe 2022",
+  "firmware": "5.19.5",
+  "clock": "CLOCK_MONOTONIC",
+  "from": "Programmatic file-open request for a temporary indexed document",
+  "to": "first_application_frame_send (driver accepted the first Library application frame)",
+  "fixture": "Public offline 15-cover shelf; same launcher with sleep 2; only B enables startup-orientation-reuse",
+  "excluded_from_timing": ["A-library", "B-library", "A-reader", "B-reader", "A0", "B0"],
+  "pairs_ns": [
+    {"pair": 1, "order": "AB", "a": 6653620308, "b": 5317586001, "a_minus_b": 1336034307},
+    {"pair": 2, "order": "BA", "a": 6548798000, "b": 5638290539, "a_minus_b": 910507461},
+    {"pair": 3, "order": "AB", "a": 6554558385, "b": 5244675847, "a_minus_b": 1309882538},
+    {"pair": 4, "order": "BA", "a": 6533009001, "b": 5614666231, "a_minus_b": 918342770},
+    {"pair": 5, "order": "AB", "a": 6969025693, "b": 5393621693, "a_minus_b": 1575404000},
+    {"pair": 6, "order": "BA", "a": 6870450462, "b": 5173077232, "a_minus_b": 1697373230}
+  ],
+  "median_ms": {"a": 6604.089, "b": 5355.604, "a_minus_b_paired": 1322.958},
+  "range_ms": {"a": [6533.009, 6969.026], "b": [5173.077, 5638.291], "a_minus_b_paired": [910.507, 1697.373]},
+  "faster_pairs": 6,
+  "timing_gate_passed": true,
+  "site_outcomes": {"a": {"splash_timeout": 6, "event_loop_timeout": 6}, "b": {"splash_reused": 6, "event_loop_reused": 6}},
+  "site_median_ms": {"a": {"splash": 507.945, "event_loop": 507.390}, "b": {"splash": 40.721, "event_loop": 5.468}},
+  "paired_median_combined_site_saving_ms": 964.852,
+  "fixed_pose": {"native_holding": "down", "raw_rotation": 1, "matching_launches": 18, "picture_alignment_degrees": 0},
+  "ab_body_mean_absolute_error_gray8": {
+    "library": {"software": 0.0, "scanout": 0.0},
+    "reader": {"software": 0.004300384813669171, "scanout": 0.004300384813669171}
+  },
+  "all_four_software_to_scanout_body_errors_zero": true,
+  "operations_succeeded": 24,
+  "released_at_utc": "2026-11-21T03:53:25.291378+00:00",
+  "daily_tile_release_measured": false,
+  "installed_application_replaced": false
+}

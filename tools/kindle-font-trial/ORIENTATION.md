@@ -55,6 +55,13 @@ python3 -B "$runner" --work "$W" --plan "$W/orientation-pilot" \
   --owner "$OWNER" --lease-tool "$LEASE_TOOL"
 ```
 
+The November 21 operator shortcut supplies those same frozen paths and the
+WeRead coordinator identity. From a private PowerShell terminal, run
+`ssh -t test-env /var/tmp/kindle-build-coordination/weread-orientation-pilot-20261121`.
+It does not replace the daily application, wait for a lease, or run the six-pair
+comparison. Do not start it during the ordinary-entry baseline. A close-only
+recovery uses the same shortcut with `--recover` and the original attempt path.
+
 There is no reserve/wait mode. A pre-existing lease is not permission to
 connect, regardless of its age. A rejected read-only admission releases
 immediately. A started trial first restores its own changes and verifies
@@ -125,22 +132,36 @@ python3 -B tools/kindle-font-trial/analyze_orientation.py plan.json operations.j
 
 The report keeps the two warmups, raw request nanoseconds and every relative
 marker, per-site outcomes/durations, six measured pairs including slower
-ones, and both variant medians. A timing pass requires a positive median
+ones, and both variant medians. This experiment's timing gate requires a positive median
 paired request-to-SEND saving, at least five faster pairs, and both candidate
 sites reusing calibration in all six **fixed-pose** measured runs. Authentic
 fallbacks remain valid observations, not proof the fast path worked. A
 completed batch missing the timing gate writes its report and exits nonzero;
 invalid or incomplete inputs cannot produce a new successful report.
 
+A positive gate is not by itself a reason to enable the flag. Keep the six
+paired differences visible alongside the within-arm timings; distinguish
+repeat-to-repeat variation from clock resolution. If the apparent saving
+cannot be distinguished from timing uncertainty, leave the flag off and
+report the result as inconclusive. Do not subtract these request-to-SEND
+times from a separately measured ordinary tile-release interval or from a
+historical interaction upper bound.
+
 ## Separate physical acceptance
 
 Use separate, explicitly authorized qualification runs for normal and inverted
 holding, changes between splash and first frame, missing/stale calibration,
-and changed pose across sleep/wake. Verify the startup artwork and Library
-are upright in the user's view, touch the same visible button and book in
-both poses, check the selected action and Reader layout, and verify native
-input/display recovery after exit. Record visible outcomes, not just device
-nodes or a route name. Film a real tap and the panel together if reporting
-tap-to-stable-ink; report first effective input separately. Do not store
-private screens. Passing this analysis proves neither those interactions
-nor the all-covers endpoint and never enables a feature or deploys a build.
+and changed pose across sleep/wake. Check that artwork and Library render
+upright, mapped input selects the intended target in both poses, and native
+input/display recover after exit. These are orientation correctness checks,
+not extra actions required to stop the startup clock.
+
+The frozen collector measures file-open request to first Library `SEND`.
+The [current primary metric](../../docs/PHYSICAL_TESTING.md#library-first-frame-startup)
+instead starts at release of the ordinary stock tile (label automated input
+as synthetic) and uses the same launch's qualifying Library frame and
+device-clock render-completion or submission log. Record which endpoint
+was observed. Cover placeholders are valid; no second click or recording is
+needed. Driver completion and optical settling are different events. Do not
+combine evidence from separate launches or store private screens. Passing
+the collector's timing gate never enables a feature or deploys a build.

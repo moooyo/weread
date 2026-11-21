@@ -7,6 +7,15 @@ desktop build, custom-font validation, launcher wait and orientation queries
 are unchanged. At the November 21 handoff WeRead held no device lease and
 had no outstanding cleanup. This is not a statement of shared availability.
 
+**Primary startup metric: not measured by the runs below.** Use [ordinary
+stock Library tile release to the first complete WeRead Library frame](docs/PHYSICAL_TESTING.md#library-first-frame-startup).
+Record the release and the qualifying render/submission in the same launch
+on one device clock; label synthetic input and the actual end event. Do not
+combine an indexed file-open timing with a separate installed-entry check.
+The November 21 ordinary-entry retest confirmed responsive native return and
+released its lease at 11:11:25 (Asia/Shanghai). Its status remains `not_timed`;
+it supplies no release-to-render, release-to-submit or interaction latency.
+
 ## What actually ran
 
 | Endpoint | Result | Scope |
@@ -41,18 +50,24 @@ the early November 20 read-only audit is likewise **not** the current install.
   isolated by project and take the **host** device lease only for actual work.
   Follow [AGENTS.md](AGENTS.md); do not fall back to local verification.
 
-## Separate future work
+## Orientation Experiment
 
 Both orientation queries timed out during all twelve timed launches, about
 half a second each. A [November 21 orientation candidate](docs/review/startup-orientation-20261121/README.md)
 is now available behind `startup-orientation-reuse`. It is **off** in the
-normal Kindle package. Both ARM builds and the two-launch public Library
-pilot are frozen on `test-env`; all 52 collector and regression tests passed
-without the device. At 09:39 Asia/Shanghai on November 21, the original
-Aidoku batch had no verified close and release receipt. WeRead had run no
-physical orientation pilot or timed pair and had not installed the candidate.
-Check for a newer verified handoff before starting; restore and release the
-pilot before judging whether to time six pairs.
+normal Kindle package. All 52 collector and regression tests passed on
+`test-env`. The [two-launch physical pilot](docs/review/startup-orientation-20261121/physical-pilot.md)
+then passed: both candidate sites actually reused calibration, the control
+timed out twice, and both the software and scanout Library bodies matched.
+The device returned to native and the pilot lease was released at 11:39:10
+(Asia/Shanghai). The [separate six-pair batch](docs/review/startup-orientation-20261121/physical-balanced.md)
+passed its timing gate and released at 11:53:25. Warm indexed request to
+first Library SEND was 6.604 s for A and 5.356 s for B (medians); all six
+pairs improved, with a median paired saving of 1.323 s. The two query sites
+explain 0.965 s of median paired saving within their measured intervals.
+Do not treat the rest as orientation-query time, or any of it as a measured
+saving from ordinary tile release. Inverted holding, mapped physical touch
+and sleep/wake remain separate gates before enabling the build flag.
 See the linked experiment for build results and remaining gates. The [power-observer
 investigation](docs/review/startup-orientation-20261121/power-wait.md) keeps
 the two-second wait unchanged. Neither changes the measured font result.

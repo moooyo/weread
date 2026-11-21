@@ -122,7 +122,13 @@ sensitivity calculation, not a prediction, a tested speedup, or evidence
 that the two changes can be combined without cost. Neither private database
 work nor downloading covers has been demonstrated to dominate this fixture.
 
-## Requirements for a current measurement
+## November 19 measurement scope
+
+For new reports, use [ordinary stock tile release to the first complete
+Library frame](../../PHYSICAL_TESTING.md#library-first-frame-startup). Keep
+the recorded file-open-request-to-first-Library-`SEND` baseline unchanged:
+it lacks that release timestamp. A later interaction or optical observation
+is not part of the current primary interval.
 
 - No fresh daily-build timing was obtained in this investigation. The same
   device was in another project's live measurement workflow and an explicit
@@ -138,20 +144,12 @@ work nor downloading covers has been demonstrated to dominate this fixture.
   The owner records a changed app and launcher and a new portrait helper.
   Freeze the latest joint inventory from the owners before observing it;
   reject drift, never use device readback to invent trusted expectations.
-- Separately identify the model, firmware, installed WeRead program and entry,
-  route, and existing cache conditions. Keep private details off the record.
-  Observe a real tap on the indexed tile (or clearly label input injection
-  or a file-open request). Time the device-side input release and first
-  unambiguous Library pixels on the same clock, excluding SSH round trips.
-  A process appearing, `state-open`, the loading artwork, and a Login frame
-  are not Library endpoints. Distinguish the first Library pixels from all
-  visible covers arriving. A direct `SEND` marker is preferable when available
-  but must also be tied to the Library route.
-- For **finger to visible, stable ink**, film the finger and panel together,
-  report the video frame interval, and identify the first legible/stable shelf
-  frame. Driver acceptance, driver completion, framebuffer pixels and resumed
-  input are distinct endpoints. Retain all repetitions, report failures and
-  open the app without rebooting or clearing private caches for warm trials.
+- The study distinguished native file-open requests, touch releases, digital
+  shelf pixels and optical ink. It did not time an ordinary tile release to
+  a qualifying Library frame, an effective tap or optical settling. In a new
+  warm trial, retain the entry and cache conditions, label automated touch
+  input as synthetic, and record release and the qualifying render/submission
+  event on the same device clock. Do not mix endpoints or clear private caches.
 
 ### A passive endpoint for the installed build
 
@@ -175,7 +173,8 @@ native Home), five synthetic negatives and a truncated input. A static ARMv7
 observer was built but not installed, launched or qualified on this Kindle.
 The template does not generalize to another theme, resolution, rotation or
 layout without new qualification. Matching means **shelf chrome in display
-memory**, not covers populated, a completed refresh, or a usable touch target.
+memory**. It does not by itself establish the required entries or empty state,
+the render/submission timestamp, cover completion or optical panel state.
 
 To reproduce the expanded replay, run the following in a checkout **on
 `test-env`**, where the public Scribe fixture gallery is retained. Omitting

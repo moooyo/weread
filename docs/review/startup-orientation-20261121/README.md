@@ -1,22 +1,33 @@
 # Startup orientation reuse on Kindle
 
-**Status, November 21:** both release arms and a verified two-launch pilot are
-ready on the verification worker. The opt-in candidate has not been run on a Kindle or
-deployed. The November 20 [font A/B](../library-startup-latency-20261119/indexed-font-ab-20261120.md)
-remains the latest physical measurement: 6.847 s median to first Library
-SEND on the specified Scribe 2022 / 5.19.5 fixture. In that batch the splash
+**Status, November 21:** after the [two-launch pilot](physical-pilot.md), the
+[six-pair physical comparison](physical-balanced.md) passed on one Kindle
+Scribe 2022 / 5.19.5 in the same fixed native portrait. Median indexed
+request to first Library SEND was **6.604 s for A and 5.356 s for B**. B
+was faster in all six pairs; the median paired saving was **1.323 s**. Both
+candidate sites reused calibration on all six timed launches. Neither the
+ordinary tile-release metric nor another physical pose was measured. The
+daily installation was unchanged.
+
+The November 20 [font A/B](../library-startup-latency-20261119/indexed-font-ab-20261120.md)
+measured a 6.847 s median indexed request to first Library SEND in six
+optimized-font launches on the same model and firmware. In that batch the splash
 and event-loop queries timed out on all 12 timed launches (507.523 and
 506.161 ms median, respectively). [Replaying the original captures and timestamps](font-baseline-breakdown.md)
 puts the two waits at 1.015 s median within the six optimized-font launches;
 4.225 s elapsed before Rust `main`. Neither is a demonstrated saving.
 
-**Decision:** retain the reuse candidate for a controlled device comparison;
-do not enable it in the package or replace the installed app yet. Keep the
-two-second power-observer wait in both arms. Promote only after the fixed-pose
-request-to-SEND comparison shows a positive median paired saving with at least
-five of six pairs faster, the candidate actually takes both fast paths, and
-the separate orientation, touch, wake and native restoration gates pass.
-A faster host test or a correct framebuffer image alone cannot promote it.
+**Decision:** the fixed-pose engineering timing gate passed; retain the
+candidate as opt-in. Do not enable it in the package or replace the installed
+app until the separate physical orientation, touch mapping, wake and native
+restoration checks pass across the required poses. Normal exits restored
+native state in this batch; that does not verify return from a changed pose
+or sleep/wake. Keep the two-second power-observer wait; neither arm changed it.
+The indexed request-to-SEND comparison does not start with the ordinary
+stock tile release. It therefore cannot measure the [release-to-first-Library-frame
+metric](../../PHYSICAL_TESTING.md#library-first-frame-startup), even if its
+`SEND` identifies the same kind of frame. Testing touch mapping after a
+rotation remains a correctness check, not the startup endpoint.
 
 ## Candidate and fallback
 
@@ -96,7 +107,7 @@ ABI and tool versions. No QEMU duration is a Kindle benchmark.
 
 Worker directory: `test-env:/root/weread-orientation-20261121.WR7ofkGL`.
 `arm-pair/baseline/weread` and `arm-pair/candidate/weread` are the two
-retained applications for the next trial; neither is an installation.
+retained applications used by both physical batches; neither replaced the installed app.
 
 ### ARM feature-off versus feature-on branch comparison
 
@@ -143,20 +154,23 @@ At **09:39 Asia/Shanghai on November 21** the Aidoku coordinator reconfirmed
 its earlier handoff: the original interrupted batch still held the physical
 lease, with no verified restore/release receipt. The worker's pilot directory
 had no physical attempt. WeRead did not connect, acquire or reserve the Kindle.
-Do not treat that status snapshot, its age or an empty lock directory as a
-release. Wait for the original owner's verified recovery, then check live
-availability and private authentication before using the frozen pilot.
+The operator-authorized cleanup receipt at **10:50:15** superseded that block:
+ordinary acquisition was reopened without claiming the old snapshot had been
+restored. A separate ordinary-entry WeRead run released its lease at
+**11:11:25** with no timing sample. Neither event ran this pilot or reserved
+its window.
 
-The first device window is **two Library launches only**, then native restore,
-owned stage removal, disconnect and release. Evaluate the pictures offline:
-the control sets the reference alignment; both arms must agree on native
-pose and scanout, and B must actually reuse both queries. A missed fast path
-or mismatched image ends this experiment before timing. A passing pilot
-permits preparing a **new**, separately leased six-pair experiment, not
-enabling the build flag. The [runbook](../../../tools/kindle-font-trial/ORIENTATION.md)
+The [physical pilot](physical-pilot.md) ran from **11:35:22 to 11:39:10**
+Asia/Shanghai: A-library, then B-library, native restoration, collection,
+stage removal and verified release. Offline replay matched the recorded
+reference: native `down`, raw rotation `1`, and 0-degree Library scanout
+alignment in both arms. This is not a claim about a person's grip. The
+pilot supplied the predeclared pose and alignment for the separately leased
+[six-pair comparison](physical-balanced.md), which closed and released the
+device at **11:53:25**. The [runbook](../../../tools/kindle-font-trial/ORIENTATION.md)
 also lists the separate physical orientation, touch, wake and native recovery
-gates. Neither a digital capture nor a first-SEND timestamp measures real
-tap-to-stable-ink latency.
+gates. Neither a digital capture nor a first-SEND timestamp establishes when
+the physical ink settled.
 
 The [power-observer readiness investigation](power-wait.md) is a separate
 question. Do not change `sleep 2` in either orientation arm.

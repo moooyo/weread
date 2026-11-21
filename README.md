@@ -4,7 +4,7 @@ An independent Rust and Slint reading application for jailbroken Kindle devices.
 
 Implementation started on 2026-11-03 (Asia/Shanghai), following the supplied WeRead for Kindle design handoff v0.2. The application shares its UI and application core between a desktop backend and an isolated Kindle backend. See [implementation status](docs/IMPLEMENTATION_STATUS.md) for completed features, verification evidence, and remaining acceptance gates.
 
-To continue the Library startup experiment, start with the [session handoff](HANDOFF.md).
+The [startup metric](docs/PHYSICAL_TESTING.md#library-first-frame-startup) runs from release of the ordinary WeRead tile in the stock Kindle Library to the first complete WeRead Library frame in the same launch. Recognizable entries or a legitimate empty state and Library navigation must be drawn; cover placeholders are valid. No second tap is required. The [handoff](HANDOFF.md) lists the separate timings measured so far.
 
 The accepted [Kindle entry cover](assets/branding/README.md) shows `WeRead` above
 a reader containing a winking penguin. Its grayscale thumbnail is embedded in
@@ -53,12 +53,16 @@ measured median seven-face admission of 2,709.496 vs. 3.557 ms on Scribe 2022 /
 reduced median warm request-to-first-Library-SEND from **9.964 to 6.847 s**
 in six pairs. The Kindle package enables the measured optimization. That
 candidate was installed and the ordinary WeRead Library entry retested
-without resetting private data. This is not a finger-to-ink measurement.
+without resetting private data. The timed starts used a file-open request,
+not an ordinary tile release; they do not measure the new interval or optical ink.
 
-The [next experiment](docs/review/startup-orientation-20261121/README.md)
-tests whether the two startup orientation queries can reuse a confirmed
-same-launch calibration. The feature is off in Kindle packages; it has no
-new physical result. The launcher's two-second wait is unchanged.
+In the [six-pair orientation A/B](docs/review/startup-orientation-20261121/physical-balanced.md),
+reusing a same-launch calibration instead of two timed-out queries improved
+indexed request-to-Library-SEND in every pair on Scribe 2022 / 5.19.5:
+**6.604 → 5.356 s median**, with a **1.323 s median paired saving**. This
+is not a daily tile-release measurement. The feature remains off in Kindle
+packages pending rotation, touch mapping and wake qualification. The
+launcher's two-second wait is unchanged.
 
 A [separate launcher change](docs/review/startup-launcher-window-20261121/README.md)
 removes the startup window-tree scan for the retired Quick and Wi-Fi controls.
