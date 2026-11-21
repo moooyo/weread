@@ -93,16 +93,44 @@ both executables, their Cargo records, `build-reconcile-lane.py`, and
 `pair-verification.json`. Its `reconciled-draw-acceptance` plan (label
 `7ce33bf9c723db91`) passed offline preflight. The archived B application
 matches the actual compiler output; the draw-policy response is the same in
-both arms and is **not** evidence of a branch hit. The frozen plan stages only
-B for a future correctness visit, not a device A/B. No lease was requested,
-the installed application was not replaced, and there was no device attempt.
+both arms and is **not** evidence of a branch hit. Preflight did not access
+the device. The plan stages only B for a correctness visit, not a device A/B.
+
+## November 22 physical result: turn after draw
+
+**The operator turned the device once. The application had already selected
+the correct exact-pose path for that startup; the new branch was not hit.**
+On Scribe 2022 / 5.19.5, the matching launch, native and initial references
+were `U:3`. Across 401 independent sensor/scanout samples, raw scanout stayed
+at `3`. The sole up-to-down transition was between samples 110 and 111,
+**43.895–94.206 ms after the first submitted frame began drawing** and
+before its submission. Both samples bracketing draw still indicated up. This
+is a time bracket on the device's reported state, not on the hand motion.
+
+| Same-launch observation | Recorded result |
+| --- | --- |
+| Splash orientation | `reused`, 40.853 ms |
+| Event-loop orientation | `reused`, 4.156 ms; no fallback query and no `reconciled` marker |
+| First application frame | Software angle 0°; driver-accepted submission logged 394.958 ms after draw began |
+| Final state | Application route `library`; the independent public shelf classifier returned `none`; native returned `D:1` |
+
+The result was independently recomputed from the original sensor and GUI
+markers in `reconciled-draw-acceptance/batch-pa0l86n5/results.tgz` on the
+worker above. The indexed open request to first application submission was
+5.530 s; it neither starts at a stock-card release nor identifies a complete
+Library frame. **There is no ordinary-startup A/B result and no measured
+reconciliation saving.** The eight transaction steps succeeded, including
+restore, collect, close and the independent absence check. The owner and
+token were verified at release at **02:37:19 Asia/Shanghai on November 22**.
+The installed daily application was not replaced; no second turn was requested.
 
 ## Promotion criterion
 
 The next useful physical observation is one same-launch `reconciled` outcome
 with a first submitted frame whose draw angle agrees with independently
-sampled grip and scanout. A fallback is a valid negative observation, not
-a reason to repeat a gesture until it passes. The earlier gestures already
+sampled grip and scanout. A fallback or an unchanged grip at the decision
+point is a valid observation, not a reason to repeat the gesture until it
+passes. The earlier gestures already
 qualify the behavior of the **earlier** build. A test of the new branch is
 needed before changing its default, not a new test of each Kindle model.
 

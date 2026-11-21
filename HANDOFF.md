@@ -1,6 +1,6 @@
 # Handoff: Kindle Library startup
 
-Updated November 21, 2026 (Asia/Shanghai). **Font optimization measured,
+Updated November 22, 2026 (Asia/Shanghai). **Font optimization measured,
 deployed and retested on Kindle Scribe 2022 / firmware 5.19.5.** The standard
 Kindle build now selects `kindle,bundled-font-preflight,startup-orientation-reuse`
 for every model. Missing or changed orientation evidence still uses the
@@ -95,8 +95,12 @@ reuses or an ordinary-entry timing. The device was restored and its lease
 released at **17:33:11**. That visit did not alter the installed daily binary.
 The normal build now shares one reuse policy; no additional per-model
 physical qualification is required to enable it. The [changed-grip follow-up](docs/review/startup-orientation-20261121/event-loop-reconcile.md)
-is implemented as a separate event-loop candidate. It is not enabled in
-the normal package, installed on the Scribe, or timed from the stock tile.
+is implemented as a separate event-loop candidate. In its [November 22
+physical visit](docs/review/startup-orientation-20261121/event-loop-reconcile.md#november-22-physical-result-turn-after-draw),
+the sensor changed 44–94 ms after first draw began. Both sites reused the
+initial pose; the new path was not hit. Native restoration and release passed.
+The candidate has not replaced the daily application, entered the default
+package, or been timed from the stock tile.
 Use a short live desktop
 popup before each assisted action. The [power-observer
 investigation](docs/review/startup-orientation-20261121/power-wait.md) keeps
