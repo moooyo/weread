@@ -962,9 +962,17 @@ cargo test --locked --all-targets
 python3 packaging/tests/launcher_test.py
 cargo build --locked
 python3 scripts/verify-ui.py --binary "$CARGO_TARGET_DIR/debug/weread"
+python3 -B packaging/tests/kindle_build_test.py
 sh scripts/build-kindle.sh
 python3 scripts/package-development.py
 ```
+
+The `-Kindle` check runs the daily build script up to its Cargo invocation,
+then resolves those arguments for ARM. It requires exact-pose reuse in both
+the application and the Kindle backend, with bundled font preflight enabled
+and the experimental opposite-grip and trial frame features excluded. See the
+[ordinary-card A/B](review/stock-library-ab-20261122/README.md#final-result-and-package-decision)
+for the device measurements behind that default.
 
 The backend dependency tests were run from a separate copy of the exact vendored source with the same target cache and `CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0`, so dependency testing did not alter the application's lockfile.
 

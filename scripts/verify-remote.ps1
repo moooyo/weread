@@ -67,6 +67,7 @@ if ($Design) {
     $WereadRemoteCommands += $WereadDesignCommand
 }
 if ($Kindle) {
+    $WereadRemoteCommands += 'python3 -B packaging/tests/kindle_build_test.py'
     $WereadRemoteCommands += 'sh scripts/build-kindle.sh'
     $WereadRemoteCommands += 'python3 scripts/package-development.py'
 }

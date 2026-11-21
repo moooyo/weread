@@ -38,6 +38,22 @@ strength of these samples. They cover a warm device, a shared public
 15-book shelf and an instrumented build, not cold boot, an untouched
 private shelf, physical display completion, or all covers being ready.
 
+### Everyday package handoff
+
+After the A/B, `test-env` rebuilt the uninstrumented application and Kindle
+backend from `088c860` with `sh scripts/build-kindle.sh`. The resulting
+`dist/weread-kindle-0.2.0-exact-pose.zip` uses the standard launcher. The
+compiler enabled `kindle`, `bundled-font-preflight` and `startup-orientation-reuse`
+in WeRead and only `startup-orientation-reuse` in the backend. Neither the
+trial Library-frame witness nor opposite-grip reconciliation is included.
+
+All 38 archive entries matched the staged files and their Unix modes. The
+static ARM application passed its Cortex-A8 QEMU version and trace-policy
+checks; five focused ARM orientation and fallback tests passed separately.
+The [standard Kindle verification](../../VERIFICATION.md#reproduce-on-the-remote-worker)
+now checks the resolved features of both crates before building the archive.
+The handoff did not install anything on a Kindle or produce new timings.
+
 ## Question and scope
 
 How much does the standard exact-pose orientation reuse change startup time
