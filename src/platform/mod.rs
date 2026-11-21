@@ -1,3 +1,5 @@
+#[cfg(all(target_os = "linux", any(feature = "kindle", test)))]
+mod library_frame;
 mod native_portrait;
 #[cfg(any(all(feature = "kindle", target_os = "linux"), test))]
 mod native_theme;
@@ -14,6 +16,8 @@ mod native_command;
 #[cfg(all(target_os = "linux", any(feature = "kindle", test)))]
 pub use native_calibration::query_native_portrait_calibration;
 
+#[cfg(all(target_os = "linux", any(feature = "kindle", test)))]
+pub use library_frame::{LibraryFrameContent, LibraryFrameRequest, LibraryFrameState};
 pub use native_portrait::{NativePortraitCalibration, NativePortraitDirection};
 pub use profile::DeviceProfile;
 pub use refresh::{RefreshKind, RefreshPlan, RefreshReason, RefreshRect, RefreshScheduler};

@@ -15,12 +15,14 @@ installed GUI via an environment variable in an unrelated SSH session.
 | --- | --- |
 | `up_before_ns`, `up_after_ns` | Device `CLOCK_MONOTONIC` brackets around the XTest ButtonRelease and server confirmation on the verified stock card. Synthetic release, not a physical finger. |
 | `first_complete_scene_ns` | Upper bound on when the observer found a matching shelf in framebuffer **memory**, subsequently confirmed in the same GUI. Not a render, submission or ink timestamp. |
-| `submit_upper_bound_ns` | Optional witness of the bound GUI in a framebuffer wait while the shelf is present. Not the exact return of a frame-specific `SEND`; zero means no witness. |
+| `submit_upper_bound_ns` | Optional witness of the bound GUI in a framebuffer wait and then its event-loop poll, with the same shelf in both. Not the exact return of a frame-specific `SEND`; zero means no witness. |
 | A qualified, directly logged Library submission | If available in a measurement build, subtract the release bracket endpoints from its device-clock timestamp. Report the resulting interval, qualified build and software boundary. |
 
 The unchanged installed-build runner always reports `primary=not_timed`
 without a frame-specific completion event. Do not combine a file-open result,
 a different launch's log, or the later pixel observation to manufacture one.
+The [one-shot in-app witness](LIBRARY-FRAME.md) defines the qualifying event
+for a build that includes it; it does not instrument the existing installation.
 
 ## Worker workflow
 

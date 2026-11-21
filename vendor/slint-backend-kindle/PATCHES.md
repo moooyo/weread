@@ -28,6 +28,17 @@ On the event-loop thread, application closures, touch events, and Slint timers r
 
 The submitted region includes both valid requested rectangles and any dirty pixels written in the same frame. Conflicting requests choose the strongest requested waveform, and a flashing request uses GC16. A rotation change retains the original full-screen GC16 path. Without any explicit request, rendering retains the original AUTO partial update for the dirty region.
 
+An optional UI-thread `StartupFrameObserver` can identify a particular startup
+scene without changing the default refresh policy. Only a naturally requested
+Slint draw can inspect it. A waiting scene renders normally; a ready scene
+forces `NewBuffer` and a full Gray8 write for that frame. The observer must
+confirm the same scene after drawing and the physical dirty and written regions
+must both cover the panel. Its one-shot callback runs after the accepted full
+SEND and before `wait_for_update_complete()`, never for an unaccepted update.
+It is not a driver-completion or optical timestamp. The application-specific
+[private request contract](../../tools/startup-observer/LIBRARY-FRAME.md)
+describes ordinary-launch admission, cancellation and diagnostic overhead.
+
 ## ABI constants
 
 The baseline already defines GC16 as 2, AUTO as 257, and the four update ioctl structures. The additional DU and A2 values are reviewed against [`koreader-base` at `6e4bc81af4e04f78d81677a323a780a71b29702a`, `ffi/mxcfb_kindle_h.lua`](https://github.com/koreader/koreader-base/blob/6e4bc81af4e04f78d81677a323a780a71b29702a/ffi/mxcfb_kindle_h.lua):

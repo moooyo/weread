@@ -43,6 +43,30 @@ pub(super) fn startup_native_output_inverted() -> Option<bool> {
 }
 
 #[cfg(target_os = "linux")]
+pub(super) fn owns_ordinary_first_generation() -> bool {
+    let variable = |name| std::env::var(name).ok();
+    let generation = variable("WEREAD_LAUNCH_GENERATION");
+    if variable("WEREAD_LAUNCH_CONTEXT_DIR").as_deref() != Some("/tmp/weread-launcher.lock")
+        || variable("WEREAD_RESUME_SESSION").as_deref() != Some("0")
+        || variable("WEREAD_NATIVE_RETURN").as_deref() != Some("0")
+    {
+        return false;
+    }
+    generation
+        .zip(variable("WEREAD_LAUNCH_TOKEN"))
+        .is_some_and(|(generation, nonce)| {
+            linux::owned_first_generation(
+                std::path::Path::new("/tmp/weread-launcher.lock"),
+                std::path::Path::new("/proc"),
+                &generation,
+                &nonce,
+                std::process::id(),
+                0,
+            )
+        })
+}
+
+#[cfg(target_os = "linux")]
 mod linux {
     use std::ffi::CString;
     use std::fs::{File, Metadata, OpenOptions};
@@ -95,6 +119,28 @@ mod linux {
                 crate::platform::NativePortraitCalibration::parse_payload(payload)
             },
         )
+    }
+
+    pub(super) fn owned_first_generation(
+        lock_root: &Path,
+        proc_root: &Path,
+        generation: &str,
+        nonce: &str,
+        process: u32,
+        owner: u32,
+    ) -> bool {
+        generation == "1"
+            && read_validated_payload(
+                lock_root,
+                proc_root,
+                generation,
+                nonce,
+                process,
+                owner,
+                "nonce",
+                |record| (record == nonce).then_some(()),
+            )
+            .is_some()
     }
 
     fn read_validated_payload<T>(
@@ -341,6 +387,27 @@ mod linux {
                     self.owner,
                 )
             }
+        }
+
+        #[test]
+        fn library_frame_claim_requires_current_first_generation_and_kernel_ancestry() {
+            let fixture = Fixture::new();
+            let valid = |generation| {
+                owned_first_generation(
+                    &fixture.lock,
+                    &fixture.proc_root,
+                    generation,
+                    NONCE,
+                    PROCESS,
+                    fixture.owner,
+                )
+            };
+            assert!(!valid(GENERATION));
+            assert!(!valid("1"));
+            fixture.record("generation", &format!("1:{NONCE}\n"));
+            assert!(valid("1"));
+            fixture.parent(RUNNER, MASTER + 1);
+            assert!(!valid("1"));
         }
 
         #[test]

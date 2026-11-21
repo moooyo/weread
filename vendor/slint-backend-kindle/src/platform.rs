@@ -36,7 +36,7 @@ use crate::render_control::{
 use crate::sleep_presentation::SleepPresentationControl;
 use crate::touch::{TouchInput, TransitionDrain, has_accelerometer};
 use crate::wakeup::{self, KindleEventLoopProxy, Queue, Wakeup};
-use crate::{OnWakeCallback, WakeSchedule};
+use crate::{StartupFrameObserver, StartupFrameReadiness, UiCallbacks, WakeSchedule};
 
 // Animations get redrawn at most ~30 fps. E-ink can't keep up with anything
 // faster, so quicker wakes would just waste battery.
@@ -51,7 +51,7 @@ pub(crate) struct KindlePlatform {
     wakeup: Wakeup,
     quit_flag: Arc<AtomicBool>,
     pub(crate) wake_schedule: Arc<Mutex<Option<WakeSchedule>>>,
-    pub(crate) on_wake: OnWakeCallback,
+    callbacks: Rc<RefCell<UiCallbacks>>,
     black_and_white: Arc<AtomicBool>,
     night_mode: Arc<NightModeControl>,
     managed_sleep: Arc<ManagedSleepControl>,
@@ -68,7 +68,7 @@ pub(crate) struct KindlePlatform {
 impl KindlePlatform {
     pub(crate) fn new(
         wake_schedule: Arc<Mutex<Option<WakeSchedule>>>,
-        on_wake: OnWakeCallback,
+        callbacks: Rc<RefCell<UiCallbacks>>,
         black_and_white: Arc<AtomicBool>,
         rotation: Arc<AtomicU32>,
     ) -> std::io::Result<Self> {
@@ -82,7 +82,7 @@ impl KindlePlatform {
             wakeup,
             quit_flag: Arc::new(AtomicBool::new(false)),
             wake_schedule,
-            on_wake,
+            callbacks,
             black_and_white,
             night_mode: Arc::new(NightModeControl::default()),
             managed_sleep: Arc::new(ManagedSleepControl::default()),
@@ -206,7 +206,7 @@ impl KindlePlatform {
         // Fire the consumer's on-wake callback (if any) before any rendering
         // this cycle, so e.g. an HTTP poll runs before the next draw shows
         // stale data.
-        if let Some(callback) = self.on_wake.borrow_mut().as_mut() {
+        if let Some(callback) = self.callbacks.borrow_mut().wake.as_mut() {
             callback();
         }
         true
@@ -291,6 +291,7 @@ impl Platform for KindlePlatform {
         // Keep the startup artwork visible until a complete application frame
         // can carry the initial FULL update. Do not submit a blank paper frame.
         let mut initial_scene_pending = true;
+        let mut startup_frame = self.callbacks.borrow_mut().startup_frame.take();
         self.synchronize_dithering_eligibility(&frame_buffer);
 
         let width = frame_buffer.width as usize;
@@ -344,6 +345,7 @@ impl Platform for KindlePlatform {
                     )
                 },
             )? {
+                startup_frame = None;
                 restore_full_frame = false;
                 presentation_barrier = false;
                 post_frame_input.clear();
@@ -382,6 +384,7 @@ impl Platform for KindlePlatform {
                     || portrait.pause(),
                 )
             {
+                startup_frame = None;
                 restore_full_frame = true;
                 presentation_barrier = true;
                 begin_presentation_transition(
@@ -488,6 +491,7 @@ impl Platform for KindlePlatform {
                     )
                 },
             )? {
+                startup_frame = None;
                 restore_full_frame = false;
                 presentation_barrier = false;
                 post_frame_input.clear();
@@ -576,6 +580,7 @@ impl Platform for KindlePlatform {
             {
                 last_interaction = Instant::now();
                 if let Some(input) = touch_input.as_mut() {
+                    startup_frame = None;
                     input
                         .poll(
                             &self.window,
@@ -602,6 +607,7 @@ impl Platform for KindlePlatform {
                     )
                 },
             )? {
+                startup_frame = None;
                 restore_full_frame = false;
                 presentation_barrier = false;
                 post_frame_input.clear();
@@ -665,19 +671,25 @@ impl Platform for KindlePlatform {
             }
             let mut dirty_region = None;
             let mut did_render = false;
+            let mut observed_frame = None;
             self.window.draw_if_needed(|renderer| {
                 did_render = true;
+                observed_frame = prepare_startup_frame(&mut startup_frame, || {
+                    !restore_full_frame
+                        && sleep_presentation_token.is_none()
+                        && image_snapshot.regions.is_empty()
+                });
                 renderer.set_rendering_rotation(match render_rotation {
                     90 => RenderingRotation::Rotate90,
                     180 => RenderingRotation::Rotate180,
                     270 => RenderingRotation::Rotate270,
                     _ => RenderingRotation::NoRotation,
                 });
-                if force_full {
+                if force_full || observed_frame.is_some() {
                     renderer.set_repaint_buffer_type(RepaintBufferType::NewBuffer);
                 }
                 let dirty = renderer.render(&mut rgb_buffer, width);
-                if force_full {
+                if force_full || observed_frame.is_some() {
                     renderer.set_repaint_buffer_type(RepaintBufferType::ReusedBuffer);
                 }
                 let origin = dirty.bounding_box_origin();
@@ -738,11 +750,11 @@ impl Platform for KindlePlatform {
                 (panel_width, panel_height),
                 dirty_region,
                 output_mode,
-                force_full || mode_changed,
+                force_full || mode_changed || observed_frame.is_some(),
                 software_regions,
                 |row, columns, pixels| frame_buffer.write_line(row, columns, pixels),
             );
-            if force_full {
+            if force_full || observed_frame.is_some() {
                 if has_raw_images {
                     submit_raw_frame(
                         &mut frame_buffer,
@@ -776,12 +788,28 @@ impl Platform for KindlePlatform {
                         || frame_buffer.wait_for_update_complete_checked(),
                     )?;
                 } else {
-                    frame_buffer.refresh_full_checked().map_err(|error| {
+                    submit_startup_frame(
+                        observed_frame,
+                        || {
+                            let panel = Some(PhysicalRect {
+                                x: 0,
+                                y: 0,
+                                width: panel_width,
+                                height: panel_height,
+                            });
+                            did_render && dirty_region == panel && written.region == panel
+                        },
+                        || frame_buffer.refresh_full_checked(),
+                    )
+                    .map_err(|error| {
                         PlatformError::Other(format!(
                             "failed to restore the presentation frame: {error}"
                         ))
                     })?;
                     frame_buffer.wait_for_update_complete();
+                }
+                if !force_full {
+                    continue;
                 }
                 let drain = match touch_input.as_mut() {
                     Some(input) => input.finish_presentation_transition().map_err(|error| {
@@ -850,6 +878,38 @@ impl Platform for KindlePlatform {
         }
         Ok(())
     }
+}
+
+fn prepare_startup_frame(
+    observer: &mut Option<Box<dyn StartupFrameObserver>>,
+    ordinary: impl FnOnce() -> bool,
+) -> Option<Box<dyn StartupFrameObserver>> {
+    let active = observer.as_mut()?;
+    if !ordinary() {
+        *observer = None;
+        return None;
+    }
+    match active.prepare() {
+        StartupFrameReadiness::Waiting => None,
+        StartupFrameReadiness::Cancelled => {
+            *observer = None;
+            None
+        }
+        StartupFrameReadiness::Ready => observer.take(),
+    }
+}
+
+fn submit_startup_frame<E>(
+    observer: Option<Box<dyn StartupFrameObserver>>,
+    complete: impl FnOnce() -> bool,
+    send: impl FnOnce() -> Result<(), E>,
+) -> Result<(), E> {
+    let receipt = observer.filter(|observer| complete() && observer.confirm_draw());
+    send()?;
+    if let Some(receipt) = receipt {
+        receipt.submitted();
+    }
+    Ok(())
 }
 
 #[derive(Default)]
@@ -1625,6 +1685,169 @@ fn set_orientation_pipe_nonblocking(descriptor: RawFd) -> io::Result<()> {
 fn retire_orientation_child(mut child: Child) {
     let _ = child.kill();
     let _ = child.wait();
+}
+
+#[cfg(test)]
+mod initial_frame_tests {
+    use super::*;
+
+    struct Observer {
+        waiting: bool,
+        qualifies: bool,
+        events: Rc<RefCell<Vec<&'static str>>>,
+    }
+
+    impl StartupFrameObserver for Observer {
+        fn prepare(&mut self) -> StartupFrameReadiness {
+            self.events.borrow_mut().push("prepare");
+            if std::mem::take(&mut self.waiting) {
+                StartupFrameReadiness::Waiting
+            } else {
+                StartupFrameReadiness::Ready
+            }
+        }
+
+        fn confirm_draw(&self) -> bool {
+            self.events.borrow_mut().push("confirm");
+            self.qualifies
+        }
+
+        fn submitted(self: Box<Self>) {
+            self.events.borrow_mut().push("submitted");
+        }
+    }
+
+    #[test]
+    fn library_frame_checks_only_the_complete_draw_and_emits_only_after_accepted_send() {
+        for (complete, qualifies, accepted, expected) in [
+            (false, true, true, vec!["prepare", "prepare", "send"]),
+            (
+                true,
+                false,
+                true,
+                vec!["prepare", "prepare", "confirm", "send"],
+            ),
+            (
+                true,
+                true,
+                false,
+                vec!["prepare", "prepare", "confirm", "send"],
+            ),
+            (
+                true,
+                true,
+                true,
+                vec!["prepare", "prepare", "confirm", "send", "submitted"],
+            ),
+        ] {
+            let events = Rc::new(RefCell::new(Vec::new()));
+            let mut observer: Option<Box<dyn StartupFrameObserver>> = Some(Box::new(Observer {
+                waiting: true,
+                qualifies,
+                events: events.clone(),
+            }));
+            assert!(prepare_startup_frame(&mut observer, || true).is_none());
+            let target = prepare_startup_frame(&mut observer, || true);
+            assert!(observer.is_none());
+            let result = submit_startup_frame(
+                target,
+                || complete,
+                || {
+                    events.borrow_mut().push("send");
+                    accepted.then_some(()).ok_or(())
+                },
+            );
+            assert_eq!(result.is_ok(), accepted);
+            assert_eq!(*events.borrow(), expected);
+            assert!(
+                prepare_startup_frame(&mut observer, || panic!("a later frame was inspected"))
+                    .is_none()
+            );
+            submit_startup_frame(
+                observer,
+                || panic!("there is no remaining request"),
+                || Ok::<_, ()>(()),
+            )
+            .unwrap();
+            assert_eq!(*events.borrow(), expected);
+        }
+    }
+
+    #[test]
+    fn library_frame_skipped_draw_keeps_the_request_for_the_first_complete_natural_frame() {
+        std::thread::spawn(|| {
+            use slint::ComponentHandle;
+
+            slint::slint! {
+                export component FrameFixture inherits Window {
+                    in property <bool> ready;
+                    background: ready ? black : white;
+                }
+            }
+            struct TestPlatform(Rc<MinimalSoftwareWindow>);
+            impl Platform for TestPlatform {
+                fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, PlatformError> {
+                    Ok(self.0.clone())
+                }
+            }
+            let window = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
+            slint::platform::set_platform(Box::new(TestPlatform(window.clone()))).unwrap();
+            let events = Rc::new(RefCell::new(Vec::new()));
+            let mut observer: Option<Box<dyn StartupFrameObserver>> = Some(Box::new(Observer {
+                waiting: true,
+                qualifies: true,
+                events: events.clone(),
+            }));
+            assert!(!window.draw_if_needed(|_| panic!("a skipped draw must not inspect a model")));
+            let ui = FrameFixture::new().unwrap();
+            window.set_size(slint::PhysicalSize::new(64, 64));
+            ui.show().unwrap();
+            let mut pixels = vec![Rgb8Pixel::default(); 64 * 64];
+            assert!(window.draw_if_needed(|renderer| {
+                assert!(prepare_startup_frame(&mut observer, || true).is_none());
+                renderer.render(&mut pixels, 64);
+            }));
+            assert!(observer.is_some());
+            ui.set_ready(true);
+            let mut receipt = None;
+            assert!(window.draw_if_needed(|renderer| {
+                receipt = prepare_startup_frame(&mut observer, || true);
+                assert!(receipt.is_some());
+                renderer.set_repaint_buffer_type(RepaintBufferType::NewBuffer);
+                let dirty = renderer.render(&mut pixels, 64);
+                assert_eq!(dirty.bounding_box_size(), slint::PhysicalSize::new(64, 64));
+                renderer.set_repaint_buffer_type(RepaintBufferType::ReusedBuffer);
+            }));
+            submit_startup_frame(
+                receipt,
+                || ui.get_ready(),
+                || {
+                    events.borrow_mut().push("send");
+                    Ok::<_, ()>(())
+                },
+            )
+            .unwrap();
+            assert_eq!(
+                *events.borrow(),
+                ["prepare", "prepare", "confirm", "send", "submitted"]
+            );
+        })
+        .join()
+        .unwrap();
+    }
+
+    #[test]
+    fn library_frame_nonordinary_presentation_drops_the_request_without_sampling() {
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let mut observer: Option<Box<dyn StartupFrameObserver>> = Some(Box::new(Observer {
+            waiting: false,
+            qualifies: true,
+            events: events.clone(),
+        }));
+        assert!(prepare_startup_frame(&mut observer, || false).is_none());
+        assert!(prepare_startup_frame(&mut observer, || panic!()).is_none());
+        assert!(events.borrow().is_empty());
+    }
 }
 
 #[cfg(test)]

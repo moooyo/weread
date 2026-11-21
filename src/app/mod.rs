@@ -9,6 +9,8 @@ mod image_preparation;
 mod image_processing;
 mod image_raster;
 mod library;
+#[cfg(all(test, target_os = "linux"))]
+mod library_frame_tests;
 mod lighting;
 mod lighting_worker;
 mod managed_lifecycle;
@@ -370,6 +372,8 @@ pub struct App {
     immediate_job_changed: bool,
     immediate_job_error: Option<anyhow::Error>,
     route: Route,
+    #[cfg(all(target_os = "linux", any(feature = "kindle", test)))]
+    startup_library_pending: bool,
     history: Vec<Route>,
     prefs: AppPreferences,
     fonts: Vec<FontRecord>,
@@ -560,6 +564,8 @@ impl App {
             immediate_job_changed: false,
             immediate_job_error: None,
             route: start,
+            #[cfg(all(target_os = "linux", any(feature = "kindle", test)))]
+            startup_library_pending: false,
             history: vec![],
             reader: ReaderState {
                 book_id: String::new(),
@@ -829,6 +835,10 @@ impl App {
     }
 
     pub fn dispatch(&mut self, section: &str, action: &str, value: &str) -> Result<()> {
+        #[cfg(all(target_os = "linux", any(feature = "kindle", test)))]
+        {
+            self.startup_library_pending = false;
+        }
         if self.closing.get() || self.managed_sleep_blocked {
             return Ok(());
         }
@@ -1310,6 +1320,10 @@ impl App {
             self.history.push(self.route.clone());
         }
         self.deferred_cover_refill = None;
+        #[cfg(all(target_os = "linux", any(feature = "kindle", test)))]
+        {
+            self.startup_library_pending = false;
+        }
         self.route = route.clone();
         match route {
             Route::Detail(id) if id.is_empty() => {

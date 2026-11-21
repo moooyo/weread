@@ -54,7 +54,23 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-pub(crate) type OnWakeCallback = Rc<RefCell<Option<Box<dyn FnMut()>>>>;
+pub enum StartupFrameReadiness {
+    Waiting,
+    Cancelled,
+    Ready,
+}
+
+pub trait StartupFrameObserver {
+    fn prepare(&mut self) -> StartupFrameReadiness;
+    fn confirm_draw(&self) -> bool;
+    fn submitted(self: Box<Self>);
+}
+
+#[derive(Default)]
+struct UiCallbacks {
+    wake: Option<Box<dyn FnMut()>>,
+    startup_frame: Option<Box<dyn StartupFrameObserver>>,
+}
 
 /// How often to wake from suspend-to-RAM and how long to stay awake afterwards.
 ///
@@ -86,7 +102,7 @@ pub struct Scheduled;
 pub struct KindleBackend<State = NoSchedule> {
     window: Rc<MinimalSoftwareWindow>,
     wake_schedule: Arc<Mutex<Option<WakeSchedule>>>,
-    on_wake: OnWakeCallback,
+    callbacks: Rc<RefCell<UiCallbacks>>,
     black_and_white: Arc<AtomicBool>,
     rotation: Arc<AtomicU32>,
     refresh_handle: RefreshHandle,
@@ -96,6 +112,10 @@ pub struct KindleBackend<State = NoSchedule> {
 }
 
 impl<State> KindleBackend<State> {
+    pub fn observe_startup_frame(&self, observer: impl StartupFrameObserver + 'static) {
+        self.callbacks.borrow_mut().startup_frame = Some(Box::new(observer));
+    }
+
     /// Queue display requests for execution after the current frame is drawn.
     pub fn refresh_handle(&self) -> RefreshHandle {
         self.refresh_handle.clone()
@@ -151,7 +171,7 @@ impl<State> KindleBackend<State> {
         KindleBackend {
             window: self.window,
             wake_schedule: self.wake_schedule,
-            on_wake: self.on_wake,
+            callbacks: self.callbacks,
             black_and_white: self.black_and_white,
             rotation: self.rotation,
             refresh_handle: self.refresh_handle,
@@ -192,7 +212,7 @@ impl KindleBackend<Scheduled> {
     /// fire anymore. Takes effect the next time the device is awake.
     pub fn clear_wake_schedule(self) -> KindleBackend<NoSchedule> {
         *self.wake_schedule.lock().expect("wake schedule poisoned") = None;
-        *self.on_wake.borrow_mut() = None;
+        self.callbacks.borrow_mut().wake = None;
         self.into_state()
     }
 
@@ -206,7 +226,7 @@ impl KindleBackend<Scheduled> {
     ///
     /// Replaces any previously-set callback. Not invoked on the initial start of the app.
     pub fn on_wake<F: FnMut() + 'static>(&self, callback: F) {
-        *self.on_wake.borrow_mut() = Some(Box::new(callback));
+        self.callbacks.borrow_mut().wake = Some(Box::new(callback));
     }
 }
 
@@ -236,12 +256,12 @@ pub fn install(font_data: &[u8]) -> Result<KindleBackend, slint::PlatformError> 
     }
 
     let wake_schedule = Arc::new(Mutex::new(None));
-    let on_wake: OnWakeCallback = Rc::new(RefCell::new(None));
+    let callbacks = Rc::new(RefCell::new(UiCallbacks::default()));
     let black_and_white = Arc::new(AtomicBool::new(false));
     let rotation = Arc::new(AtomicU32::new(0));
     let platform = KindlePlatform::new(
         wake_schedule.clone(),
-        on_wake.clone(),
+        callbacks.clone(),
         black_and_white.clone(),
         rotation.clone(),
     )
@@ -255,7 +275,7 @@ pub fn install(font_data: &[u8]) -> Result<KindleBackend, slint::PlatformError> 
     Ok(KindleBackend {
         window,
         wake_schedule,
-        on_wake,
+        callbacks,
         black_and_white,
         rotation,
         refresh_handle,

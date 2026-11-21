@@ -474,6 +474,56 @@ fn startup_mark(stage: &'static str) {
     let _ = stage;
 }
 
+#[cfg(all(feature = "kindle", target_os = "linux"))]
+struct StartupLibraryFrame {
+    request: platform::LibraryFrameRequest,
+    app: std::rc::Weak<RefCell<App>>,
+    content: Option<platform::LibraryFrameContent>,
+}
+
+#[cfg(all(feature = "kindle", target_os = "linux"))]
+impl StartupLibraryFrame {
+    fn scene(&self) -> platform::LibraryFrameState {
+        self.app
+            .upgrade()
+            .and_then(|app| {
+                app.try_borrow()
+                    .ok()
+                    .map(|state| state.startup_library_frame())
+            })
+            .unwrap_or(platform::LibraryFrameState::Cancelled)
+    }
+}
+
+#[cfg(all(feature = "kindle", target_os = "linux"))]
+impl slint_backend_kindle::StartupFrameObserver for StartupLibraryFrame {
+    fn prepare(&mut self) -> slint_backend_kindle::StartupFrameReadiness {
+        use slint_backend_kindle::StartupFrameReadiness;
+        if !self.request.active() {
+            return StartupFrameReadiness::Cancelled;
+        }
+        match self.scene() {
+            platform::LibraryFrameState::Waiting => StartupFrameReadiness::Waiting,
+            platform::LibraryFrameState::Cancelled => StartupFrameReadiness::Cancelled,
+            platform::LibraryFrameState::Ready(content) => {
+                self.content = Some(content);
+                StartupFrameReadiness::Ready
+            }
+        }
+    }
+
+    fn confirm_draw(&self) -> bool {
+        self.content
+            .is_some_and(|content| self.scene() == platform::LibraryFrameState::Ready(content))
+    }
+
+    fn submitted(self: Box<Self>) {
+        if let Some(content) = self.content {
+            self.request.submitted(content);
+        }
+    }
+}
+
 fn run(arguments: Arguments) -> Result<()> {
     let data_dir = arguments
         .data_dir
@@ -482,6 +532,11 @@ fn run(arguments: Arguments) -> Result<()> {
         .unwrap_or_else(default_data_dir)?;
     let actions = load_actions(arguments.actions.as_deref())?;
     let deadline = automatic_deadline(&arguments, &actions)?;
+    #[cfg(all(feature = "kindle", target_os = "linux"))]
+    let frame_request = arguments
+        .kindle
+        .then(platform::LibraryFrameRequest::claim)
+        .flatten();
     let platform = Arc::new(Platform::new(arguments.device, arguments.kindle)?);
     startup_mark("platform_ready");
     install_shutdown_signals(arguments.kindle)?;
@@ -602,6 +657,15 @@ fn run(arguments: Arguments) -> Result<()> {
     )
     .context("Open application state")?;
     startup_mark("application_attached");
+    #[cfg(all(feature = "kindle", target_os = "linux"))]
+    if let (Some(backend), Some(request)) = (_kindle_backend.as_ref(), frame_request) {
+        application.borrow_mut().arm_startup_library();
+        backend.observe_startup_frame(StartupLibraryFrame {
+            request,
+            app: Rc::downgrade(&application),
+            content: None,
+        });
+    }
 
     let failures = Rc::new(RefCell::new(FailureLog::default()));
     let quitting = Rc::new(Cell::new(false));

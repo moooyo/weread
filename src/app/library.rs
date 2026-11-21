@@ -832,6 +832,72 @@ impl App {
         Ok(())
     }
 
+    #[cfg(all(target_os = "linux", any(feature = "kindle", test)))]
+    pub fn arm_startup_library(&mut self) {
+        self.startup_library_pending = self.route == Route::Library && !self.demo;
+    }
+
+    #[cfg(all(target_os = "linux", any(feature = "kindle", test)))]
+    pub fn startup_library_frame(&self) -> crate::platform::LibraryFrameState {
+        use crate::platform::{LibraryFrameContent, LibraryFrameState::*};
+        use slint::Model;
+
+        if !self.startup_library_pending
+            || self.route != Route::Library
+            || self.demo
+            || self.closing.get()
+            || self.managed_sleep_blocked
+        {
+            return Cancelled;
+        }
+        let Some(ui) = self.ui.upgrade() else {
+            return Cancelled;
+        };
+        let shell = ui.global::<ShellModel>();
+        let library = ui.global::<LibraryModel>();
+        if shell.get_route() != "library"
+            || shell.get_active_tab() != "library"
+            || shell.get_demo()
+            || library.get_selecting()
+            || ui.global::<SleepScreenModel>().get_active()
+            || library.get_page() != 1
+            || !matches!(library.get_view_mode().as_str(), "cover" | "list")
+        {
+            return Cancelled;
+        }
+        if !shell.get_dialog_kind().is_empty()
+            || !shell.get_toast().is_empty()
+            || library.get_summary().is_empty()
+        {
+            return Waiting;
+        }
+        let books = library.get_books();
+        if books.row_count() == 0 {
+            return if self.library_sort == "default"
+                && library.get_sort() == "default"
+                && library.get_page_count() == 1
+                && !self.busy
+                && !library.get_busy()
+                && self.library_status.is_empty()
+                && library.get_status().is_empty()
+            {
+                Ready(LibraryFrameContent::Empty)
+            } else {
+                Waiting
+            };
+        }
+        if books.row_data(0).is_some_and(|first| {
+            first.row == 0
+                && first.column == 0
+                && !first.id.is_empty()
+                && !first.title.trim().is_empty()
+        }) {
+            Ready(LibraryFrameContent::Entries)
+        } else {
+            Waiting
+        }
+    }
+
     pub(super) fn library_page_size(&self) -> usize {
         if self.prefs.view_mode != "list" {
             return self.profile.cover_page_size();
