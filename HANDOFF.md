@@ -79,8 +79,10 @@ the splash and Reader matched the expected digital orientation in the same
 `D:1` pose. The wake-command guard refused before sleep. The device was
 restored and released at 13:28:38; no daily installation was changed.
 The [operator-assisted shelf visit](tools/kindle-font-trial/ORIENTATION.md#operator-assisted-opposite-portrait-and-shelf-tap)
-is prepared for the opposite native portrait and one real tap on the profile
-tab. Its preflight and software tests are not physical acceptance results.
+was attempted on the Scribe: the physical prelaunch reference remained `D:1`
+and the collector did not open the candidate. The device was released at
+15:36:49. Neither opposite-portrait startup nor a physical tap was observed;
+see the [assisted attempt](docs/review/startup-orientation-20261121/physical-pose-visit.md#assisted-opposite-portrait-attempt).
 See the linked experiment for build results and remaining gates. The [power-observer
 investigation](docs/review/startup-orientation-20261121/power-wait.md) keeps
 the two-second wait unchanged. Neither changes the measured font result.

@@ -42,6 +42,25 @@ tests. The splash recognizer separately passed 10/10 examples on host and
 visit's 69,889,077-byte upload was removed; its plan and public result archive
 remain available. Freeze a new label for another visit.
 
+## Assisted opposite-portrait attempt
+
+The operator-assisted public Library visit (`6e3bda685cbce23d`) did **not**
+launch the candidate. The stock reference was `D:1` before the turn cue. After
+the upload, the prelaunch calibration was still `D:1` and all ten independent
+pressure reads were `16` over 460.801 ms. The collector therefore did not arm
+the temporary entry or send an open request. There is no shelf, final route or
+tap sample. The operator reported that the app did not open, consistent with
+the gate. These readings cannot establish whether the operator moved the
+device or what it reported outside the sampled interval.
+
+Native return was `D:1`; restore, close and independent absence passed and
+the lease was released at **15:36:49 Asia/Shanghai**. See
+`test-env:/root/weread-assisted-shelf-20261121.BcM2UfxL/plan/batch-j10ef22z`
+for the operation receipt, raw public records and `assisted-shelf.json`. For
+the next attempt, use the short standalone native probe to confirm the target
+portrait **before uploading** another candidate; keep the same-launch
+prelaunch gate as well.
+
 ## Remaining gates
 
 The [software qualification](pose-qualification.md) does not replace a real
