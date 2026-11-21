@@ -77,18 +77,21 @@ also passes the **fixed-portrait Library and physical Profile tap** in both
 and [`U:3`](docs/review/startup-orientation-20261121/turn-and-wake-device.md#stable-opposite-portrait-passed).
 In the [startup turn and screen-saver visits](docs/review/startup-orientation-20261121/turn-and-wake-device.md),
 the sensor changed before the first application frame's submission log and
-the operator saw an upright Library. The **first frame's orientation** is
-still unknown. Across the stock screen saver, the same Reader process resumed,
+the operator saw an upright Library. That earlier visit had no draw marker.
+Across the stock screen saver, the same Reader process resumed,
 the awake endpoints changed from up to down and the operator read the same
 page. A comparison of the two raw frames supports the same content at a
 relative 180 degrees; the sensor did not timestamp the move while stopped.
-Neither visit verified deep suspend or absolute optical orientation. Keep
-the optimization **off by default**. The last visit released at **16:59:42**;
-the production installation was not changed. Use a short live desktop popup
-before each assisted action. The [new first-draw candidate](docs/review/startup-orientation-20261121/first-draw-boundary.md)
-and its paired pose/scanout sampler are frozen and preflighted. The preparation
-dialog was not confirmed: no device was claimed and there is no new first-frame
-result. The [power-observer
+Neither visit verified deep suspend or absolute optical orientation. The
+[instrumented first-draw visit](docs/review/startup-orientation-20261121/first-draw-boundary.md#physical-result)
+then confirmed that the grip changed 1.04–1.09 s before draw and the first
+submitted application frame used **180°**, as predicted by the new pose and
+scanout rather than the old 0° mapping. The splash reused calibration; the
+event-loop fallback query timed out after 557 ms. Do not treat this as two
+reuses or an ordinary-entry timing. The device was restored and its lease
+released at **17:33:11**. The production installation and **off-by-default**
+setting were unchanged. Use a short live desktop popup before each assisted
+action. The [power-observer
 investigation](docs/review/startup-orientation-20261121/power-wait.md) keeps
 the two-second wait unchanged. Neither changes the measured font result.
 

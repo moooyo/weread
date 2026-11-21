@@ -181,6 +181,9 @@ The later [operator-assisted turn and wake results](turn-and-wake-device.md)
 cover a stable opposite grip, a measured turn during startup and the same
 public Reader resuming across a stock screen saver. These are correctness
 tests, not additional startup timings. The package flag remains off.
+In the [separate first-draw visit](first-draw-boundary.md#physical-result),
+the first submitted application frame used the new grip's predicted 180°
+software angle. The event loop fell back; only the splash reused calibration.
 
 The [power-observer readiness investigation](power-wait.md) is a separate
 question. Do not change `sleep 2` in either orientation arm.

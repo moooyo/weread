@@ -94,18 +94,14 @@ suspend, optical update timing or touch mapping after wake.
 ## Default decision
 
 Leave `startup-orientation-reuse` off in the normal Kindle package. Both fixed
-grips now pass the Library and Profile tap, and this screen-saver case resumed
-with the same readable content. None of these observations establishes that
-the **first application frame** used the changed orientation during startup.
-The next useful test would record the effective rendering angle and the start
-of that frame's draw on the same clock as the sensor, not ask the operator
-to repeat the same gesture against the present markers. No new Scribe or
-KPW6 startup-time claim follows from these visits.
-
-The [first-draw follow-up](first-draw-boundary.md) now has these markers, a
-paired pressure/scanout sampler and a preflighted ARM build. No operator
-confirmation was received at the initial readiness dialog: no lease or
-additional device observation resulted.
+grips passed the Library and Profile tap, and the screen-saver case resumed
+with the same readable content. The earlier turn above did not identify
+the first frame. A [separately instrumented follow-up](first-draw-boundary.md#physical-result)
+closed that **software mapping** question: the grip changed before draw, and
+the first submitted frame used the new 180° angle instead of the old 0°.
+The event loop fell back rather than reusing the initial calibration. Neither
+that measurement nor the operator's view of the Library measures first-frame
+ink or ordinary-entry latency. No repeat of the turn is needed.
 
 Worker receipts: `weread-assisted-shelf-20261121.BcM2UfxL` holds the
 opposite-portrait and screen-saver visits, `weread-startup-turn-checkpoint-20261121.boU0XHJQ`
