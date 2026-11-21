@@ -6,10 +6,18 @@ import tempfile
 import unittest
 
 from freeze import HERE, SCHEDULE, device_body
-from prepare_rollout import release_gate
+from prepare_rollout import prepare, release_gate
 
 
 class ReleaseGateTest(unittest.TestCase):
+    def test_archived_font_only_binary_cannot_replace_the_current_package(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            plan = root / "plan"
+            with self.assertRaisesRegex(ValueError, "archived font-only candidate"):
+                prepare(root, root, root, plan, root / "old-document")
+            self.assertFalse(plan.exists())
+
     def test_partial_or_slow_study_cannot_promote(self):
         operations = {"passed": True, "released": "recorded",
                       "operations": [{"mode": "case", "case": case, "status": 0} for case in SCHEDULE]}

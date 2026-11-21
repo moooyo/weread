@@ -5,8 +5,9 @@ the candidate reduced **programmatic indexed request to first Library frame
 submission** in every timed pair. Baseline median: **6.604 s**; candidate
 median: **5.356 s**. The median of the six paired savings was **1.323 s**
 (range **0.911–1.697 s**). This is an engineering result, **not** release
-of the daily stock Library tile to its first complete frame. Keep the feature
-opt-in; do not change the power wait or deploy based on this batch alone.
+of the daily stock Library tile to its first complete frame. The feature stayed
+opt-in at the time; this batch neither changed the power wait nor deployed a
+build. See the later [package decision](README.md#package-decision).
 
 Both arms used the same public 15-cover offline shelf, bundled font preflight,
 launcher (including `sleep 2`) and isolated temporary document. Only B enabled

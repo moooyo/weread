@@ -2,6 +2,7 @@ import gzip
 import io
 import json
 from pathlib import Path
+import shlex
 import subprocess
 import tarfile
 import tempfile
@@ -11,6 +12,7 @@ from PIL import Image, ImageDraw
 
 from analyze import analyze, metrics
 from freeze import HERE, ROOT, SCHEDULE, device_body, launcher
+from orientation_contract import CANDIDATE
 from run import close_transaction, is_installed_retest, transport
 
 
@@ -133,10 +135,12 @@ class AnalysisTests(unittest.TestCase):
         self.assertIn('--demo --offline --screen "$WEREAD_TRIAL_ROUTE"', changes[0])
         self.assertIn("sleep 2", after)
 
-    def test_device_package_selects_the_qualified_arm(self):
+    def test_normal_kindle_package_selects_font_preflight_and_orientation_reuse(self):
         source = (ROOT / "scripts/build-kindle.sh").read_text()
-        command, = [line for line in source.splitlines() if line.startswith("cargo zigbuild ")]
-        self.assertIn('--no-default-features --features kindle,bundled-font-preflight --target "$TARGET"', command)
+        command, = [shlex.split(line) for line in source.splitlines() if line.startswith("cargo zigbuild ")]
+        self.assertIn("--no-default-features", command)
+        self.assertCountEqual(command[command.index("--features") + 1].split(","), CANDIDATE)
+        self.assertEqual(command[command.index("--target") + 1], "$TARGET")
 
     def test_document_consumes_one_arm(self):
         with tempfile.TemporaryDirectory() as temporary:

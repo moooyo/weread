@@ -139,10 +139,11 @@ fallbacks remain valid observations, not proof the fast path worked. A
 completed batch missing the timing gate writes its report and exits nonzero;
 invalid or incomplete inputs cannot produce a new successful report.
 
-A positive gate is not by itself a reason to enable the flag. Keep the six
-paired differences visible alongside the within-arm timings; distinguish
+A result from this frozen A/B does not change the
+[normal package default](../../docs/review/startup-orientation-20261121/README.md#package-decision).
+Keep the six paired differences visible alongside the within-arm timings; distinguish
 repeat-to-repeat variation from clock resolution. If the apparent saving
-cannot be distinguished from timing uncertainty, leave the flag off and
+cannot be distinguished from timing uncertainty,
 report the result as inconclusive. Do not subtract these request-to-SEND
 times from a separately measured ordinary tile-release interval or from a
 historical interaction upper bound.

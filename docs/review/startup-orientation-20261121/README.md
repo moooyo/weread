@@ -1,12 +1,44 @@
 # Startup orientation reuse on Kindle
 
+## Package decision
+
+The normal Kindle package enables `startup-orientation-reuse` by default for
+all models. There is no model allowlist or per-model test requirement to enable
+it. Each startup site still checks the current pose against its launch
+calibration; missing, changed or unreadable evidence takes the existing bounded
+`winmgr` query. This packaging decision does not establish deployment or extend
+the physical results beyond the Scribe 2022 / 5.19.5 tested here.
+
+The standard build script produced the ARM bundle on `test-env` under
+`/root/weread-default-package-20261121.BXUqBfS5/src/dist/kindle/`. The ARM
+application ran its version and trace-policy queries under Cortex-A8 QEMU;
+the package build did not enable runtime timing logs. The trial-tool suite
+passed 305/305, including a check that the archived font-only rollout cannot
+substitute its old executable for the new default. No physical device was used
+or updated for this package change.
+
+## What to apply from these tests
+
+| Observation on Scribe 2022 / 5.19.5 | Engineering decision |
+| --- | --- |
+| [Six paired, fixed-grip launches](physical-balanced.md) improved in every pair; median paired saving was 1.323 s from the indexed file-open request to first Library submission. | Use one guarded default across Kindle models. Measure ordinary stock-tile release to a complete Library frame separately; do not transfer this number to that metric or to another app. |
+| [Both grips](turn-and-wake-device.md) showed an upright populated Library and the intended Profile screen after a physical tap. The same Reader resumed with the same content after a turn in the stock screen saver. | Check pose, page and action separately. A readable restored page is not a test of post-wake touch or deep suspend. |
+| [Turning during startup](first-draw-boundary.md#physical-result) changed the required first-frame angle from 0° to 180°; the renderer used 180°. Splash reused the launch calibration, but the event-loop query timed out after 556.837 ms. | Investigate this second wait rather than skipping orientation checks. A new live observation must not be reported as reuse of an unchanged pose. |
+
+For other Kindle apps, first find the corresponding stages in that app's own
+trace. Optimize a demonstrated redundant wait and retain the existing path
+when live evidence is insufficient. The shared test device is for ready-to-run
+visits only; release it before changing code or analyzing results.
+
+## Experiment results
+
 **Status, November 21:** after the [two-launch pilot](physical-pilot.md), the
 [six-pair physical comparison](physical-balanced.md) passed on one Kindle
 Scribe 2022 / 5.19.5 in the same fixed native portrait. Median indexed
 request to first Library SEND was **6.604 s for A and 5.356 s for B**. B
 was faster in all six pairs; the median paired saving was **1.323 s**. Both
-candidate sites reused calibration on all six timed launches. Neither the
-ordinary tile-release metric nor another physical pose was measured. The
+candidate sites reused calibration on all six timed launches. This comparison
+did not measure the ordinary tile-release metric or another physical pose. The
 daily installation was unchanged.
 
 The November 20 [font A/B](../library-startup-latency-20261119/indexed-font-ab-20261120.md)
@@ -17,17 +49,16 @@ and event-loop queries timed out on all 12 timed launches (507.523 and
 puts the two waits at 1.015 s median within the six optimized-font launches;
 4.225 s elapsed before Rust `main`. Neither is a demonstrated saving.
 
-**Decision:** the fixed-pose engineering timing gate passed; retain the
-candidate as opt-in. Do not enable it in the package or replace the installed
-app until the separate physical orientation, touch mapping, wake and native
-restoration checks pass across the required poses. Normal exits restored
+**Decision at the time:** the fixed-pose timing gate passed, but the candidate
+remained opt-in pending separate physical checks; the batch did not replace
+the installed app. Normal exits restored
 native state in this batch; that does not verify return from a changed pose
 or sleep/wake. The [software pose qualification](pose-qualification.md)
 and [physical fixed-pose visit](physical-pose-visit.md) add screen/touch
 regressions and real digital splash/Reader orientation at `D:1`. The latter
 did not request sleep because its wake guard refused; the three physical
-turn/touch gates remain open. Keep the two-second power-observer wait; neither
-arm changed it.
+turn/touch checks were still open at that point. Neither arm changed the
+two-second power-observer wait.
 The indexed request-to-SEND comparison does not start with the ordinary
 stock tile release. It therefore cannot measure the [release-to-first-Library-frame
 metric](../../PHYSICAL_TESTING.md#library-first-frame-startup), even if its
@@ -38,7 +69,7 @@ rotation remains a correctness check, not the startup endpoint.
 
 - Both arms keep `kindle,bundled-font-preflight`, the indexed entry, power
   observer delay, splash artwork and first business-frame/input barrier. Only
-  the candidate adds `startup-orientation-reuse`; the normal build script does not.
+  the candidate adds `startup-orientation-reuse` in this historical A/B.
 - The splash may read the same private launch-generation, nonce and ancestry
   checked portrait record used by the app. It requires a recognized live
   sensor pose matching that anchor, bracketed by matching GETVAR reads on
@@ -180,7 +211,8 @@ the physical ink settled.
 The later [operator-assisted turn and wake results](turn-and-wake-device.md)
 cover a stable opposite grip, a measured turn during startup and the same
 public Reader resuming across a stock screen saver. These are correctness
-tests, not additional startup timings. The package flag remains off.
+tests, not additional startup timings. The normal package still excluded the
+feature at the time of those visits.
 In the [separate first-draw visit](first-draw-boundary.md#physical-result),
 the first submitted application frame used the new grip's predicted 180°
 software angle. The event loop fell back; only the splash reused calibration.

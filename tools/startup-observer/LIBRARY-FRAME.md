@@ -80,7 +80,7 @@ waited; a model update caused a natural 64-by-64 complete redraw. The send
 was a test callback, not a Kindle driver ioctl. The full application library suite
 was not rerun here.
 
-The unchanged packaging feature selection (`kindle,bundled-font-preflight`,
+The packaging feature selection at the time (`kindle,bundled-font-preflight`,
 without orientation reuse) built a 95,222,992-byte release application for
 `armv7-unknown-linux-musleabihf`. `qemu-arm -cpu cortex-a8` returned
 `weread 0.2.0`; a separate ARM test executable linked the actual request and

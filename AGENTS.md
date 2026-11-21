@@ -19,7 +19,7 @@
 - Do not run local tests, validation suites, build verification, smoke tests, or runtime probes unless the user explicitly authorizes local verification in the current task.
 - Otherwise, use the designated remote environment through `ssh test-env` for verification that can run there.
 - If the remote verification environment is unavailable, report verification as blocked rather than falling back to local verification.
-- Device behavior must be assessed on an explicitly identified Kindle model and firmware combination. Keep device claims separate from emulator results.
+- Assume shared behavior across Kindle models unless a concrete difference is known. Verify shared changes on a representative Kindle; do not require a separate physical run for every model or firmware. Record the actual model and firmware tested, and keep device observations separate from emulator results.
 - Ordinary source review, documentation editing, and Git operations are not application verification.
 
 ## Pre-release persistence

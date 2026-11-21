@@ -25,15 +25,19 @@ def release_gate(operations, analysis):
 
 
 def prepare(work, trial, attempt, plan, old_document):
+    script = (ROOT / "scripts/build-kindle.sh").read_text()
+    commands = [line for line in script.splitlines() if line.startswith("cargo zigbuild ")]
+    archived_build = ('cargo zigbuild --locked --release --no-default-features '
+                      '--features kindle,bundled-font-preflight --target "$TARGET"')
+    if commands != [archived_build]:
+        raise ValueError("The archived font-only candidate does not match the current Kindle package; "
+                         "build the normal package instead")
     operations = json.loads((attempt / "operations.json").read_text())
     analysis = analyze(attempt / "results.tgz")
     release_gate(operations, analysis)
     for lane, count in (("default", 56), ("preflight", 58)):
         if f"test result: ok. {count} passed; 0 failed;" not in (trial / f"main-{lane}.log").read_text():
             raise ValueError("Missing host font regression evidence")
-    script = (ROOT / "scripts/build-kindle.sh").read_text()
-    if '--features kindle,bundled-font-preflight --target "$TARGET"' not in script:
-        raise ValueError("The production package must select the measured font feature")
     plan.mkdir(mode=0o700)
     (plan / "plan.json").write_text(json.dumps({"purpose": "installed-retest", "label": secrets.token_hex(8),
         "schedule": ["normal"], "source": "qualified retained B", "private_data": "untouched by installer"}, indent=2) + "\n")

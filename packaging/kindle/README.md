@@ -6,6 +6,12 @@ Implementation and device acceptance are still in progress. The user removed the
 
 ## Layout
 
+The standard Kindle build enables startup orientation reuse for every device
+profile. Both the splash and the event loop independently check the launch
+calibration against live sensor and framebuffer readings. If the evidence is
+missing or changed, the existing fallback is used. This optimization does not
+add a firmware allowlist or change the launcher's other admission checks.
+
 The build script stages this layout under `dist/kindle/`:
 
 ```text

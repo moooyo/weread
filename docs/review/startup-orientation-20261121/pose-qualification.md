@@ -1,7 +1,8 @@
 # Startup orientation correctness, November 21
 
-**Decision: keep `startup-orientation-reuse` off in the normal package.** The
-[six-pair timing result](physical-balanced.md) applies to one Scribe 2022 on
+**Decision during this round:** the normal package kept `startup-orientation-reuse`
+off. The later [package decision](README.md#package-decision) applies to all
+Kindle models. The [six-pair timing result](physical-balanced.md) applies to one Scribe 2022 on
 5.19.5 in fixed native `down`, raw rotation `1`. It does not establish that
 the screen and touch agree in the opposite portrait or after a change. The
 checks below use public fixtures on `test-env`. No Kindle was claimed,
@@ -11,7 +12,7 @@ A [subsequent physical visit](physical-pose-visit.md) verified the digital
 splash and Reader at native `D:1` on the Scribe. It did not enter sleep,
 change pose or exercise physical touch. The software results below are unchanged.
 
-| Qualification | What can be checked off-device | Still required on Scribe 2022 / 5.19.5 |
+| Qualification | What can be checked off-device | Physical evidence sought at the time on Scribe 2022 / 5.19.5 |
 | --- | --- | --- |
 | Opposite stable portrait | Fixed `U:3` and `D:1` fixture inputs; splash mapping, independently resolved event-loop mapping, oriented software pixels and asymmetric touch targets. | Establish the opposite native portrait independently of the app. Check the actual splash and shelf frame against the expected panel orientation, the intended physical tap target and native return. |
 | Turn during startup | Change the simulated sensor between splash and event-loop decisions, or after attaching the observer and before the first application draw. A stale calibration must not skip the fallback. | Observe an actual change during the same startup window, then check the first shelf frame and touch. A turn entirely before startup or after submission is not a pass. |
@@ -122,6 +123,6 @@ and [opposite-grip, startup-turn and screen-saver visits](turn-and-wake-device.m
 Those reports distinguish physical input, software submission, raw frames and
 operator observations; see them for the outstanding gates. Prepare the complete
 isolated candidate, observation and restoration path before claiming the device.
-Return it before investigating missing evidence. Any future default must be
-scoped to the model/firmware that passes; do not enable the Cargo feature for
-every Kindle.
+Return it before investigating missing evidence. Scope physical results to
+the tested model and firmware; they are not per-model admission requirements
+for the shared package default.

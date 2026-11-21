@@ -309,6 +309,13 @@ Cache operations should support bounded storage, eviction, stale-entry recovery,
 
 Own the interfaces for display updates, touch and input, geometry and scaling, rotation, lifecycle, and reader handoff.
 
+Startup orientation reuse is a shared Kindle package default, not a model or
+firmware policy. The splash and event loop each confirm the same launch's
+calibration against live pose and framebuffer rotation; neither trusts the
+other site's previous decision. Missing or inconsistent evidence uses the
+existing bounded query or fixed mapping. This decision does not alter wake,
+touch, general launcher admission, or which devices have physical test evidence.
+
 A candidate implementation is the backend fork used by Jobman, which has author-reported tests on PW5, PW6, and first-generation Scribe combinations. Review and pin reused code. These reports do not establish this application's support matrix or support for every Scribe generation.
 
 Musl-based builds may reduce user-space library dependencies, but still depend on device kernel interfaces, display and input protocols, permissions, and any selected Kindle services. Static linking does not solve lifecycle or device compatibility by itself.

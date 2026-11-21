@@ -1,10 +1,12 @@
 # Handoff: Kindle Library startup
 
 Updated November 21, 2026 (Asia/Shanghai). **Font optimization measured,
-deployed and retested on Kindle Scribe 2022 / firmware 5.19.5.** The Kindle
-package now deliberately selects `kindle,bundled-font-preflight`. The default
-desktop build, custom-font validation, launcher wait and orientation queries
-are unchanged. At the November 21 handoff WeRead held no device lease and
+deployed and retested on Kindle Scribe 2022 / firmware 5.19.5.** The standard
+Kindle build now selects `kindle,bundled-font-preflight,startup-orientation-reuse`
+for every model. Missing or changed orientation evidence still uses the
+existing fallback. This package change was not installed on the shared Scribe.
+The default desktop build, custom-font validation and launcher wait are
+unchanged. At the November 21 handoff WeRead held no device lease and
 had no outstanding cleanup. This is not a statement of shared availability.
 
 **Primary startup metric: not measured by the runs below.** Use [ordinary
@@ -58,9 +60,10 @@ the early November 20 read-only audit is likewise **not** the current install.
 
 Both orientation queries timed out during all twelve timed launches, about
 half a second each. A [November 21 orientation candidate](docs/review/startup-orientation-20261121/README.md)
-is now available behind `startup-orientation-reuse`. It is **off** in the
-normal Kindle package. All 52 collector and regression tests passed on
-`test-env`. The [two-launch physical pilot](docs/review/startup-orientation-20261121/physical-pilot.md)
+was tested as an opt-in build against a control without the feature. The
+[subsequent package decision](docs/review/startup-orientation-20261121/README.md#package-decision)
+enables it by default for every Kindle. All 52 collector and regression
+tests passed on `test-env`. The [two-launch physical pilot](docs/review/startup-orientation-20261121/physical-pilot.md)
 then passed: both candidate sites actually reused calibration, the control
 timed out twice, and both the software and scanout Library bodies matched.
 The device returned to native and the pilot lease was released at 11:39:10
@@ -89,9 +92,10 @@ submitted application frame used **180°**, as predicted by the new pose and
 scanout rather than the old 0° mapping. The splash reused calibration; the
 event-loop fallback query timed out after 557 ms. Do not treat this as two
 reuses or an ordinary-entry timing. The device was restored and its lease
-released at **17:33:11**. The production installation and **off-by-default**
-setting were unchanged. Use a short live desktop popup before each assisted
-action. The [power-observer
+released at **17:33:11**. That visit did not alter the installed daily binary.
+The normal build now shares one reuse policy; no additional per-model
+physical qualification is required to enable it. Use a short live desktop
+popup before each assisted action. The [power-observer
 investigation](docs/review/startup-orientation-20261121/power-wait.md) keeps
 the two-second wait unchanged. Neither changes the measured font result.
 

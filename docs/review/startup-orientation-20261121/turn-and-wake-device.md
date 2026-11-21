@@ -93,8 +93,9 @@ suspend, optical update timing or touch mapping after wake.
 
 ## Default decision
 
-Leave `startup-orientation-reuse` off in the normal Kindle package. Both fixed
-grips passed the Library and Profile tap, and the screen-saver case resumed
+The normal package kept `startup-orientation-reuse` off during these visits;
+the later [package decision](README.md#package-decision) supersedes that
+choice. Both fixed grips passed the Library and Profile tap, and the screen-saver case resumed
 with the same readable content. The earlier turn above did not identify
 the first frame. A [separately instrumented follow-up](first-draw-boundary.md#physical-result)
 closed that **software mapping** question: the grip changed before draw, and

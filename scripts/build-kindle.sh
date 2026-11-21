@@ -21,7 +21,7 @@ command -v zig >/dev/null 2>&1 || { printf '%s\n' 'Zig is required by cargo-zigb
 
 export CARGO_TARGET_DIR CARGO_BUILD_JOBS
 cd "$REPO_ROOT"
-cargo zigbuild --locked --release --no-default-features --features kindle,bundled-font-preflight --target "$TARGET"
+cargo zigbuild --locked --release --no-default-features --features kindle,bundled-font-preflight,startup-orientation-reuse --target "$TARGET"
 # The existing Kindle X11 runtime stays in an independent glibc process.
 # The main application remains a static musl executable.
 zig cc -target arm-linux-gnueabihf.2.17 -std=c11 -Wall -Wextra -Werror -O2 -s \

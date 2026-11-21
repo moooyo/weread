@@ -6,6 +6,8 @@ Implementation started on 2026-11-03 (Asia/Shanghai), following the supplied WeR
 
 The [startup metric](docs/PHYSICAL_TESTING.md#library-first-frame-startup) runs from release of the ordinary WeRead tile in the stock Kindle Library to the first complete WeRead Library frame in the same launch. Recognizable entries or a legitimate empty state and Library navigation must be drawn; cover placeholders are valid. No second tap is required. The [handoff](HANDOFF.md) lists the separate timings measured so far.
 
+The standard Kindle package [reuses confirmed startup orientation](docs/review/startup-orientation-20261121/README.md#package-decision) on all models. Both startup sites check live readings before reuse; missing or changed readings take the existing fallback. No per-model sign-off is required for this optimization.
+
 The accepted [Kindle entry cover](assets/branding/README.md) shows `WeRead` above
 a reader containing a winking penguin. Its grayscale thumbnail is embedded in
 the document launcher's Icon metadata and travels with the development package.

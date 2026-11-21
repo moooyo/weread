@@ -7,7 +7,8 @@ portrait as the six-pair experiment**. The screen-saver cycle was **not run
 in this visit**. A [separate shelf retest](#confirmed-fixed-down-retest) qualified
 one physical tap in `D:1`: the operator's report and independent same-visit
 shelf and final-route evidence agreed, with both orientation queries reused.
-Keep the feature off in the normal package. These visits did not measure
+The feature was off in the normal package at the time of these visits; see
+the [later package decision](README.md#package-decision). These visits did not measure
 ordinary-entry startup latency or optical settling.
 
 | Actual observation | Result | What it establishes |

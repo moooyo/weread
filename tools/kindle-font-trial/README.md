@@ -52,6 +52,10 @@ changes into that promotion. A successful indexed comparison still requires
 a normal-entry post-deployment check. Permission to clear application data
 does not make a reset necessary.
 
+`prepare_rollout.py` is specific to that archived font-only binary; it must
+not deploy it over a package that also enables orientation reuse. Build new
+daily packages with `scripts/build-kindle.sh`, not the historical promotion tool.
+
 Use `test_trial.py` in the worker userspace to rehearse one-shot selection,
 clock validation and fresh/partial/foreign stage behavior. During the
 physical batch, `run.py` uses the existing host lease protocol, pinned SSH

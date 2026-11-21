@@ -9,8 +9,9 @@ the draw boundary nor the angle used by the renderer. Do not relabel it.
 ## Decision before device access
 
 Use a new build and one public offline Library launch. Do not replace the
-installed app or enable the optimization. Before acquisition, the worker must
-verify the ARM candidate, sensor, frozen transaction and close path. A real
+installed app or change the normal package as part of this visit. Before
+acquisition, the worker must verify the ARM candidate, sensor, frozen
+transaction and close path. A real
 Windows readiness popup must be acknowledged. After staging, ask the operator
 to turn once **when the WeRead splash appears**. Start only after a timely
 acknowledgment; if the splash is missed, do not ask for a late turn. A popup
@@ -56,7 +57,8 @@ backend were both freshly compiled (`fresh: false` in Cargo's stream). The
 static ARM candidate is 95,228,264 bytes and the paired sampler 29,072 bytes.
 The packed executables returned their expected policies under Cortex-A8 QEMU;
 the device transaction preflight succeeded without a lease. The older daily
-binary rejected the candidate-only CLI; it was not replaced or rebuilt.
+binary rejected the trace-policy CLI available in the reuse build; it was
+not replaced or rebuilt during this visit.
 
 On `test-env`, the complete Python trial suite passed **304/304**. In a
 separate Rust backend suite, **158/158** tests passed with the default feature
@@ -101,8 +103,9 @@ The final route was `library`; the operator [separately confirmed upright
 Library text after turning](first-draw-operator.json). This does not identify
 the very first optical frame. The digital shelf classifier returned `none`
 about 14.5 s after submission, not evidence of a blank or inverted shelf.
-No touch or KPW6 result is claimed. No change to rotation logic, the daily
-installation or the default feature is warranted by this single visit.
+No touch or KPW6 result is claimed. This visit did not change the rotation
+logic, daily installation or package default. The subsequent
+[package decision](README.md#package-decision) is not another device result.
 
 The device returned to native `U:3`. All eight operations succeeded, including
 restore, collection, close and independent absence; owner/token release was
