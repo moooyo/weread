@@ -5,6 +5,8 @@ use super::super::{
     session_restore::{LauncherContext, ManagedMarker},
 };
 use super::*;
+use crate::platform::{NativePortraitCalibration, NativePortraitDirection};
+use std::io::Write;
 
 std::thread_local! {
     // RenderSink is Send + Sync; the actual Slint handle stays on its UI thread.
@@ -28,6 +30,7 @@ struct SleepDisplayState {
     requested: u64,
     completed: u64,
     sleep_calls: Vec<(bool, bool)>,
+    wake_portrait: Option<NativePortraitCalibration>,
 }
 
 #[derive(Default)]
@@ -75,6 +78,17 @@ impl RenderSink for SleepLifecycleDisplay {
 
     fn managed_sleep_state(&self) -> std::result::Result<ManagedSleepState, PlatformError> {
         Ok(self.0.lock().unwrap().backend)
+    }
+
+    fn prepare_native_portrait_resume(
+        &self,
+        observation: NativePortraitCalibration,
+    ) -> std::result::Result<(), PlatformError> {
+        let mut state = self.0.lock().unwrap();
+        assert_eq!(state.backend, ManagedSleepState::Suspended);
+        assert!(sleep_overlay_active());
+        assert!(state.wake_portrait.replace(observation).is_none());
+        Ok(())
     }
 
     fn request_sleep_presentation(&self) -> std::result::Result<u64, PlatformError> {
@@ -136,6 +150,15 @@ fn run_cover_sleep_lifecycle(
     assert!(state.pending_covers.contains(&book.id));
 
     let route = state.route.clone();
+    let visible_lines = || {
+        ui.global::<ReaderModel>()
+            .get_lines()
+            .iter()
+            .map(|line| (line.start, line.end, line.text))
+            .collect::<Vec<_>>()
+    };
+    let original_lines = visible_lines();
+    assert!(!original_lines.is_empty());
     let page = state
         .reader
         .paginator
@@ -217,8 +240,19 @@ fn run_cover_sleep_lifecycle(
     assert!(context.matches("resume-ready")?);
 
     context.write_managed_cycle(ManagedMarker::WakeRequest, 1)?;
+    let wake = std::fs::read_to_string(launcher_directory.path().join("managed-wake-request"))?;
+    let mut observation = tempfile::NamedTempFile::new_in(launcher_directory.path())?;
+    writeln!(observation, "{}:D:1", wake.trim_end())?;
+    observation.persist(launcher_directory.path().join("managed-native-portrait-calibration"))?;
     assert!(state.poll_managed_sleep(false, true)?);
     assert!(!overlay.get_active());
+    assert_eq!(
+        sink.0.lock().unwrap().wake_portrait,
+        Some(NativePortraitCalibration {
+            direction: NativePortraitDirection::Down,
+            framebuffer_rotation: 1,
+        })
+    );
     // The sink sampled the actual Slint model inside set_managed_sleep(false).
     assert_eq!(sink.sleep_calls(), vec![(true, true), (false, false)]);
     assert_eq!(
@@ -236,6 +270,7 @@ fn run_cover_sleep_lifecycle(
     assert!(!state.resident_lifecycle.is_prepared());
     assert_eq!(context.managed_cycle(ManagedMarker::WakeReady)?, Some(1));
     assert_eq!(state.route, route);
+    assert_eq!(visible_lines(), original_lines);
     assert_eq!(
         state.reader.paginator.as_ref().unwrap().current_page(),
         &page

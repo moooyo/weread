@@ -513,7 +513,13 @@ pub(super) fn isolated(case: &'static str, scenario: fn() -> Result<()>) -> Resu
     let marker = completion.path().join("completed");
     let mut command = Command::new(std::env::current_exe()?);
     command
-        .args(["--exact", case, "--nocapture", "--test-threads=1"])
+        .args([
+            "--exact",
+            case,
+            "--include-ignored",
+            "--nocapture",
+            "--test-threads=1",
+        ])
         .env(CHILD, case)
         .env(COMPLETED, &marker)
         .env_remove("WEREAD_API_KEY")

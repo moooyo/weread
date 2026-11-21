@@ -29,6 +29,9 @@ mod underline_projection;
 mod closing_tests;
 
 #[cfg(test)]
+mod pose_hit_tests;
+
+#[cfg(test)]
 mod terminal_tests;
 
 #[cfg(test)]

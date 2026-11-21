@@ -70,8 +70,10 @@ first Library SEND was 6.604 s for A and 5.356 s for B (medians); all six
 pairs improved, with a median paired saving of 1.323 s. The two query sites
 explain 0.965 s of median paired saving within their measured intervals.
 Do not treat the rest as orientation-query time, or any of it as a measured
-saving from ordinary tile release. Inverted holding, mapped physical touch
-and sleep/wake remain separate gates before enabling the build flag.
+saving from ordinary tile release. The [pose qualification](docs/review/startup-orientation-20261121/pose-qualification.md)
+checks screen/touch mappings and wake on the Linux worker. The opposite
+physical portrait, a turn during startup, and a turn across actual sleep/wake
+remain untested on the Scribe; leave the package flag off.
 See the linked experiment for build results and remaining gates. The [power-observer
 investigation](docs/review/startup-orientation-20261121/power-wait.md) keeps
 the two-second wait unchanged. Neither changes the measured font result.

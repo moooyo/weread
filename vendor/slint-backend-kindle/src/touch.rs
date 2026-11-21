@@ -863,7 +863,7 @@ fn panel_to_logical_position(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::{TouchInput, lists_accelerometer, panel_to_logical_position, undo_rotation};
     use slint::{ComponentHandle, LogicalPosition};
 
@@ -890,6 +890,12 @@ mod tests {
     }
 
     fn touch_pipe() -> (TouchInput, std::os::fd::OwnedFd) {
+        let (mut input, writer) = touch_pipe_for_size(100, 100);
+        input.draining = true;
+        (input, writer)
+    }
+
+    pub(crate) fn event_pipe() -> (std::os::fd::OwnedFd, std::os::fd::OwnedFd) {
         use std::os::fd::FromRawFd;
         let mut descriptors = [-1; 2];
         // SAFETY: The initialized two-element array owns both returned descriptors.
@@ -897,21 +903,30 @@ mod tests {
             unsafe { libc::pipe2(descriptors.as_mut_ptr(), libc::O_NONBLOCK | libc::O_CLOEXEC) },
             0
         );
-        // SAFETY: pipe2 just created the writer, which has exactly one owner.
-        let writer = unsafe { std::os::fd::OwnedFd::from_raw_fd(descriptors[1]) };
+        // SAFETY: pipe2 created both descriptors; each is transferred to exactly one owner.
+        let [reader, writer] = descriptors.map(|fd| unsafe { std::os::fd::OwnedFd::from_raw_fd(fd) });
+        (reader, writer)
+    }
+
+    pub(crate) fn touch_pipe_for_size(
+        width: u32,
+        height: u32,
+    ) -> (TouchInput, std::os::fd::OwnedFd) {
+        use std::os::fd::IntoRawFd;
+        let (reader, writer) = event_pipe();
         let input = TouchInput {
-            file_descriptor: descriptors[0],
+            file_descriptor: reader.into_raw_fd(),
             active_slot: 0,
             tracked_slot: None,
             x: 0.0,
             y: 0.0,
             pressed: false,
-            screen_width: 100.0,
-            screen_height: 100.0,
+            screen_width: width as f32,
+            screen_height: height as f32,
             rotation: 0,
-            max_x: 100.0,
-            max_y: 100.0,
-            draining: true,
+            max_x: width as f32,
+            max_y: height as f32,
+            draining: false,
             drain_synchronization: super::DrainSynchronization::Complete,
             current_tracking: [-1; super::MAX_TOUCH_SLOTS],
             cancelled_tracking: [-1; super::MAX_TOUCH_SLOTS],
@@ -923,7 +938,7 @@ mod tests {
         (input, writer)
     }
 
-    fn write_packet(writer: &std::os::fd::OwnedFd, kind: u16, code: u16, value: i32) {
+    pub(crate) fn write_packet(writer: &std::os::fd::OwnedFd, kind: u16, code: u16, value: i32) {
         use std::os::fd::AsRawFd;
         let event = super::TouchInputEvent {
             timestamp_seconds: 0,

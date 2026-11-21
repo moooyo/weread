@@ -22,7 +22,9 @@ candidate as opt-in. Do not enable it in the package or replace the installed
 app until the separate physical orientation, touch mapping, wake and native
 restoration checks pass across the required poses. Normal exits restored
 native state in this batch; that does not verify return from a changed pose
-or sleep/wake. Keep the two-second power-observer wait; neither arm changed it.
+or sleep/wake. The [follow-up pose qualification](pose-qualification.md)
+separates the Linux software evidence from the three outstanding physical
+checks. Keep the two-second power-observer wait; neither arm changed it.
 The indexed request-to-SEND comparison does not start with the ordinary
 stock tile release. It therefore cannot measure the [release-to-first-Library-frame
 metric](../../PHYSICAL_TESTING.md#library-first-frame-startup), even if its

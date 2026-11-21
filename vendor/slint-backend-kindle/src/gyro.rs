@@ -363,6 +363,17 @@ pub(crate) struct GyroObserver {
 }
 
 impl GyroObserver {
+    #[cfg(all(test, feature = "startup-orientation-reuse"))]
+    pub(crate) fn from_test_stream(file: File) -> Self {
+        Self {
+            file,
+            state: DirectionState::default(),
+            bytes: [0; EVENT_BYTES],
+            filled: 0,
+            backlog: false,
+        }
+    }
+
     /// Retain exactly one recognized, pressure-only sensor. All descriptors of
     /// rejected candidates close immediately through File's ordinary Drop.
     pub(crate) fn open() -> io::Result<Option<Self>> {

@@ -1949,13 +1949,21 @@ class LauncherLifecycleTests(unittest.TestCase):
             application = self.wait_for_managed_application()
             directory = self.root / "lock"
             initial = (directory / "native-portrait-calibration").read_text()
+            generation = (directory / "generation").read_text().strip()
+            identity = self.observed_identity(application)
+            owner = f"{generation}:{application}:{identity['birth']}"
+            self.assertEqual(initial.strip(), generation + ":U:3")
             for cycle, direction, rotation in ((1, "D", 1), (2, "U", 3)):
                 request = self.suspend_managed_application(application)
-                self.assertTrue(request.endswith(":" + str(cycle)))
+                self.assertEqual(request, f"{generation}:{cycle}")
+                self.assertEqual(self.observed_identity(application), identity)
                 self.assertFalse((directory / "managed-native-portrait-calibration").exists())
                 self.wait_until(lambda: self.process_state(awesome.pid) not in (None, "T", "Z", "X"))
                 self.set_native_portrait_inputs(f"AUTO:{rotation}\n", direction + "\n")
                 self.wake_managed_application(application, request)
+                self.assertEqual(self.observed_identity(application), identity)
+                self.assertEqual((directory / "application-owned").read_text().strip(), owner)
+                self.assertEqual((directory / "generation").read_text().strip(), generation)
                 value = request + f":{direction}:{rotation}"
                 self.assertEqual((directory / "managed-native-portrait-calibration").read_text().strip(), value)
                 self.assertEqual((directory / "native-portrait-calibration").read_text(), initial)

@@ -156,6 +156,11 @@ upright, mapped input selects the intended target in both poses, and native
 input/display recover after exit. These are orientation correctness checks,
 not extra actions required to stop the startup clock.
 
+See the [pose qualification](../../docs/review/startup-orientation-20261121/pose-qualification.md)
+for the completed Linux and ARM user-mode checks, the physical admission
+criteria and the same-launch sensor-window classifier. The fixed portrait
+samples from the six-pair batch cannot be reused as observed turns.
+
 The frozen collector measures file-open request to first Library `SEND`.
 The [current primary metric](../../docs/PHYSICAL_TESTING.md#library-first-frame-startup)
 instead starts at release of the ordinary stock tile (label automated input

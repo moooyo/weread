@@ -2463,6 +2463,10 @@ mod active_orientation_runtime_tests {
 }
 
 #[cfg(all(test, feature = "startup-orientation-reuse"))]
+#[path = "pose_acceptance_tests.rs"]
+mod pose_acceptance_tests;
+
+#[cfg(all(test, feature = "startup-orientation-reuse"))]
 mod startup_orientation_reuse_tests {
     use super::*;
     use crate::orientation::NativePortraitOrientation::{Down, Up};
