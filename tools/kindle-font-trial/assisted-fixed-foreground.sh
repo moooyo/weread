@@ -6,7 +6,8 @@ fixed_foreground_check() {
     fixed_reason=power; [ "$(power_state)" = active ] || return 1
     for fixed_peer in aidoku bilicomics; do
         fixed_reason=peer_lock; absent "/tmp/$fixed_peer-launcher.lock" || return 1
-        fixed_reason=peer_process; ! pidof "$fixed_peer" >/dev/null || return 1
+        fixed_reason=peer_process
+        if pidof "$fixed_peer" >/dev/null 2>&1; then return 1; else [ "$?" = 1 ] || return 1; fi
     done
     fixed_reason=manager; fixed_managers=$(pidof awesome) && [ -n "$fixed_managers" ] || return 1
     for fixed_manager in $fixed_managers; do

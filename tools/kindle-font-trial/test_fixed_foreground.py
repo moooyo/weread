@@ -83,6 +83,7 @@ stage=$ROOT/candidate; out=$stage/out; home=$stage/B; lock=$ROOT/tmp/weread-laun
 gui=63; birth=87; identity=63:87; generation=1:fixture_generation
 power_state() { cat "$ROOT/power"; }
 pidof() {
+    if [ -f "$ROOT/pidof_$1" ]; then printf 'injected pidof error\n' >&2; return "$(cat "$ROOT/pidof_$1")"; fi
     case "$1" in awesome) cat "$ROOT/wm";; aidoku|bilicomics) [ -f "$ROOT/$1" ];; *) return 2;; esac
 }
 usleep() {
@@ -183,6 +184,16 @@ fixed_capture_shelf
         self.put('tmp/weread-launcher.lock/application-birth', '88')
         self.stat(self.gui, 'S', 88)
         self.refused('pre_identity')
+
+    def test_peer_lookup_errors_never_mean_no_peer(self):
+        for peer in ('aidoku', 'bilicomics'):
+            for status in (2, 127):
+                with self.subTest(peer=peer, status=status):
+                    self.put('pidof_' + peer, str(status))
+                    self.refused('pre_peer_process')
+                    (self.root / ('pidof_' + peer)).unlink()
+        self.put('at_capture', 'echo 127 >"$ROOT/pidof_bilicomics"')
+        self.refused('post_peer_process', wanted_reads=1)
 
     def test_stopped_gui_is_never_retried(self):
         self.stat(self.gui, 'T', 87)
