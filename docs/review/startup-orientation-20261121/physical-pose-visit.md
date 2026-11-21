@@ -4,9 +4,10 @@
 the startup lettering and the public Reader in the expected digital orientation
 on a Kindle Scribe 2022 / 5.19.5. The native reference was `D:1`, **the same
 portrait as the six-pair experiment**. The requested screen-saver cycle was
-**not run**. A [separate shelf visit](#fixed-down-library-touch) has an
-operator-confirmed physical tap in `D:1`, without independent final-route
-evidence. Keep the feature off in the normal package. Neither visit measured
+**not run**. A [separate shelf retest](#confirmed-fixed-down-retest) qualified
+one physical tap in `D:1`: the operator's report and independent same-visit
+shelf and final-route evidence agreed, with both orientation queries reused.
+Keep the feature off in the normal package. These visits did not measure
 ordinary-entry startup latency or optical settling.
 
 | Actual observation | Result | What it establishes |
@@ -141,6 +142,32 @@ owner/token-verified release. The public receipts and archive are in
 The later `operator-analysis.json` includes the four explicit answers and
 retains both automated qualifications as `not_established`. The initial
 machine-only report was not overwritten.
+
+### Confirmed fixed-down retest
+
+The operator opted in separately to a new run. Both the readiness and action
+prompts were visible Windows dialogs. Label `2a937e8d13e142f5` ran at
+**16:17:47–16:20:35** on the same Scribe 2022 / 5.19.5. The candidate and
+public seed were unchanged; the observer separated pre-sample, post-sample
+and result-file errors. The new run does not identify which check rejected
+the first visit.
+
+| Evidence in this visit | Result |
+| --- | --- |
+| Native direction | `D:1` before, at launch and on return; all ten prelaunch sensor checks were `16`. |
+| Candidate startup | Both the splash and event loop reused the launch calibration; neither took the fallback path. |
+| Digital shelf and destination | The live framebuffer classifier recognized a **populated grid**. The candidate's final route was `settings` (the bottom-right **Profile** tab). |
+| Independent human account | In a new, label-bound [four-item report](fixed-down-repeat-operator.json), the operator confirmed holding still, seeing an upright populated shelf, tapping Profile once and seeing the Profile page. Dismissing either earlier notification was not counted as feedback. |
+
+`operator-analysis.json` reports `operator_and_route_confirmed` and
+`confirmed_in_scope`. This qualifies **only this fixed-portrait Library tap**,
+not the opposite grip, another touch target, wake, or a startup time. No
+screen recording or private books were used. All eight operations succeeded,
+including restore, close and independent absence, followed by exact release.
+`fixed-down-refined-161659-39f51b/batch-zgzkz1az` under the same worker
+retains the allowlisted archive, operations, original machine-only result,
+and separate operator and combined reports. The Ubuntu collector suite passed
+**166/166** before the visit.
 
 ## Remaining gates
 

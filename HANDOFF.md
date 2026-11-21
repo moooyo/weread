@@ -94,8 +94,12 @@ the operator subsequently confirmed they missed that turn cue. In a separate
 [fixed-down shelf visit](docs/review/startup-orientation-20261121/physical-pose-visit.md#fixed-down-library-touch),
 the operator saw an upright populated shelf and reached Profile with one
 physical tap. The collector did not preserve the digital shelf or final route.
-The device was restored and released at 16:07:15. Keep the optimization off
-by default. Provide an actual desktop notification before any assisted action.
+The device was restored and released at 16:07:15. A [fresh retest](docs/review/startup-orientation-20261121/physical-pose-visit.md#confirmed-fixed-down-retest)
+then confirmed the populated grid, both reuse sites, and the final Profile
+route in the same visit as an independently confirmed physical tap. It
+released at 16:20:35. The fixed `D:1` single-tap gate is closed; the other
+portrait and real turn/sleep cases are not. Keep the optimization off by
+default. Provide an actual desktop notification before any assisted action.
 See the linked experiment for build results and remaining gates. The [power-observer
 investigation](docs/review/startup-orientation-20261121/power-wait.md) keeps
 the two-second wait unchanged. Neither changes the measured font result.
