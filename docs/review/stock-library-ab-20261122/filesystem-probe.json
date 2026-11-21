@@ -1,0 +1,24 @@
+{
+  "device": "Kindle Scribe 2022",
+  "firmware": "5.19.5",
+  "date": "2026-11-22",
+  "timezone": "Asia/Shanghai",
+  "scope": "Two owned temporary markers on the user volume; no application, stock card or production launcher access.",
+  "public_label": "b1d3e4038750a2a1",
+  "acquired_at_utc": "2026-11-21T20:02:01.437140+00:00",
+  "released_at_utc": "2026-11-21T20:02:03.781179+00:00",
+  "observation": {
+    "policy": "selector-diagnostic-v1",
+    "filesystem": "fuse",
+    "admission": "verified",
+    "admission_errno": 0,
+    "exchange": "exchange_out",
+    "exchange_errno": 22,
+    "hardlink": "link_create",
+    "hardlink_errno": 1,
+    "clean": true
+  },
+  "operations": {"admit": 0, "probe": 0, "close": 0, "absent": 0},
+  "owner_and_token_checked": true,
+  "lease_absent_at_release": true
+}

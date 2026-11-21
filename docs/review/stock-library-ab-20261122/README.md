@@ -69,6 +69,48 @@ B bytes respectively, with the original archive content and EOF verified.
 This check used no Kindle. The failed device visit and its receipt remain
 separate from any new series; a transfer fix cannot supply a timing sample.
 
+## Second device attempt: exchange guard refused
+
+The fresh A warmup `0796ac63322c9ceb` ran from **03:46:39 to 03:48:54
+Asia/Shanghai**. This time the device acknowledged the complete script header
+and got past both archives, the installed-file reference checks and public
+shelf preparation. The private scratch-file check then returned
+`selector_exchange_probe` (SSH status 1). This is not a transport failure:
+the stage's own test of the exchange operation did not pass. Its original
+error name covers several filesystem checks; it is not itself an errno or
+proof that the exchange syscall was unavailable.
+
+The production launcher was never exchanged, the native card was not clicked,
+and there is no render timestamp. Stop, restore, close and independent absence
+all passed; the worker verified the owner and token on release. The two
+warmups belong to separate series. **Neither yields a performance sample.**
+
+## Physical verdict: the measured volume rejects both rollback strategies
+
+At **04:02:01–04:02:03 Asia/Shanghai on November 22**, a separate 51,740-byte
+ARM diagnostic tested two disposable 19-byte markers on this Scribe 2022 /
+5.19.5. It did not run WeRead, tap the screen, or open the production launcher
+or private data. The device reported a **FUSE** user volume. Directory and
+mount identity checks passed. The first cross-directory `RENAME_EXCHANGE`
+syscall returned **`EINVAL` (22)**, before any post-exchange `fsync` or file
+check. The independent hard-link strategy failed at **`linkat`, `EPERM` (1)**,
+before replacing even a test file. These results apply to the tested
+operations on this volume, not all FUSE filesystems, ordinary renames or
+all Kindle models.
+
+The diagnostic itself completed successfully: scratch cleanup, close and an
+independent absence check passed. The owner and token were verified on
+release. Its [public device receipt](filesystem-probe.json) is distinct from
+both failed warmups.
+
+**Decision: stop this series with zero formal launches, zero pairs and no
+stock-card speedup claim.** Do not retry the same rejected operations, write
+the launcher in place, or restore a look-alike copy instead of the original
+file. The normal Kindle package default is unchanged. A different rollback
+design, such as a temporary mount of *only* WeRead's own launcher, needs a
+separate decision and rehearsal. No such mount was attempted. An explicitly
+labeled temporary card would measure that entry, not the ordinary stock card.
+
 ## Acceptance and stopping rules
 
 - Start: the automatic button release on the uniquely recognized normal

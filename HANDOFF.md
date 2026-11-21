@@ -22,6 +22,14 @@ the unchanged installation showed a complete grid in framebuffer memory by
 **8.258 s** after synthetic release (one launch; no frame-specific completion
 or `SEND` timestamp). All close checks passed; the lease was released at 12:28:06.
 
+The [November 22 ordinary-card A/B](docs/review/stock-library-ab-20261122/README.md#physical-verdict-the-measured-volume-rejects-both-rollback-strategies)
+has **zero formal pairs**. Two separate warmups stopped before switching the
+launcher or clicking the card. On the Scribe's FUSE user volume a scratch-only
+probe confirmed that atomic exchange returned `EINVAL` and hard-link creation
+returned `EPERM`. The original launcher and private shelf were not changed.
+The device was released at 04:02:03 Asia/Shanghai. Do not restart this series
+or infer a stock-card saving from the indexed A/B.
+
 ## What actually ran
 
 | Endpoint | Result | Scope |

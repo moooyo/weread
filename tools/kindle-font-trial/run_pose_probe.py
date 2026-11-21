@@ -17,7 +17,7 @@ from pose_turn_cue import cue_program, streaming_probe
 from run import LEASE, UTIL, stamp, transport
 
 
-def transact(call, release, report, save, recovering=False, *, display_trace=False):
+def transact(call, release, report, save, recovering=False, *, display_trace=False, decode=None):
     touched = recovering
     raw = None
     try:
@@ -39,15 +39,20 @@ def transact(call, release, report, save, recovering=False, *, display_trace=Fal
         finally:
             save()
     if raw is not None:
-        report['observation'] = parse_observation(raw.decode('ascii'), expected_label=report['label'], display_trace=display_trace)
+        report['observation'] = (decode(raw) if decode else
+                                 parse_observation(raw.decode('ascii'), expected_label=report['label'], display_trace=display_trace))
     report['passed'] = True
     save()
 
 
-def main(args):
+def main(args, *, volume=False):
     os.umask(0o077)
     if not Path('/opt/kindle-toolchain/ubuntu-run').is_file():
         raise ValueError('Use the designated worker host')
+    if volume:
+        from volume_diagnostic import observation, program
+        if args.display_trace or args.turn_cue or args.operator_ready:
+            raise ValueError('The volume diagnostic never requests operator action')
     if args.recover and args.display_trace:
         raise ValueError('Recovery is cleanup only, not a display trace')
     turn_cue = args.turn_cue
@@ -56,6 +61,8 @@ def main(args):
     runs = args.runs.resolve(strict=True)
     if args.recover:
         mode, scope = 'recover', 'stage_cleanup_only'
+    elif volume:
+        mode, scope = 'scratch_filesystem', 'scratch_filesystem_capabilities_only'
     elif args.display_trace:
         mode, scope = 'display_trace', 'stock_native_display_trace_only'
     else:
@@ -64,6 +71,10 @@ def main(args):
         attempt = args.recover.resolve(strict=True)
         if attempt.parent != runs or not (attempt / 'private-token').is_file():
             raise ValueError('No matching interrupted pose probe')
+        volume_record = attempt / 'volume-diagnostic'
+        if ((volume_record.exists() != volume) or (volume and (volume_record.is_symlink() or
+                volume_record.read_text() != 'selector-diagnostic-v1\n'))):
+            raise ValueError('The original probe type must match for cleanup')
         label = (attempt / 'label').read_text().strip()
         if not re.fullmatch('[a-f0-9]{16}', label):
             raise ValueError('Invalid original probe label')
@@ -76,7 +87,7 @@ def main(args):
         if helper[:7] != b'\x7fELF\x01\x01\x01' or int.from_bytes(helper[18:20], 'little') != 40:
             raise ValueError('Expected an ARM32 little-endian ELF')
         label = secrets.token_hex(8)
-        body = render_device(len(helper), display_trace=args.display_trace)
+        body = program(len(helper)) if volume else render_device(len(helper), display_trace=args.display_trace)
         if turn_cue:
             body = cue_program(body)
     for operation in ('admit', 'probe', 'close', 'absent'):
@@ -91,12 +102,14 @@ def main(args):
     if not secret:
         raise ValueError('Missing private authentication; no acquisition attempted')
     if not args.recover:
-        attempt = Path(tempfile.mkdtemp(prefix='probe-', dir=runs))
+        attempt = Path(tempfile.mkdtemp(prefix='fs-probe-' if volume else 'probe-', dir=runs))
         (attempt / 'label').write_text(label + '\n')
         (attempt / 'device.sh').write_text(body)
+        if volume:
+            (attempt / 'volume-diagnostic').write_text('selector-diagnostic-v1\n')
     report = {'label': label, 'started': stamp(), 'operations': [], 'passed': False, 'mode': mode, 'scope': scope}
     output = attempt / ('recovery.json' if args.recover else 'operations.json')
-    request = lease.LeaseRequest(LEASE, attempt / 'private-token', args.owner, 'weread-native-pose-' + label)
+    request = lease.LeaseRequest(LEASE, attempt / 'private-token', args.owner, ('weread-fs-diag-' if volume else 'weread-native-pose-') + label)
 
     def save():
         pending = output.with_suffix('.next')
@@ -149,7 +162,7 @@ def main(args):
                 report['acquired'] = lease.acquire(request)['acquired_at_utc']
             save()
             transact(call, lambda: lease.release(request, native_restored_and_connections_closed=True), report, save,
-                     args.recover, display_trace=args.display_trace)
+                     args.recover, display_trace=args.display_trace, decode=observation if volume else None)
         except (Exception, KeyboardInterrupt) as error:
             report['error'] = getattr(error, 'code', type(error).__name__)
             changes = getattr(error, 'details', {})
