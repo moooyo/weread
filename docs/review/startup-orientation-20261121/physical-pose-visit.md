@@ -138,6 +138,9 @@ does not contradict what the operator saw.
 Restore, collection, close and independent absence succeeded, followed by
 owner/token-verified release. The public receipts and archive are in
 `fixed-down-160145-0a4faa/batch-9ybcmwk_` under the same worker as the trace.
+The later `operator-analysis.json` includes the four explicit answers and
+retains both automated qualifications as `not_established`. The initial
+machine-only report was not overwritten.
 
 ## Remaining gates
 

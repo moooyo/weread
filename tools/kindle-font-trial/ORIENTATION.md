@@ -266,6 +266,13 @@ For a separate test at the known down posture, freeze a **new** plan using
 `assisted_shelf.py freeze --fixed-down`. Only this plan accepts native `D:1`
 and ten prelaunch samples in `16/18`. Do not turn for it. A successful tap
 in this posture cannot be used to accept the opposite-portrait optimization.
+If the fixed-down observer refuses the foreground before or after inspecting
+the shelf, inspect the corresponding `pre_*` or `post_*` diagnostic after
+release. `scene_publish` identifies a result-file failure, not a tap or route
+failure. Before sampling, a temporarily busy GUI may return to the existing
+allowed task state within a bounded wait; no picture is taken while it is
+busy. The post-sample check never retries. Never replace a missing observation
+with a screen from a later visit.
 
 The frozen collector measures file-open request to first Library `SEND`.
 The [current primary metric](../../docs/PHYSICAL_TESTING.md#library-first-frame-startup)
