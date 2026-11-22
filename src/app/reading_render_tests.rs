@@ -1248,3 +1248,5 @@ fn preparing_pictures_preserve_reader_and_article_page_taps() {
         .expect("The pending-picture pointer scenario must not panic")
         .expect("The pending-picture pointer scenario must succeed");
 }
+
+include!("reader_turn_pointer_tests.rs");

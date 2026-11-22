@@ -5,6 +5,7 @@ use crate::reader::{CaretBudget, CaretGeometry, Layout, LayoutBudget, Line, Page
 use crate::store::{
     AnnotationFieldState, AnnotationGeometry, AnnotationHeader, AnnotationLimits,
     AnnotationResourceLimit, AnnotationUnavailable, BookmarkUnavailable, ChapterAccessMetadata,
+    ChapterMetadata,
 };
 use std::collections::HashMap;
 
@@ -2004,17 +2005,17 @@ impl App {
             .as_ref()
             .map_or(0, |p| p.current_index());
         let pages = self.reader.paginator.as_ref().map_or(1, |p| p.pages.len());
-        let fraction = self.local_book_fraction_with_access(
-            page_start,
-            Some(&book.source),
-            Some(&access),
-            owner.as_deref(),
-        )?;
+        let chapters = self.store.chapter_metadata_with_presence(&book.id)?;
         let content_status = library::chapter_content_status_for_access_owner(
             &book.source,
             &access,
             owner.as_deref(),
         );
+        let fraction = self.local_book_fraction_from_chapters(
+            page_start,
+            &chapters,
+            content_status == ContentStatus::Full,
+        )?;
         let access_hint = reader_access_hint(content_status, access.body_present);
         let access_label = if access_hint.is_some() {
             reader_content_label(content_status, access.body_present)
@@ -2077,6 +2078,8 @@ impl App {
         );
         state.set_show_heading(page_index == 0);
         state.set_lines(rows);
+        #[cfg(test)]
+        render_tests::record_reader_model_publication();
         state.set_status(
             if self.reader.body.is_empty() {
                 tr("no_content")
@@ -2173,6 +2176,7 @@ impl App {
         let selected_notes = self.render_reader_contents(
             &state,
             &book,
+            chapters,
             annotation_count,
             bookmark_count,
             owner.as_deref(),
@@ -2225,6 +2229,7 @@ impl App {
         &mut self,
         state: &ReaderModel,
         book: &BookMetadata,
+        chapters: Vec<ChapterMetadata>,
         annotation_count: u64,
         bookmark_count: u64,
         owner: Option<&str>,
@@ -2234,7 +2239,6 @@ impl App {
         } else {
             self.reader_entry_page_size()
         };
-        let chapters = self.store.chapter_metadata_with_presence(&book.id)?;
         let toc_open = state.get_toc_open();
         let length = match self.reader.toc_tab.as_str() {
             "toc" => chapters.len(),
@@ -2778,6 +2782,14 @@ impl App {
     }
 
     pub(super) fn reader_action(&mut self, action: &str, value: &str) -> Result<()> {
+        self.apply_reader_action(action, value).map(|_| ())
+    }
+
+    pub(super) fn apply_reader_action(
+        &mut self,
+        action: &str,
+        value: &str,
+    ) -> Result<ActionPublication> {
         let action = action.strip_prefix("reader.").unwrap_or(action);
         self.reader.last_active = Instant::now();
         self.note_cover_reading_activity();
@@ -2804,7 +2816,9 @@ impl App {
             }
             "press" => {
                 if let Some((x, y)) = pointer(value) {
-                    if self.reader.press.is_some_and(ReaderPress::is_selecting) {
+                    let replacing_selection =
+                        self.reader.press.is_some_and(ReaderPress::is_selecting);
+                    if replacing_selection {
                         self.reader.selection = None;
                     }
                     let generation = self.advance_reader_press_generation();
@@ -2815,6 +2829,9 @@ impl App {
                         generation,
                         READER_HOLD_DELAY,
                     );
+                    if !replacing_selection && matches!(self.route, Route::Reader(..)) {
+                        return Ok(ActionPublication::ImageProcessingOnly);
+                    }
                 }
             }
             "hold" => {
@@ -2822,7 +2839,10 @@ impl App {
                     self.refresh_display(RefreshReason::Content);
                 }
             }
-            "move" => self.move_reader_pointer(value),
+            "move" => {
+                self.move_reader_pointer(value);
+                return Ok(ActionPublication::ImageProcessingOnly);
+            }
             "preview" => {
                 if matches!(self.route, Route::Reader(..))
                     && self.reader.press.is_some_and(|press| {
@@ -2846,18 +2866,18 @@ impl App {
                     self.refresh_display(RefreshReason::Content);
                 }
             }
-            "release" => self.release_reader_pointer(value)?,
+            "release" => return self.release_reader_pointer(value),
             "tap" => {
                 if self.reader.suppress_tap {
                     self.reader.suppress_tap = false;
-                    return Ok(());
+                    return Ok(ActionPublication::Full);
                 }
                 let Some(x) = value
                     .parse::<f32>()
                     .ok()
                     .filter(|x| x.is_finite() && (0.0..=1.0).contains(x))
                 else {
-                    return Ok(());
+                    return Ok(ActionPublication::Full);
                 };
                 let menu = self
                     .ui
@@ -2876,7 +2896,7 @@ impl App {
             "turn" => {
                 // Once selection is active, movement cannot become a page swipe.
                 if self.reader.press.is_some_and(ReaderPress::is_selecting) {
-                    return Ok(());
+                    return Ok(ActionPublication::Full);
                 }
                 self.invalidate_reader_press();
                 self.turn_reader(value.parse().unwrap_or(0))?;
@@ -2996,7 +3016,7 @@ impl App {
             "thought-draft" => {
                 if self.reader_thought_editor_blocked() {
                     self.show_toast("api_error");
-                    return Ok(());
+                    return Ok(ActionPublication::Full);
                 }
                 if !self
                     .reader
@@ -3208,7 +3228,7 @@ impl App {
             }
             "resolve-progress" => {
                 if !matches!(value, "local" | "cloud") {
-                    return Ok(());
+                    return Ok(ActionPublication::Full);
                 }
                 if value == "cloud" {
                     if let Some(position) = self.reader.cloud.clone() {
@@ -3251,7 +3271,7 @@ impl App {
             }
             _ => {}
         }
-        Ok(())
+        Ok(ActionPublication::Full)
     }
 
     fn set_reader_flag(&self, flag: &str, enabled: bool) {
@@ -3366,16 +3386,16 @@ impl App {
         Ok(())
     }
 
-    fn release_reader_pointer(&mut self, value: &str) -> Result<()> {
+    fn release_reader_pointer(&mut self, value: &str) -> Result<ActionPublication> {
         if !matches!(self.route, Route::Reader(..)) {
             if self.reader.press.is_some_and(ReaderPress::is_selecting) {
                 self.reader.selection = None;
             }
             self.invalidate_reader_press();
-            return Ok(());
+            return Ok(ActionPublication::Full);
         }
         let Some(mut press) = self.reader.press else {
-            return Ok(());
+            return Ok(ActionPublication::Full);
         };
         press.latest = unbounded_pointer(value).unwrap_or(press.latest);
         self.reader.press = Some(press);
@@ -3390,7 +3410,7 @@ impl App {
                 ui.global::<ReaderModel>().set_selection_open(true);
             }
             self.refresh_display(RefreshReason::Content);
-            return Ok(());
+            return Ok(ActionPublication::Full);
         }
         let press = self.reader.press.unwrap_or(press);
         self.invalidate_reader_press();
@@ -3398,18 +3418,23 @@ impl App {
             || press.exceeds_hold_movement(self.reader_text_width())
         {
             self.reader.suppress_tap = true;
-            return Ok(());
+            return Ok(ActionPublication::Full);
         }
         let edge = self.prefs.edge_region as f32 / 100.0;
         let protected =
             self.prefs.edge_guard && (press.latest.0 < edge || press.latest.0 > 1.0 - edge);
         if !protected {
+            let previous_toast = self.toast_until;
             if let Some(id) = self.reader_hit_mark(press.latest.0, press.latest.1)? {
                 self.open_reader_thought(&id)?;
                 self.reader.suppress_tap = true;
+                return Ok(ActionPublication::Full);
+            }
+            if self.toast_until != previous_toast {
+                return Ok(ActionPublication::Full);
             }
         }
-        Ok(())
+        Ok(ActionPublication::ImageProcessingOnly)
     }
 
     pub(super) fn invalidate_reader_press(&mut self) {
@@ -4229,25 +4254,36 @@ impl App {
         access: Option<&ChapterAccessMetadata>,
         owner: Option<&str>,
     ) -> Result<f32> {
-        let chapters = self.store.chapter_metadata(&self.reader.book_id)?;
-        let Some(rank) = chapters
-            .iter()
-            .position(|chapter| chapter.index == self.reader.chapter_index)
-        else {
-            return Ok(0.0);
-        };
-        let characters = self.reader.body.chars().count() as u32;
+        let chapters = self
+            .store
+            .chapter_metadata_with_presence(&self.reader.book_id)?;
         let complete = source.zip(access).is_some_and(|(source, access)| {
             library::chapter_content_status_for_access_owner(source, access, owner)
                 == ContentStatus::Full
         });
+        self.local_book_fraction_from_chapters(offset, &chapters, complete)
+    }
+
+    fn local_book_fraction_from_chapters(
+        &self,
+        offset: u32,
+        chapters: &[ChapterMetadata],
+        complete: bool,
+    ) -> Result<f32> {
+        let Some(rank) = chapters
+            .iter()
+            .position(|entry| entry.chapter.index == self.reader.chapter_index)
+        else {
+            return Ok(0.0);
+        };
+        let characters = self.reader.body.chars().count() as u32;
         let catalog = self.remote_catalog(&self.reader.book_id)?;
         let denominator = if complete {
             characters
         } else {
             let words = catalog
                 .iter()
-                .find(|chapter| chapter.uid == chapters[rank].id)
+                .find(|chapter| chapter.uid == chapters[rank].chapter.id)
                 .map_or(0, |chapter| chapter.word_count);
             if words == 0 {
                 0
@@ -4256,7 +4292,7 @@ impl App {
             }
         };
         if let Some(fraction) = weighted_book_fraction(
-            &chapters,
+            chapters.iter().map(|entry| &entry.chapter),
             &catalog,
             self.reader.chapter_index,
             offset.min(characters),
@@ -4856,15 +4892,20 @@ fn cloud_chapter_index(
         .map(|chapter| chapter.index)
 }
 
-fn weighted_book_fraction(
-    chapters: &[Chapter],
+fn weighted_book_fraction<'a, Chapters>(
+    chapters: Chapters,
     catalog: &[source::RemoteChapter],
     current: u32,
     anchor: u32,
     characters: u32,
-) -> Option<f32> {
+) -> Option<f32>
+where
+    Chapters: IntoIterator<Item = &'a Chapter>,
+    Chapters::IntoIter: Clone,
+{
+    let chapters = chapters.into_iter();
     let rank = chapters
-        .iter()
+        .clone()
         .position(|chapter| chapter.index == current)?;
     let maximum = BOOK_WEIGHT_METADATA_BYTES;
     #[cfg(test)]
@@ -4917,7 +4958,7 @@ fn weighted_book_fraction(
     let mut total = 0_u64;
     let mut before = 0_u64;
     let mut current_weight = 0_u64;
-    for (index, chapter) in chapters.iter().enumerate() {
+    for (index, chapter) in chapters.enumerate() {
         #[cfg(test)]
         BOOK_WEIGHT_WORK.with(|work| {
             let mut observed = work.get();

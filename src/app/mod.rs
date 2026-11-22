@@ -158,6 +158,11 @@ use crate::{
     ui::*,
 };
 
+enum ActionPublication {
+    Full,
+    ImageProcessingOnly,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Route {
     Login,
@@ -884,13 +889,14 @@ impl App {
             self.show_toast("api_error");
             return Ok(());
         }
+        let mut publication = ActionPublication::Full;
         match section {
             "shell" => self.shell_action(action, value)?,
             "library" => self.library_action(action, value)?,
             "detail" => self.detail_action(action, value)?,
             "login" => self.login_action(action, value)?,
             "search" => self.search_action(action, value)?,
-            "reader" => self.reader_action(action, value)?,
+            "reader" => publication = self.apply_reader_action(action, value)?,
             "article" => self.article_action(action, value)?,
             "auxiliary" => self.auxiliary_action(action, value)?,
             _ => {}
@@ -898,10 +904,10 @@ impl App {
         if self.closing.get() {
             return Ok(());
         }
-        if section == "reader" && matches!(action, "reader.move" | "move") {
-            return self.sync_presented_image_processing();
+        match publication {
+            ActionPublication::Full => self.render(),
+            ActionPublication::ImageProcessingOnly => self.sync_presented_image_processing(),
         }
-        self.render()
     }
 
     pub fn tick(&mut self) -> Result<()> {

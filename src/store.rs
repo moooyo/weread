@@ -9380,6 +9380,11 @@ fn validate_catalog_capacity_with_encoding_on(
     Ok(())
 }
 
+#[cfg(test)]
+std::thread_local! {
+    pub(crate) static COMPLETED_CHAPTER_HEADER_PROJECTIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 fn chapter_headers_on(
     connection: &Connection,
     book_id: &str,
@@ -9458,6 +9463,8 @@ fn chapter_headers_on(
             body_present,
         });
     }
+    #[cfg(test)]
+    COMPLETED_CHAPTER_HEADER_PROJECTIONS.with(|count| count.set(count.get() + 1));
     Ok(headers)
 }
 
