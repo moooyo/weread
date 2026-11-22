@@ -1,0 +1,49 @@
+{
+  "date": "2026-11-22",
+  "reviewed_revision": "f8194f3",
+  "reader_sql_on_test_env": {
+    "scope": "Exact chapter_headers_on SQL plus Python row extraction on a synthetic database, not a Reader run or an A/B saving.",
+    "architecture": "x86_64",
+    "sqlite": "3.46.1",
+    "python": "3.12.16",
+    "units": "microseconds, rounded to nearest integer per sample",
+    "fixture": "Production initialize_schema SQL; UTF-8, foreign_keys=ON, WAL, synchronous=NORMAL. One target book and optionally a second book. Full chapters, synthetic owner, uid-NNNN and Synthetic chapter NNNN starting at 0000; body is 'Sample text. ' repeated 16 times.",
+    "schedule": "One SQLite connection per corpus. Each pass ran the cases below in forward or reverse order, alternating; discard two passes and include twelve. In each iteration, time BEGIN, admission for target/with titles, ordered query fetchall, COMMIT, count check and Python row disposal. No application row validation, JSON decode or framebuffer work.",
+    "query_plan": ["SCAN chapters", "SEARCH chapters USING INDEX sqlite_autoindex_chapters_1 (book_id=?)"],
+    "columns": ["current_chapters", "other_chapters", "iterations", "projected_rows", "samples_us"],
+    "cases": [
+      [24, 0, 1, 24, [42, 23, 23, 27, 23, 23, 47, 23, 23, 38, 31, 31]],
+      [24, 0, 7, 168, [168, 179, 157, 204, 158, 178, 164, 178, 159, 177, 164, 203]],
+      [1863, 0, 1, 1863, [1453, 1442, 1456, 1447, 1445, 1436, 1449, 1452, 1453, 1446, 1460, 1419]],
+      [1863, 0, 7, 13041, [10153, 10148, 10113, 10276, 10064, 10127, 10086, 10118, 10103, 10264, 10094, 10252]],
+      [24, 1839, 1, 24, [111, 59, 106, 64, 115, 60, 104, 60, 115, 82, 113, 61]],
+      [24, 1839, 7, 168, [474, 416, 415, 466, 440, 441, 447, 437, 415, 442, 443, 438]]
+    ]
+  },
+  "initial_guard_on_test_env": {
+    "scope": "1860x2480 Xvfb, from immediately before guard Popen to reading the matching ready record following an inotify wake; not a Kindle or whole application.",
+    "architecture": "x86_64",
+    "compiler": "GCC 13.3.0 -O2 for both arms",
+    "arms": {"A": "current uploaded white pixmap", "B": "initial window background pixel from validated gray_pixels[255]"},
+    "units": "nanoseconds measured by the same parent monotonic clock",
+    "columns": ["order", "A_ns", "B_ns"],
+    "static_gray_8": {
+      "excluded_warmup_A_B_ms_rounded": [18.414, 12.221],
+      "pairs": [["AB", 17159384, 13464174], ["BA", 18571966, 14434808], ["AB", 22303605, 13270330], ["BA", 20159913, 13492853], ["AB", 19600479, 11992834], ["BA", 17977142, 11392072]]
+    },
+    "true_color_24": {
+      "excluded_warmup_A_B_ns": [18522818, 4760631],
+      "pairs": [["AB", 15166478, 4259954], ["BA", 14942584, 2772695], ["AB", 15238866, 3282520], ["BA", 15878789, 2913621], ["AB", 15575077, 2756826], ["BA", 15987856, 2942110]]
+    }
+  },
+  "historical_indexed_Scribe_replay": {
+    "scope": "November 21 closed physical B1-B6 only, not another hardware run or an ordinary stock-card result.",
+    "source": "test-env:/root/weread-orientation-20261121.WR7ofkGL/orientation-six-pair/batch-8yk236y7/results.tgz (out/B1 through out/B6, request and markers only)",
+    "units": "milliseconds rounded to three decimals; columns in B1 through B6 order",
+    "request_to_main": [4061.145, 4068.161, 3968.020, 4259.616, 4179.271, 3967.377],
+    "main_to_software_ready": [847.691, 1150.676, 833.836, 916.652, 833.932, 835.764],
+    "attach_begin_to_attached_within_main_to_ready": [554.970, 844.214, 534.943, 616.355, 554.441, 554.458],
+    "software_ready_to_first_send": [408.750, 419.453, 442.819, 438.398, 380.419, 369.936],
+    "request_to_first_send": [5317.586, 5638.291, 5244.676, 5614.666, 5393.622, 5173.077]
+  }
+}

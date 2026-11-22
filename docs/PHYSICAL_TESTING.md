@@ -15,6 +15,10 @@ dates remain attached to their own results.
   trials; the latest normal update preserves the existing current-layout data.
 - Scope: supervised device iterations and private daily-trial observations, separate from the Scribe 2022 firmware 5.20.1 VM experiments.
 
+## Reader turns on a physical Scribe
+
+The [November 22 Reader pilot](review/performance-opportunities-20261122/physical-reader.md) records four visits on Scribe 2022 / firmware 5.19.5. In a 1,863-chapter public fixture the new page reached the matching display-driver completion about 71 ms sooner on ordinary partial refresh and 79 ms sooner on periodic full refresh (differences of pooled medians). The input was a synthetic Slint release, not a finger; optical settling was not measured. Each visit restored native ownership and released its lease without replacing the daily package.
+
 ## Library first-frame startup
 
 Measure **release of the ordinary WeRead tile in the stock Kindle Library to

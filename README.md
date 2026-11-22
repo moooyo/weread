@@ -6,6 +6,12 @@ Implementation started on 2026-11-03 (Asia/Shanghai), following the supplied WeR
 
 The [startup metric](docs/PHYSICAL_TESTING.md#library-first-frame-startup) runs from release of the ordinary WeRead tile in the stock Kindle Library to the first complete WeRead Library frame in the same launch. Recognizable entries or a legitimate empty state and Library navigation must be drawn; cover placeholders are valid. No second tap is required. The [handoff](HANDOFF.md) lists the separate timings measured so far.
 
+The [November 22 performance review](docs/review/performance-opportunities-20261122/README.md) identifies repeated work in ordinary Reader taps and first-shelf publication, replays an existing Scribe trace, and measures two isolated components on Linux. It proposes the next experiments without claiming a new device speedup.
+
+The [ordinary Reader tap follow-up](docs/review/performance-opportunities-20261122/reader-pointer.md) removes two unchanged-page publications and shares the footer's chapter metadata with the contents view. In six paired Linux runs with a 1,863-chapter public fixture, median release-to-software-draw time fell from 10.016 to 5.838 ms. This is not an e-ink panel measurement.
+
+The [physical Scribe 2022 / 5.19.5 Reader pilot](docs/review/performance-opportunities-20261122/physical-reader.md) then measured synthetic release to the matching display-driver completion. Ordinary partial turns fell from 555.6 to 484.3 ms median and periodic full turns from 632.6 to 553.7 ms across four counterbalanced visits. This did not measure optical settling or replace the daily installation.
+
 The standard Kindle package [reuses confirmed startup orientation](docs/review/startup-orientation-20261121/README.md#package-decision) on all models. Both startup sites check live readings before reuse; missing or changed readings take the existing fallback. No per-model sign-off is required for this optimization.
 
 The accepted [Kindle entry cover](assets/branding/README.md) shows `WeRead` above
