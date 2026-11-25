@@ -1752,6 +1752,24 @@ impl App {
         tr("report_waiting_activity")
     }
 
+    /// The reading-time report summary when it needs attention. Routine
+    /// states (reporting off, waiting for reading, pending or last delivered
+    /// time) restate what the switches already show, so they return `None`.
+    pub(super) fn read_report_notice(&self) -> Option<String> {
+        let summary = self.read_report_summary();
+        let routine = [
+            "report_demo_local_only",
+            "report_disabled_local",
+            "report_waiting_activity",
+        ]
+        .iter()
+        .any(|key| summary == tr(key))
+            || ["report_pending_seconds", "report_last_success"]
+                .iter()
+                .any(|key| matches_template(&summary, &tr(key)));
+        (!routine).then_some(summary)
+    }
+
     fn current_report_account(&self) -> Option<String> {
         self.jobs
             .session()
@@ -2498,6 +2516,18 @@ fn observe_active(
     active.observed_seconds = observed;
     active.last_checkpoint_at = now;
     validate_active(active)
+}
+
+/// Whether `text` was formatted from `template`, which holds one `{name}`
+/// placeholder: the fixed text on both sides of the placeholder must match.
+fn matches_template(text: &str, template: &str) -> bool {
+    let Some((prefix, rest)) = template.split_once('{') else {
+        return text == template;
+    };
+    let Some((_, suffix)) = rest.split_once('}') else {
+        return text == template;
+    };
+    text.len() > prefix.len() + suffix.len() && text.starts_with(prefix) && text.ends_with(suffix)
 }
 
 #[cfg(test)]

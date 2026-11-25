@@ -149,11 +149,23 @@ fn start_pending_reader_press(fixture: &Fixture) -> Result<i32> {
     Ok(fixture.ui().global::<ReaderModel>().get_press_generation())
 }
 
+fn book_info_tab(fixture: &Fixture) -> &'static str {
+    if fixture.app().profile.is_scribe() {
+        "toc"
+    } else {
+        "intro"
+    }
+}
+
 fn prior_tabs_and_current_chapter(fixture: &Fixture) -> Result<()> {
     let expected = prepare_nonfirst_page(fixture)?;
-    for prior_tab in ["intro", "notes"] {
+    for (value, prior_tab) in [("", "reviews"), ("intro", "notes")] {
         open_font_menu(fixture)?;
-        reader_event(fixture, "detail", "")?;
+        reader_event(fixture, "detail", value)?;
+        assert_eq!(
+            fixture.ui().global::<DetailModel>().get_tab().as_str(),
+            book_info_tab(fixture)
+        );
         detail_event(fixture, "tab", prior_tab)?;
         assert_eq!(
             fixture.ui().global::<DetailModel>().get_tab().as_str(),
@@ -292,10 +304,20 @@ fn sparse_detail_navigation(fixture: &Fixture) -> Result<()> {
     assert_reader_anchor(fixture, &expected)?;
     open_font_menu(fixture)?;
 
-    // A changed detail owner exercises initial catalog location before forcing a tab.
+    // A changed detail owner exercises initial catalog location and the
+    // profile-specific book-info tab before explicitly opening the catalog.
     reader_event(fixture, "detail", "")?;
+    assert_eq!(
+        fixture.ui().global::<DetailModel>().get_tab().as_str(),
+        book_info_tab(fixture)
+    );
+    detail_event(fixture, "tab", "toc")?;
     assert_sparse_detail_page(fixture, &catalog);
     detail_event(fixture, "tab", "intro")?;
+    assert_eq!(
+        fixture.ui().global::<DetailModel>().get_tab().as_str(),
+        book_info_tab(fixture)
+    );
     detail_event(fixture, "tab", "toc")?;
     assert_sparse_detail_page(fixture, &catalog);
     detail_event(fixture, "tab", "notes")?;

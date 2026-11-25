@@ -1,6 +1,6 @@
 import { Theme } from "theme.slint";
 import { Strings } from "strings.slint";
-import { ActionButton, IconButton, Icon, PageBar, PageHeader, ProgressTrack, SwipeTouchArea, FilterChip, DashedOutline } from "widgets.slint";
+import { ActionButton, IconButton, Icon, HeaderPager, PageHeader, ProgressTrack, SwipeTouchArea, FilterChip, DashedOutline, PressArea } from "widgets.slint";
 
 export struct BookTile {
     id: string,
@@ -42,6 +42,11 @@ export struct DetailReview {
     thought: string,
 }
 
+export struct IntroductionLine {
+    text: string,
+    letter-spacing: float,
+}
+
 export global LibraryModel {
     in-out property <[BookTile]> books;
     in-out property <string> summary;
@@ -63,20 +68,21 @@ export global DetailModel {
     in-out property <string> author;
     in-out property <string> rating;
     in-out property <string> summary;
-    in-out property <string> chapter-summary;
     in-out property <string> intro;
     in-out property <string> intro-preview;
+    in-out property <[IntroductionLine]> intro-preview-lines;
     in-out property <bool> intro-available;
+    in-out property <bool> intro-prefix-truncated;
+    in-out property <string> intro-dialog-text;
+    in-out property <[IntroductionLine]> intro-dialog-lines;
     in-out property <string> metadata;
     in-out property <string> publisher;
     in-out property <string> published;
     in-out property <string> isbn;
-    in-out property <string> update-label;
     in-out property <string> catalog-label;
     in-out property <string> reviews-label;
     in-out property <string> notes-label;
     in-out property <string> note-summary;
-    in-out property <string> notes-summary;
     in-out property <string> status;
     in-out property <string> tab: "toc";
     in-out property <[DetailChapter]> chapters;
@@ -91,6 +97,24 @@ export global DetailModel {
     in-out property <bool> can-read;
     in-out property <string> review-order: "hot";
     callback event(string, string);
+}
+
+component BookPickBadge inherits Rectangle {
+    in property <bool> checked;
+    in property <bool> compact;
+    width: root.compact ? 26px : 32px;
+    height: self.width;
+    border-radius: self.width / 2;
+    border-width: 2px;
+    border-color: Theme.ink;
+    background: root.checked ? Theme.ink : Theme.paper;
+    if root.checked: Icon {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: root.compact ? 16px : 24px; height: self.width;
+        kind: "check";
+        inverted: true;
+    }
 }
 
 component CoverArt inherits Rectangle {
@@ -138,7 +162,8 @@ component CoverArt inherits Rectangle {
         x: 10px; y: parent.height - 32px; width: parent.width - 20px; height: 20px;
         text: root.book.author; color: root.foreground; font-family: Theme.ui-font; font-size: 14px; overflow: elide;
     }
-    if root.book.badge != "" && !root.selection && !root.compact: Rectangle {
+    // "Finished" is already written under the grid tile; the cover keeps only the update badge.
+    if root.book.badge != "" && root.book.badge != Strings.finished && !root.selection && !root.compact: Rectangle {
         x: 6px; y: 6px; width: tag.preferred-width + 16px; height: 28px;
         background: root.foreground;
         tag := Text { text: root.book.badge; color: root.dark ? Theme.ink : Theme.paper; font-family: Theme.ui-font; font-size: 14px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
@@ -148,11 +173,7 @@ component CoverArt inherits Rectangle {
         Rectangle { x: 0px; y: 0px; width: root.width * root.book.progress; height: 8px; background: Theme.ink; }
         Rectangle { x: 0px; y: 0px; width: root.width; height: 1px; background: Theme.ink; }
     }
-    if root.selection: Rectangle {
-        x: 8px; y: 8px; width: 32px; height: 32px; border-radius: 16px; border-width: 2px; border-color: Theme.ink;
-        background: root.book.selected ? Theme.ink : Theme.paper;
-        if root.book.selected: Icon { x: 4px; y: 4px; kind: "check"; inverted: true; }
-    }
+    if root.selection && !root.compact: BookPickBadge { x: 8px; y: 8px; checked: root.book.selected; }
 }
 
 component SortTab inherits Rectangle {
@@ -169,7 +190,7 @@ component SortTab inherits Rectangle {
     }
     if root.selected: Rectangle { y: parent.height - 3px; height: 3px; background: Theme.ink; }
     accessible-role: tab; accessible-label: root.text; accessible-item-selected: root.selected;
-    touch := TouchArea { clicked => { root.clicked(); } }
+    touch := PressArea { clicked => { root.clicked(); } }
 }
 
 component CatalogChapterRow inherits Rectangle {
@@ -182,7 +203,7 @@ component CatalogChapterRow inherits Rectangle {
     property <length> layout-top: root.y;
     property <length> title-left: root.selecting ? 84px : 48px;
     property <length> title-right: root.chapter.cached ? 146px : 120px;
-    height: max(52px, max(chapter-title.preferred-height, chapter-state.preferred-height) + 24px);
+    height: 52px;
     background: root.inverted ? Theme.ink : Theme.paper;
     accessible-role: button;
     accessible-label: root.chapter.title + " · " + root.chapter.state;
@@ -202,29 +223,33 @@ component CatalogChapterRow inherits Rectangle {
         text: root.chapter.index + 1; font-family: Theme.ui-font; font-size: 15px;
         color: root.inverted ? Theme.paper : Theme.secondary; vertical-alignment: center;
     }
-    chapter-title := Text {
-        x: root.title-left; y: 12px;
-        width: max(1px, root.width - root.title-left - root.title-right);
-        height: self.preferred-height;
+    Text {
+        x: root.title-left; y: 0px;
+        width: max(1px, root.width - root.title-left - root.title-right); height: root.height;
         text: root.chapter.title; font-family: Theme.ui-font; font-size: 18px;
         font-weight: root.chapter.current ? 700 : 400;
         color: root.inverted ? Theme.paper : root.disabled ? Theme.muted : Theme.ink;
-        wrap: word-wrap;
+        overflow: elide; vertical-alignment: center;
     }
-    if root.chapter.cached: Icon {
-        x: root.width - 134px; y: (root.height - 14px) / 2;
-        width: 14px; height: 14px; kind: "download"; inverted: root.inverted;
-    }
-    chapter-state := Text {
-        x: root.width - 108px; y: 12px; width: 100px; height: self.preferred-height;
-        text: root.chapter.state; font-family: Theme.ui-font; font-size: 14px;
-        color: root.inverted ? Theme.paper : root.disabled ? Theme.muted : Theme.secondary;
-        wrap: word-wrap;
+    HorizontalLayout {
+        x: root.width - root.title-right; y: 0px; width: root.title-right; height: root.height;
+        padding-right: 8px; spacing: 8px;
+        Rectangle { horizontal-stretch: 1; }
+        if root.chapter.cached: Rectangle {
+            width: 14px;
+            Icon { y: (parent.height - 14px) / 2; width: 14px; height: 14px; kind: "download"; inverted: root.inverted; }
+        }
+        Text {
+            text: root.chapter.state; font-family: Theme.ui-font; font-size: 14px;
+            color: root.inverted ? Theme.paper : root.disabled ? Theme.muted : Theme.secondary;
+            overflow: elide; vertical-alignment: center;
+        }
     }
     Rectangle { x: 0px; y: parent.height - 1px; width: parent.width; height: 1px; background: Theme.line; }
-    touch := TouchArea {
+    touch := PressArea {
         x: 0px; y: 0px; width: root.width; height: root.height;
-        clicked => { if !root.disabled { root.tapped(); } }
+        enabled: !root.disabled;
+        clicked => { root.tapped(); }
     }
 }
 
@@ -232,34 +257,46 @@ export component LibraryScreen inherits Rectangle {
     property <int> columns: Theme.scribe ? 5 : 3;
     property <length> tile-gap: Theme.scribe ? 28px : 24px;
     property <int> grid-rows: Theme.scribe ? 3 : 2;
-    property <length> row-gap: Theme.scribe ? 34px : 20px;
+    property <length> row-gap: Theme.scribe ? 64px : 20px;
     property <length> grid-top: Theme.scribe ? 22px : 10px;
-    property <length> cover-height: max(112px, min(Theme.scribe ? 210px : 226px, (content.height - root.grid-top * 2 - root.row-gap * (root.grid-rows - 1)) / root.grid-rows - 36px));
+    property <length> grid-bottom: Theme.scribe ? 16px : 10px;
+    // Below each cover: an 8px gap, the 28px title row and the 20px progress row.
+    property <length> label-height: 56px;
     property <length> tile-width: (self.width - Theme.page-margin * 2 - (self.columns - 1) * self.tile-gap) / self.columns;
+    // The grid rows divide the available height down to the navigation.
+    property <length> cover-height: max(112px, (content.height - root.grid-top - root.grid-bottom - root.row-gap * (root.grid-rows - 1)) / root.grid-rows - root.label-height);
     background: Theme.paper;
     VerticalLayout {
         spacing: 0px;
-        Rectangle {
-            height: 52px;
-            Rectangle {
-                x: Theme.page-margin; y: 4px; width: parent.width - Theme.page-margin * 2; height: 44px;
-                border-width: 2px; border-color: Theme.ink; border-radius: 0px;
-                HorizontalLayout {
-                    padding-left: 14px; padding-right: 14px; spacing: 12px;
-                    Rectangle { width: 24px; Icon { y: (parent.height - 24px) / 2; kind: "search"; } }
-                    Text { text: Strings.search-hint; color: Theme.muted; font-family: Theme.ui-font; font-size: 18px; vertical-alignment: center; horizontal-stretch: 1; }
-                    Rectangle { width: 1px; y: 10px; height: 24px; background: Theme.line; }
-                    Text { text: Strings.store; font-family: Theme.ui-font; font-size: 18px; font-weight: 700; vertical-alignment: center; }
-                }
-                TouchArea { clicked => { LibraryModel.event("search", "store"); } }
-            }
-        }
+        // Two header rows instead of three: the search field keeps its upper-left
+        // position and shares the first row with the actions; the title leads the
+        // sort tabs on the second row.
         Rectangle {
             height: 52px;
             HorizontalLayout {
                 padding-left: Theme.page-margin; padding-right: 8px; spacing: 8px;
-                Text { text: Strings.library; font-family: Theme.serif-font; font-size: 28px; font-weight: 700; vertical-alignment: center; }
-                Rectangle { horizontal-stretch: 1; }
+                Rectangle {
+                    horizontal-stretch: 1;
+                    Rectangle {
+                        x: 0px; y: 4px; width: parent.width; height: 44px;
+                        border-width: 2px; border-color: Theme.ink; border-radius: 0px;
+                        // Opening Search redraws the whole screen; the field inverts first.
+                        background: search-touch.pressed ? Theme.ink : Theme.paper;
+                        accessible-role: button;
+                        accessible-label: Strings.search-hint;
+                        HorizontalLayout {
+                            padding-left: 14px; padding-right: 14px; spacing: 12px;
+                            Rectangle { width: 24px; Icon { y: (parent.height - 24px) / 2; kind: "search"; inverted: search-touch.pressed; } }
+                            Text { text: Strings.search-hint; color: search-touch.pressed ? Theme.paper : Theme.muted; font-family: Theme.ui-font; font-size: 18px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                            Rectangle { width: 1px; y: 10px; height: 24px; background: search-touch.pressed ? Theme.paper : Theme.line; }
+                            Text { text: Strings.store; color: search-touch.pressed ? Theme.paper : Theme.ink; font-family: Theme.ui-font; font-size: 18px; font-weight: 700; vertical-alignment: center; }
+                        }
+                    }
+                    search-touch := PressArea {
+                        x: 0px; y: 2px; width: parent.width; height: 48px;
+                        clicked => { LibraryModel.event("search", "store"); }
+                    }
+                }
                 IconButton { icon: "sync"; text: Theme.scribe ? Strings.sync : ""; label: Strings.sync; enabled: !LibraryModel.busy; clicked => { LibraryModel.event("sync", ""); } }
                 IconButton { icon: LibraryModel.view-mode == "cover" ? "list" : "grid"; text: Theme.scribe ? (LibraryModel.view-mode == "cover" ? Strings.list-view : Strings.cover-view) : ""; label: LibraryModel.view-mode == "cover" ? Strings.list-view : Strings.cover-view; clicked => { LibraryModel.event("view", ""); } }
                 IconButton { icon: "select"; text: LibraryModel.selecting ? Strings.done : Strings.select; selected: LibraryModel.selecting; clicked => { LibraryModel.event("select", ""); } }
@@ -268,7 +305,9 @@ export component LibraryScreen inherits Rectangle {
         Rectangle {
             height: 48px;
             HorizontalLayout {
-                padding-left: Theme.page-margin - 8px; padding-right: 8px; spacing: 0px; alignment: start;
+                padding-left: Theme.page-margin; padding-right: 8px; spacing: 0px;
+                Text { text: Strings.library; font-family: Theme.serif-font; font-size: 28px; font-weight: 700; vertical-alignment: center; }
+                Rectangle { width: Theme.scribe ? 16px : 8px; }
                 SortTab { text: Strings.default-sort; selected: LibraryModel.sort == "default"; clicked => { LibraryModel.event("sort", "default"); } }
                 SortTab { text: Strings.updated; selected: LibraryModel.sort == "update"; clicked => { LibraryModel.event("sort", "update"); } }
                 SortTab { text: Strings.progress; selected: LibraryModel.sort == "progress"; clicked => { LibraryModel.event("sort", "progress"); } }
@@ -276,15 +315,26 @@ export component LibraryScreen inherits Rectangle {
                 SortTab { text: Strings.downloaded; selected: LibraryModel.sort == "downloaded"; clicked => { LibraryModel.event("sort", "downloaded"); } }
                 SortTab { text: Strings.finished; selected: LibraryModel.sort == "finished"; clicked => { LibraryModel.event("sort", "finished"); } }
                 if Theme.scribe: SortTab { text: Strings.has-notes; selected: LibraryModel.sort == "notes"; clicked => { LibraryModel.event("sort", "notes"); } }
+                Rectangle { horizontal-stretch: 1; }
+                HeaderPager {
+                    current: LibraryModel.page; total: LibraryModel.page-count;
+                    step(delta) => { LibraryModel.event("page", delta); }
+                    jump => { LibraryModel.event("jump", ""); }
+                }
             }
             Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
         }
-        if LibraryModel.status != "": Rectangle {
+        if LibraryModel.status != "": status-row := Rectangle {
             height: LibraryModel.download-notice ? 48px : 32px;
-            Text { x: Theme.page-margin; width: parent.width - Theme.page-margin * 2 - (LibraryModel.download-notice ? 32px : 0px); text: LibraryModel.status; color: Theme.secondary; font-family: Theme.ui-font; font-size: 14px; vertical-alignment: center; overflow: elide; }
-            if LibraryModel.download-notice: Icon { kind: "next"; x: parent.width - Theme.page-margin - self.width; y: (parent.height - self.height) / 2; }
-            if LibraryModel.download-notice: TouchArea {
+            // The download notice opens Downloads; it inverts while pressed like other rows.
+            property <bool> notice-pressed: LibraryModel.download-notice && notice-touch.pressed;
+            background: self.notice-pressed ? Theme.ink : Theme.paper;
+            Text { x: Theme.page-margin; width: parent.width - Theme.page-margin * 2 - (LibraryModel.download-notice ? 32px : 0px); text: LibraryModel.status; color: status-row.notice-pressed ? Theme.paper : Theme.secondary; font-family: Theme.ui-font; font-size: 14px; vertical-alignment: center; overflow: elide; }
+            if LibraryModel.download-notice: Icon { kind: "next"; inverted: status-row.notice-pressed; x: parent.width - Theme.page-margin - self.width; y: (parent.height - self.height) / 2; }
+            notice-touch := PressArea {
+                enabled: LibraryModel.download-notice;
                 accessible-role: button;
+                accessible-enabled: LibraryModel.download-notice;
                 accessible-label: LibraryModel.status;
                 clicked => { LibraryModel.event("download-status", ""); }
             }
@@ -294,10 +344,13 @@ export component LibraryScreen inherits Rectangle {
             clip: true;
             SwipeTouchArea { swiped(delta) => { LibraryModel.event("page", delta); } }
             if LibraryModel.books.length == 0: VerticalLayout {
-                padding: Theme.page-margin; alignment: center; spacing: 20px;
+                x: Theme.page-margin; width: parent.width - Theme.page-margin * 2;
+                y: max(0px, (Theme.scribe ? 420px : 280px) - 28px - content.y);
+                height: self.preferred-height;
+                alignment: start; spacing: 24px;
                 Text { text: Strings.empty-library; font-family: Theme.serif-font; font-size: 24px; font-weight: 700; horizontal-alignment: center; }
                 HorizontalLayout { alignment: center; spacing: 16px;
-                    ActionButton { text: Strings.login-title; primary: true; clicked => { LibraryModel.event("login", ""); } }
+                    ActionButton { text: Strings.browse-store; primary: true; clicked => { LibraryModel.event("search", "store"); } }
                     ActionButton { text: Strings.import-book; clicked => { LibraryModel.event("import", ""); } }
                 }
             }
@@ -305,9 +358,14 @@ export component LibraryScreen inherits Rectangle {
                 width: parent.width; height: parent.height;
                 for book in LibraryModel.books: Rectangle {
                     x: Theme.page-margin + book.column * (root.tile-width + root.tile-gap);
-                    y: root.grid-top + book.row * (root.cover-height + 36px + root.row-gap);
-                    width: root.tile-width; height: root.cover-height + 36px;
+                    y: root.grid-top + book.row * (root.cover-height + root.label-height + root.row-gap);
+                    width: root.tile-width; height: root.cover-height + root.label-height;
                     CoverArt { x: 0px; y: 0px; width: parent.width; book: book; selection: LibraryModel.selecting; height: root.cover-height; }
+                    // Press feedback: a heavy frame on the cover while Detail is prepared.
+                    if cover-touch.pressed: Rectangle {
+                        x: 0px; y: 0px; width: parent.width; height: root.cover-height;
+                        border-width: 4px; border-color: Theme.ink; background: transparent;
+                    }
                     Rectangle {
                         x: 0px; y: root.cover-height + 8px; width: parent.width; height: 28px;
                         HorizontalLayout {
@@ -316,7 +374,14 @@ export component LibraryScreen inherits Rectangle {
                             Text { text: book.title; font-family: Theme.ui-font; font-size: 16px; font-weight: 500; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
                         }
                     }
-                    SwipeTouchArea {
+                    // Reading position as text; books that have not been started leave the row empty.
+                    Text {
+                        x: 0px; y: root.cover-height + 36px; width: parent.width; height: 20px;
+                        text: book.badge == Strings.finished ? Strings.read-finished : book.progress > 0 ? Strings.read-to + " " + round(book.progress * 100) + "%" : "";
+                        font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary;
+                        vertical-alignment: center; overflow: elide;
+                    }
+                    cover-touch := SwipeTouchArea {
                         tapped => { LibraryModel.event("book", book.id); }
                         swiped(delta) => { LibraryModel.event("page", delta); }
                     }
@@ -326,11 +391,16 @@ export component LibraryScreen inherits Rectangle {
                 padding-left: Theme.page-margin; padding-right: Theme.page-margin; spacing: 0px; alignment: start;
                 for book in LibraryModel.books: Rectangle {
                     height: 72px;
+                    background: row-touch.pressed ? Theme.fill : Theme.paper;
                     HorizontalLayout {
                         padding-top: 6px; padding-bottom: 6px; spacing: 14px;
-                        CoverArt { book: book; compact: true; width: 44px; height: 60px; }
+                        Rectangle {
+                            width: 44px; height: 60px;
+                            CoverArt { width: parent.width; height: parent.height; book: book; compact: true; selection: LibraryModel.selecting; }
+                            if LibraryModel.selecting: BookPickBadge { x: -6px; y: -6px; compact: true; checked: book.selected; }
+                        }
                         VerticalLayout {
-                            alignment: center; spacing: 5px;
+                            alignment: center; spacing: 5px; horizontal-stretch: 1;
                             Text { text: book.title; font-family: Theme.ui-font; font-size: 18px; font-weight: 500; overflow: elide; }
                             HorizontalLayout {
                                 spacing: 6px;
@@ -338,24 +408,30 @@ export component LibraryScreen inherits Rectangle {
                                     width: 14px;
                                     Icon { y: (parent.height - 14px) / 2; kind: "download"; width: 14px; height: 14px; }
                                 }
-                                Text { text: book.author; color: Theme.secondary; font-family: Theme.ui-font; font-size: 14px; overflow: elide; horizontal-stretch: 1; }
+                                Text { text: book.author; color: Theme.secondary; font-family: Theme.ui-font; font-size: 14px; overflow: elide; vertical-alignment: center; }
+                                if book.badge == Strings.updated && !LibraryModel.selecting: Rectangle {
+                                    width: badge-caption.preferred-width + 12px; height: 20px;
+                                    border-width: 1px; border-color: Theme.ink;
+                                    badge-caption := Text { text: book.badge; font-family: Theme.ui-font; font-size: 14px; vertical-alignment: center; horizontal-alignment: center; }
+                                }
+                                Rectangle { horizontal-stretch: 1; }
                             }
                         }
                         VerticalLayout {
                             width: 92px; alignment: center; spacing: 6px;
-                            Text { text: book.badge == Strings.finished ? Strings.finished : round(book.progress * 100) + "%"; font-family: Theme.ui-font; font-size: 15px; horizontal-alignment: right; }
+                            // As in the cover grid, unstarted books show no "0%".
+                            Text { text: book.badge == Strings.finished ? Strings.finished : book.progress > 0 ? round(book.progress * 100) + "%" : ""; font-family: Theme.ui-font; font-size: 15px; horizontal-alignment: right; }
                             ProgressTrack { value: book.progress; }
                         }
                     }
                     Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
-                    SwipeTouchArea {
+                    row-touch := SwipeTouchArea {
                         tapped => { LibraryModel.event("book", book.id); }
                         swiped(delta) => { LibraryModel.event("page", delta); }
                     }
                 }
             }
         }
-        PageBar { page: LibraryModel.page; count: LibraryModel.page-count; turn(delta) => { LibraryModel.event("page", delta); } jump => { LibraryModel.event("jump", ""); } }
     }
 }
 
@@ -363,15 +439,21 @@ component DetailContent inherits Rectangle {
     background: Theme.paper;
     property <length> content-padding: Theme.scribe ? 0px : Theme.page-margin;
     property <length> status-height: DetailModel.status != "" ? 32px : 0px;
-    property <length> controls-height: DetailModel.tab == "toc" || DetailModel.tab == "notes" ? 48px : DetailModel.tab == "reviews" ? (Theme.scribe ? 64px : 52px) : 0px;
-    property <bool> show-pager: (DetailModel.tab == "toc" && !DetailModel.selecting) || DetailModel.tab == "reviews" || DetailModel.tab == "notes";
-    property <length> footer-height: DetailModel.selecting && DetailModel.tab == "toc" ? 64px : root.show-pager ? 48px : 0px;
-    property <length> body-height: max(0px, root.height - 48px - root.status-height - root.controls-height - root.footer-height);
+    property <length> controls-height: DetailModel.tab == "toc" ? 48px : DetailModel.tab == "reviews" ? (Theme.scribe ? 64px : 52px) : 0px;
+    property <length> body-height: max(0px, root.height - 48px - root.status-height - root.controls-height);
     property <bool> follow-current: true;
     property <length> current-top;
     property <string> content-key: DetailModel.book.id + ":" + DetailModel.tab;
     property <int> observed-page: DetailModel.page;
-    property <bool> observed-selecting: DetailModel.selecting;
+    function step-page(delta: int) {
+        root.follow-current = false;
+        content-scroll.viewport-y = 0px;
+        DetailModel.event("page", delta);
+    }
+    function jump-page() {
+        root.follow-current = false;
+        DetailModel.event("jump", "");
+    }
     function reveal-current() {
         if root.follow-current && DetailModel.tab == "toc" {
             content-scroll.viewport-y = clamp(-root.current-top, min(0px, content-scroll.height - content-scroll.viewport-height), 0px);
@@ -383,7 +465,6 @@ component DetailContent inherits Rectangle {
         root.reveal-current();
     }
     changed observed-page => { content-scroll.viewport-y = 0px; root.reveal-current(); }
-    changed observed-selecting => { content-scroll.viewport-y = 0px; root.reveal-current(); }
     VerticalLayout {
         x: 0px; y: 0px; width: root.width; height: root.height;
         spacing: 0px;
@@ -392,40 +473,35 @@ component DetailContent inherits Rectangle {
             HorizontalLayout {
                 x: 0px; y: 0px; width: parent.width; height: parent.height;
                 spacing: 0px;
-                SortTab { text: Strings.introduction; selected: DetailModel.tab == "intro"; horizontal-stretch: 1; clicked => { DetailModel.event("tab", "intro"); } }
+                if !Theme.scribe: SortTab { text: Strings.introduction; selected: DetailModel.tab == "intro"; horizontal-stretch: 1; clicked => { DetailModel.event("tab", "intro"); } }
                 SortTab { text: DetailModel.catalog-label; selected: DetailModel.tab == "toc"; horizontal-stretch: 1; clicked => { root.follow-current = true; DetailModel.event("tab", "toc"); root.reveal-current(); } }
                 SortTab { text: DetailModel.reviews-label; selected: DetailModel.tab == "reviews"; horizontal-stretch: 1; clicked => { DetailModel.event("tab", "reviews"); } }
                 if Theme.scribe: SortTab { text: DetailModel.notes-label; selected: DetailModel.tab == "notes"; horizontal-stretch: 1; clicked => { DetailModel.event("tab", "notes"); } }
             }
             Rectangle { x: 0px; y: parent.height - 1px; width: parent.width; height: 1px; background: Theme.line; }
         }
-        if DetailModel.status != "": Rectangle {
-            height: root.status-height;
-            Text { x: root.content-padding; y: 0px; width: parent.width - root.content-padding * 2; height: parent.height; text: DetailModel.status; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; vertical-alignment: center; overflow: elide; }
-        }
-        if DetailModel.tab == "toc": Rectangle {
-            height: root.controls-height;
-            HorizontalLayout {
-                x: 0px; y: 0px; width: parent.width; height: parent.height;
-                padding-left: root.content-padding; padding-right: root.content-padding; spacing: 8px;
-                Text { text: DetailModel.selecting ? Strings.select-chapters-hint : DetailModel.chapter-summary; font-family: Theme.ui-font; font-size: 15px; color: Theme.secondary; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
-                if DetailModel.selecting: ActionButton { text: Strings.select-page; quiet: true; clicked => { DetailModel.event("select-page", ""); } }
-                FilterChip { text: DetailModel.selecting ? Strings.done : Strings.select; selected: DetailModel.selecting; clicked => { DetailModel.event("select", ""); } }
-            }
-        }
-        if DetailModel.tab == "reviews": Rectangle {
+        if root.controls-height > 0px: Rectangle {
             height: root.controls-height;
             HorizontalLayout {
                 x: 0px; y: 0px; width: parent.width; height: parent.height;
                 padding-left: root.content-padding; padding-right: root.content-padding; spacing: 12px;
-                FilterChip { text: Strings.recommended-reviews; selected: DetailModel.review-order == "hot"; clicked => { DetailModel.event("review-order", "hot"); } }
-                FilterChip { text: Strings.latest-reviews; selected: DetailModel.review-order == "latest"; clicked => { DetailModel.event("review-order", "latest"); } }
+                if DetailModel.tab == "toc": FilterChip {
+                    text: DetailModel.selecting ? Strings.select-page : Strings.select;
+                    clicked => { DetailModel.event(DetailModel.selecting ? "select-page" : "select", ""); }
+                }
+                if DetailModel.tab == "reviews": FilterChip { text: Strings.recommended-reviews; selected: DetailModel.review-order == "hot"; clicked => { DetailModel.event("review-order", "hot"); } }
+                if DetailModel.tab == "reviews": FilterChip { text: Strings.latest-reviews; selected: DetailModel.review-order == "latest"; clicked => { DetailModel.event("review-order", "latest"); } }
                 Rectangle { horizontal-stretch: 1; }
+                HeaderPager {
+                    current: DetailModel.page; total: DetailModel.page-count;
+                    step(delta) => { root.step-page(delta); }
+                    jump => { root.jump-page(); }
+                }
             }
         }
-        if DetailModel.tab == "notes": Rectangle {
-            height: root.controls-height;
-            Text { x: root.content-padding; y: 0px; width: parent.width - root.content-padding * 2; height: parent.height; text: DetailModel.notes-summary; font-family: Theme.ui-font; font-size: 16px; color: Theme.secondary; vertical-alignment: center; overflow: elide; }
+        if DetailModel.status != "": Rectangle {
+            height: root.status-height;
+            Text { x: root.content-padding; y: 0px; width: parent.width - root.content-padding * 2; height: parent.height; text: DetailModel.status; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; vertical-alignment: center; overflow: elide; }
         }
         content-scroll := Flickable {
             width: root.width;
@@ -436,63 +512,61 @@ component DetailContent inherits Rectangle {
             flicked => { root.follow-current = false; }
             changed height => { root.reveal-current(); }
             changed viewport-height => { root.reveal-current(); }
-            // Lists scroll vertically; the fixed page bar owns page navigation.
-            // Only the application's bounded page is present in this viewport.
+            // Lists scroll vertically within the bounded page shown by the pager.
             details-content := VerticalLayout {
             x: 0px; y: 0px; width: parent.width; height: self.preferred-height;
             spacing: 0px; alignment: start;
-            if DetailModel.tab == "intro": VerticalLayout {
+            if !Theme.scribe && DetailModel.tab == "intro": VerticalLayout {
                 width: parent.width;
                 height: self.preferred-height;
-                padding-left: root.content-padding; padding-right: root.content-padding; padding-top: Theme.scribe ? 24px : 16px;
-                spacing: Theme.scribe ? 22px : 16px; alignment: start;
-                GridLayout {
-                    spacing: Theme.scribe ? 10px : 8px;
-                    Row {
-                        HorizontalLayout {
-                            spacing: 12px;
-                            Text { text: Strings.metadata-publisher; font-family: Theme.ui-font; font-size: Theme.scribe ? 17px : 16px; color: Theme.secondary; }
-                            Text { text: DetailModel.publisher; font-family: Theme.ui-font; font-size: Theme.scribe ? 17px : 16px; overflow: elide; horizontal-stretch: 1; }
-                        }
-                        HorizontalLayout {
-                            spacing: 12px;
-                            Text { text: Strings.metadata-published; font-family: Theme.ui-font; font-size: Theme.scribe ? 17px : 16px; color: Theme.secondary; }
-                            Text { text: DetailModel.published; font-family: Theme.ui-font; font-size: Theme.scribe ? 17px : 16px; overflow: elide; horizontal-stretch: 1; }
-                        }
+                padding-left: root.content-padding; padding-right: root.content-padding; padding-top: 16px;
+                spacing: 16px; alignment: start;
+                // Only metadata that is actually known; "unavailable" placeholders are not shown.
+                VerticalLayout {
+                    spacing: 8px;
+                    if DetailModel.publisher != "" && DetailModel.publisher != Strings.metadata-unavailable: HorizontalLayout {
+                        spacing: 12px;
+                        Text { text: Strings.metadata-publisher; font-family: Theme.ui-font; font-size: 16px; color: Theme.secondary; }
+                        Text { text: DetailModel.publisher; font-family: Theme.ui-font; font-size: 16px; overflow: elide; horizontal-stretch: 1; }
                     }
-                    Row {
-                        HorizontalLayout {
-                            spacing: 12px;
-                            Text { text: Strings.metadata-category; font-family: Theme.ui-font; font-size: Theme.scribe ? 17px : 16px; color: Theme.secondary; }
-                            Text { text: DetailModel.metadata; font-family: Theme.ui-font; font-size: Theme.scribe ? 17px : 16px; overflow: elide; horizontal-stretch: 1; }
-                        }
-                        HorizontalLayout {
-                            spacing: 12px;
-                            Text { text: Strings.metadata-isbn; font-family: Theme.ui-font; font-size: Theme.scribe ? 17px : 16px; color: Theme.secondary; }
-                            Text { text: DetailModel.isbn; font-family: Theme.ui-font; font-size: Theme.scribe ? 17px : 16px; overflow: elide; horizontal-stretch: 1; }
-                        }
+                    if DetailModel.published != "" && DetailModel.published != Strings.metadata-unavailable: HorizontalLayout {
+                        spacing: 12px;
+                        Text { text: Strings.metadata-published; font-family: Theme.ui-font; font-size: 16px; color: Theme.secondary; }
+                        Text { text: DetailModel.published; font-family: Theme.ui-font; font-size: 16px; overflow: elide; horizontal-stretch: 1; }
+                    }
+                    if DetailModel.metadata != "" && DetailModel.metadata != Strings.metadata-unavailable: HorizontalLayout {
+                        spacing: 12px;
+                        Text { text: Strings.metadata-category; font-family: Theme.ui-font; font-size: 16px; color: Theme.secondary; }
+                        Text { text: DetailModel.metadata; font-family: Theme.ui-font; font-size: 16px; overflow: elide; horizontal-stretch: 1; }
+                    }
+                    if DetailModel.isbn != "" && DetailModel.isbn != Strings.metadata-unavailable: HorizontalLayout {
+                        spacing: 12px;
+                        Text { text: Strings.metadata-isbn; font-family: Theme.ui-font; font-size: 16px; color: Theme.secondary; }
+                        Text { text: DetailModel.isbn; font-family: Theme.ui-font; font-size: 16px; overflow: elide; horizontal-stretch: 1; }
                     }
                 }
                 Text {
                     width: max(0px, parent.width - root.content-padding * 2);
                     height: self.preferred-height;
-                    text: DetailModel.intro; font-family: Theme.serif-font;
-                    font-size: Theme.scribe ? 19px : 18px;
+                    text: DetailModel.intro == "" ? Strings.no-introduction : DetailModel.intro;
+                    font-family: Theme.serif-font; font-size: 18px;
                     wrap: word-wrap; vertical-alignment: top;
                 }
                 Rectangle {
-                    height: Theme.scribe ? 64px : 56px;
+                    height: 56px;
+                    background: notes-link.pressed ? Theme.fill : Theme.paper;
+                    accessible-role: button;
+                    accessible-label: Strings.my-notes;
                     HorizontalLayout {
                         spacing: 12px;
-                        Text { text: Strings.my-notes; font-family: Theme.ui-font; font-size: Theme.scribe ? 19px : 18px; vertical-alignment: center; horizontal-stretch: 1; }
-                        Text { text: DetailModel.note-summary; font-family: Theme.ui-font; font-size: Theme.scribe ? 16px : 15px; color: Theme.secondary; vertical-alignment: center; }
+                        Text { text: Strings.my-notes; font-family: Theme.ui-font; font-size: 18px; vertical-alignment: center; horizontal-stretch: 1; }
+                        Text { text: DetailModel.note-summary; font-family: Theme.ui-font; font-size: 15px; color: Theme.secondary; vertical-alignment: center; }
                         Rectangle { width: 24px; Icon { y: (parent.height - 24px) / 2; kind: "next"; } }
                     }
                     Rectangle { y: 0px; height: 1px; background: Theme.line; }
                     Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
-                    TouchArea { clicked => { DetailModel.event("notes", ""); } }
+                    notes-link := PressArea { clicked => { DetailModel.event("notes", ""); } }
                 }
-                Text { text: DetailModel.update-label; font-family: Theme.ui-font; font-size: Theme.scribe ? 15px : 14px; color: Theme.secondary; }
             }
             if DetailModel.tab == "toc": VerticalLayout {
                 width: parent.width;
@@ -512,6 +586,7 @@ component DetailContent inherits Rectangle {
                 for review in DetailModel.reviews: Rectangle {
                     width: parent.width - root.content-padding * 2;
                     height: max(52px, review-content.preferred-height);
+                    background: review-touch.pressed ? Theme.fill : Theme.paper;
                     review-content := VerticalLayout {
                         x: 0px; y: 0px; width: parent.width; height: self.preferred-height;
                         padding-top: Theme.scribe ? 18px : 14px; padding-bottom: 12px; spacing: 8px;
@@ -523,7 +598,7 @@ component DetailContent inherits Rectangle {
                         Text { height: self.preferred-height; text: review.body; font-family: Theme.ui-font; font-size: Theme.scribe ? 18px : 16px; wrap: word-wrap; }
                     }
                     Rectangle { x: 0px; y: 0px; width: parent.width; height: 1px; background: Theme.line; }
-                    TouchArea {
+                    review-touch := PressArea {
                         x: 0px; y: 0px; width: parent.width; height: parent.height;
                         clicked => { DetailModel.event("note", review.id); }
                     }
@@ -536,6 +611,7 @@ component DetailContent inherits Rectangle {
                 for note in DetailModel.reviews: Rectangle {
                     width: parent.width - root.content-padding * 2;
                     height: max(52px, note-content.preferred-height);
+                    background: note-touch.pressed ? Theme.fill : Theme.paper;
                     note-content := VerticalLayout {
                         x: 0px; y: 0px; width: parent.width; height: self.preferred-height;
                         padding-top: 18px; padding-bottom: 18px; spacing: 8px; alignment: start;
@@ -551,8 +627,8 @@ component DetailContent inherits Rectangle {
                             Text { height: self.preferred-height; text: note.thought; font-family: Theme.ui-font; font-size: 17px; wrap: word-wrap; horizontal-stretch: 1; }
                         }
                     }
-                    Rectangle { x: 0px; y: 0px; width: parent.width; height: 1px; background: Theme.line; }
-                    TouchArea {
+                    Rectangle { x: 0px; y: parent.height - 1px; width: parent.width; height: 1px; background: Theme.line; }
+                    note-touch := PressArea {
                         x: 0px; y: 0px; width: parent.width; height: parent.height;
                         clicked => { DetailModel.event("note", note.id); }
                     }
@@ -560,22 +636,23 @@ component DetailContent inherits Rectangle {
             }
             }
         }
-        if root.show-pager: PageBar { width: root.width; height: root.footer-height; page: DetailModel.page; count: DetailModel.page-count; turn(delta) => { root.follow-current = false; content-scroll.viewport-y = 0px; DetailModel.event("page", delta); } jump => { root.follow-current = false; DetailModel.event("jump", ""); } }
-        if DetailModel.selecting && DetailModel.tab == "toc": Rectangle {
-            height: root.footer-height;
-            Rectangle { x: 0px; y: 0px; width: parent.width; height: 2px; background: Theme.ink; }
-            HorizontalLayout { x: 0px; y: 0px; width: parent.width; height: parent.height; padding-top: 8px; padding-bottom: 8px; padding-left: root.content-padding; padding-right: root.content-padding; spacing: 12px;
-                Text { text: DetailModel.selection-summary; font-family: Theme.ui-font; font-size: 18px; vertical-alignment: center; horizontal-stretch: 1; }
-                ActionButton { text: Strings.download-selected; primary: true; enabled: DetailModel.selected-count > 0 && DetailModel.can-download; clicked => { DetailModel.event("download-selected", ""); } }
-            }
-        }
+    }
+}
+
+component IntroductionLines inherits Rectangle {
+    in property <[IntroductionLine]> lines;
+    in property <length> text-size;
+    in property <length> line-height;
+    for line[index] in root.lines: Text {
+        x: 0px; y: index * root.line-height; width: root.width; height: root.line-height;
+        text: line.text; font-family: Theme.serif-font; font-size: root.text-size;
+        letter-spacing: line.letter-spacing * 1px; vertical-alignment: center;
     }
 }
 
 component DetailSideSummary inherits Rectangle {
     background: Theme.paper;
     clip: true;
-    // The preview is separately bounded; full Introduction metadata stays in the right pane.
     cover := CoverArt {
         x: (root.width - 214px) / 2; y: 0px;
         width: 214px; height: 300px;
@@ -602,7 +679,7 @@ component DetailSideSummary inherits Rectangle {
     }
     rating := Text {
         x: 0px; y: author-frame.y + author-frame.height + 8px;
-        width: root.width; height: 24px;
+        width: root.width; height: DetailModel.rating == "" ? 0px : 24px;
         text: DetailModel.rating; font-family: Theme.ui-font; font-size: 16px;
         color: Theme.secondary; vertical-alignment: center;
     }
@@ -622,7 +699,7 @@ component DetailSideSummary inherits Rectangle {
     read-action := ActionButton {
         x: 0px; y: progress.y + progress.height + 24px;
         width: root.width; height: 48px;
-        text: Strings.continue-reading; primary: true; enabled: DetailModel.can-read;
+        text: DetailModel.book.progress > 0 || DetailModel.book.badge == Strings.finished ? Strings.continue-reading : Strings.start-reading; primary: true; enabled: DetailModel.can-read;
         clicked => { DetailModel.event("read", ""); }
     }
     download-action := ActionButton {
@@ -633,51 +710,57 @@ component DetailSideSummary inherits Rectangle {
         clicked => { DetailModel.event(DetailModel.access-needs-refresh ? "refresh-access" : "download", ""); }
     }
     intro-block := Rectangle {
-        x: 0px; y: download-action.y + download-action.height + 16px;
+        x: 0px; y: download-action.y + download-action.height + 24px;
         width: root.width; height: max(0px, root.height - self.y);
         clip: true;
-        property <length> body-top: 53px;
-        property <bool> show-link: DetailModel.intro-available && self.height >= self.body-top + 60px;
-        property <length> body-limit: max(0px, min(156px, self.height - self.body-top - (self.show-link ? 60px : 0px)));
+        property <length> body-top: 56px;
+        property <length> line-height: 30.6px;
+        property <bool> measured: DetailModel.intro-preview-lines.length > 0;
+        property <length> natural-height: self.measured ? DetailModel.intro-preview-lines.length * self.line-height : fallback.preferred-height;
+        property <length> available: max(0px, self.height - self.body-top - 24px);
+        property <bool> clipped: DetailModel.intro-available && (DetailModel.intro-prefix-truncated || self.natural-height > self.available);
+        property <length> text-room: max(0px, self.available - (self.clipped ? 60px : 0px));
         Rectangle { x: 0px; y: 0px; width: parent.width; height: 1px; background: Theme.line; }
         Text {
-            x: 0px; y: 13px; width: parent.width; height: 28px;
+            x: 0px; y: 16px; width: parent.width; height: 28px;
             text: Strings.introduction; font-family: Theme.ui-font; font-size: 20px;
-            font-weight: 700; color: Theme.ink; vertical-alignment: top;
+            font-weight: 700; vertical-alignment: center;
         }
-        intro-preview := Text {
+        preview := Rectangle {
             x: 0px; y: intro-block.body-top; width: parent.width;
-            height: min(self.preferred-height, intro-block.body-limit);
+            height: min(intro-block.natural-height, intro-block.measured ? floor(intro-block.text-room / intro-block.line-height) * intro-block.line-height : intro-block.text-room);
+            clip: true;
+            if intro-block.measured: IntroductionLines {
+                width: parent.width; height: parent.height;
+                lines: DetailModel.intro-preview-lines;
+                text-size: 18px; line-height: intro-block.line-height;
+            }
+        }
+        fallback := Text {
+            x: 0px; y: preview.y; width: parent.width; height: preview.height;
+            visible: !intro-block.measured;
             text: DetailModel.intro-preview == "" ? Strings.no-introduction : DetailModel.intro-preview;
-            font-family: Theme.ui-font; font-size: 18px; color: Theme.secondary;
+            font-family: Theme.serif-font; font-size: 18px;
             wrap: word-wrap; overflow: elide; vertical-alignment: top;
         }
-        if intro-block.show-link: Rectangle {
-            x: 0px; y: intro-preview.y + intro-preview.height + 12px;
-            width: parent.width; height: 48px;
+        if intro-block.clipped: Rectangle {
+            x: 0px; y: preview.y + preview.height + 12px;
+            width: max(48px, link-caption.preferred-width); height: 48px;
             background: intro-link.pressed ? Theme.ink : Theme.paper;
             accessible-role: button;
-            accessible-label: Strings.view-full-introduction;
+            accessible-label: Strings.full-text;
             link-caption := Text {
                 x: 0px; y: 0px; width: parent.width; height: parent.height;
-                text: Strings.view-full-introduction + " ›";
+                text: Strings.full-text + " ›";
                 font-family: Theme.ui-font; font-size: 18px; font-weight: 700;
                 color: intro-link.pressed ? Theme.paper : Theme.ink;
-                horizontal-alignment: left; vertical-alignment: center; overflow: elide;
+                vertical-alignment: center;
             }
             Rectangle {
-                x: 0px; y: parent.height - 5px;
-                width: min(parent.width, link-caption.preferred-width); height: 1px;
+                x: 0px; y: 38px; width: link-caption.preferred-width; height: 1px;
                 background: intro-link.pressed ? Theme.paper : Theme.ink;
             }
-            intro-link := TouchArea {
-                x: 0px; y: 0px; width: parent.width; height: parent.height;
-                pointer-event(event) => {
-                    if event.kind == PointerEventKind.down { Theme.refresh("press"); }
-                    else if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel { Theme.refresh("release"); }
-                }
-                clicked => { DetailModel.event("tab", "intro"); }
-            }
+            intro-link := PressArea { clicked => { DetailModel.event("intro-open", ""); } }
         }
     }
 }
@@ -713,8 +796,47 @@ component DetailStackedSummary inherits Rectangle {
         HorizontalLayout {
             x: 0px; y: 0px; width: parent.width; height: parent.height;
             padding-left: Theme.page-margin; padding-right: Theme.page-margin; padding-bottom: 16px; spacing: 12px;
-            ActionButton { text: Strings.continue-reading; primary: true; enabled: DetailModel.can-read; horizontal-stretch: 1.4; clicked => { DetailModel.event("read", ""); } }
+            ActionButton { text: DetailModel.book.progress > 0 || DetailModel.book.badge == Strings.finished ? Strings.continue-reading : Strings.start-reading; primary: true; enabled: DetailModel.can-read; horizontal-stretch: 1.4; clicked => { DetailModel.event("read", ""); } }
             ActionButton { text: DetailModel.access-needs-refresh ? Strings.refresh-content-access : Strings.download-all; enabled: DetailModel.can-download; horizontal-stretch: 1; clicked => { DetailModel.event(DetailModel.access-needs-refresh ? "refresh-access" : "download", ""); } }
+        }
+    }
+}
+
+component DetailIntroductionDialog inherits Rectangle {
+    PressArea { clicked => { DetailModel.event("intro-close", ""); } }
+    panel := Rectangle {
+        x: (parent.width - self.width) / 2; y: 132px;
+        width: min(parent.width - Theme.page-margin * 2, 580px);
+        height: min(max(0px, parent.height - self.y - 24px), scroller.viewport-height + 168px);
+        border-width: 2px; border-color: Theme.ink; background: Theme.paper;
+        property <length> line-height: 34.2px;
+        property <bool> measured: DetailModel.intro-dialog-lines.length > 0;
+        TouchArea { }
+        Text {
+            x: 24px; y: 24px; width: parent.width - 48px; height: 32px;
+            text: Strings.introduction; font-family: Theme.serif-font; font-size: 24px; font-weight: 700;
+            vertical-alignment: center;
+        }
+        scroller := Flickable {
+            x: 24px; y: 76px; width: parent.width - 48px; height: max(0px, parent.height - 168px);
+            viewport-width: self.width;
+            viewport-height: panel.measured ? DetailModel.intro-dialog-lines.length * panel.line-height : full-text.preferred-height;
+            interactive: self.height < self.viewport-height;
+            if panel.measured: IntroductionLines {
+                width: scroller.viewport-width; height: scroller.viewport-height;
+                lines: DetailModel.intro-dialog-lines; text-size: 19px; line-height: panel.line-height;
+            }
+            full-text := Text {
+                x: 0px; y: 0px; width: scroller.viewport-width; height: self.preferred-height;
+                visible: !panel.measured;
+                text: panel.measured ? "" : DetailModel.intro-dialog-text;
+                font-family: Theme.serif-font; font-size: 19px; wrap: word-wrap;
+            }
+        }
+        ActionButton {
+            x: parent.width - self.width - 24px; y: parent.height - 72px;
+            width: self.preferred-width; text: Strings.close;
+            clicked => { DetailModel.event("intro-close", ""); }
         }
     }
 }
@@ -722,11 +844,38 @@ component DetailStackedSummary inherits Rectangle {
 export component DetailScreen inherits Rectangle {
     background: Theme.paper;
     clip: true;
-    PageHeader {
+    if !DetailModel.selecting: PageHeader {
         x: 0px; y: 0px; width: root.width; height: 52px;
         title: Strings.book-detail; more: true;
         back => { DetailModel.event("back", ""); }
         menu => { DetailModel.event("more", ""); }
+    }
+    // Notes start directly under the tabs; larger collections page in the header.
+    if DetailModel.tab == "notes" && DetailModel.page-count > 1: HeaderPager {
+        x: root.width - self.width - 64px; y: 2px;
+        current: DetailModel.page; total: DetailModel.page-count;
+        step(delta) => { DetailModel.event("page", delta); }
+        jump => { DetailModel.event("jump", ""); }
+    }
+    if DetailModel.selecting: Rectangle {
+        x: 0px; y: 0px; width: root.width; height: 52px;
+        ActionButton {
+            x: 8px; y: 2px; width: self.preferred-width;
+            text: Strings.done; quiet: true;
+            clicked => { DetailModel.event("select", ""); }
+        }
+        Text {
+            x: 128px; y: 0px; width: parent.width - 256px; height: parent.height;
+            text: DetailModel.selection-summary; font-family: Theme.ui-font; font-size: 18px; font-weight: 700;
+            horizontal-alignment: center; vertical-alignment: center; overflow: elide;
+        }
+        ActionButton {
+            x: parent.width - self.width - 8px; y: 2px; width: self.preferred-width;
+            text: Strings.download-selected; primary: true;
+            enabled: DetailModel.selected-count > 0 && DetailModel.can-download;
+            clicked => { DetailModel.event("download-selected", ""); }
+        }
+        Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
     }
     if Theme.scribe: Rectangle {
         x: 0px; y: 52px; width: root.width; height: max(0px, root.height - 52px);
@@ -746,5 +895,8 @@ export component DetailScreen inherits Rectangle {
         x: 0px; y: 52px; width: root.width; height: max(0px, root.height - 52px);
         DetailStackedSummary { x: 0px; y: 0px; width: parent.width; }
         DetailContent { x: 0px; y: 218px; width: parent.width; height: max(0px, parent.height - 218px); }
+    }
+    if Theme.scribe && DetailModel.intro-dialog-text != "": DetailIntroductionDialog {
+        x: 0px; y: 0px; width: parent.width; height: parent.height;
     }
 }

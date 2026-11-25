@@ -216,7 +216,6 @@ fn article(id: &str, title: &str, author: &str, published_at: i64) -> MpArticle 
 #[derive(Debug, PartialEq)]
 struct View {
     title: String,
-    subtitle: String,
     query: String,
     sort: String,
     owner: String,
@@ -231,7 +230,6 @@ fn view(fixture: &Fixture) -> View {
     let global = fixture.ui().global::<AuxiliaryModel>();
     View {
         title: global.get_publications_title().to_string(),
-        subtitle: global.get_publications_subtitle().to_string(),
         query: global.get_publications_query().to_string(),
         sort: global.get_publications_sort().to_string(),
         owner: global.get_publications_account_id().to_string(),

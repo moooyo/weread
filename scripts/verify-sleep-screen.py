@@ -166,10 +166,11 @@ class SleepScreenVerifier(ui.Verifier):
             profile,
             "sleep-cover",
             actions=(
+                # A capture must see a visibility action in the same timer batch.
                 ui.action(100, "fixture", "hide"),
-                ui.action(250, "fixture", "capture", "before"),
+                ui.action(100, "fixture", "capture", "before"),
                 ui.action(400, "fixture", "show"),
-                ui.action(600, "fixture", "capture", "sleep"),
+                ui.action(400, "fixture", "capture", "sleep"),
                 ui.action(800, "fixture", "hide"),
             ),
         )

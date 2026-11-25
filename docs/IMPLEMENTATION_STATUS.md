@@ -6,6 +6,18 @@ The date above belongs to the original implementation record. Later changes and 
 
 The user authorized implementation from the WeRead for Kindle design handoff v0.2. This repository contains an independent Rust and Slint application, desktop verification, a Kindle platform adapter, and a development-bundle builder. Iteration continues and general acceptance remains incomplete. The latest Scribe 2022 / firmware 5.19.5 operator acceptance below is artifact-specific and does not establish a supported model/firmware matrix or untested hardware qualification.
 
+The November 25, 2026 [Kindle e-ink UI handoff](KINDLE_UI_OPTIMIZATION.md)
+replaces bottom list bars with compact pagers, anchors prompts above the
+active bottom controls, and fits Reader and Article panels to their contents.
+It updates the two-profile Library, Publications, Search, and Detail layouts,
+keeps the Scribe introduction in the side pane, and retains four Settings tabs.
+Scribe firmware emulation passed all 14 walkthrough groups; Paperwhite 6 passed
+13, with sleep/wake blocked by the guest's stock power state. The Search-row
+follow-up passed on both guests and on a physical Scribe 2022 / firmware 5.19.5.
+The authorized clean daily installation opened Login from the stock Library
+entry, then removed the prior WeRead installation and local data. See the
+handoff record for the remaining live-service and physical-device gates.
+
 The [November 20 physical font probe](review/library-startup-latency-20261119/physical-20261120.md)
 verified the benefit of build-time outline admission for seven bundled fonts
 in a guarded CPU-only workload. The subsequent [indexed comparison and

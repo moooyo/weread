@@ -592,7 +592,7 @@ impl App {
                     self.show_toast("local_saved");
                 }
             }
-            "page" => {
+            "page" | "jump" if self.search_purpose == "books" => {
                 let keyboard = self
                     .ui
                     .upgrade()
@@ -601,10 +601,14 @@ impl App {
                     self.search_results.len(),
                     search_page_size(self.profile, self.search_viewport_size(), keyboard),
                 );
-                self.search_page = move_page(self.search_page, value.parse().unwrap_or(0), count);
-                self.refresh_display(RefreshReason::Content);
+                if action == "page" {
+                    self.search_page =
+                        move_page(self.search_page, value.parse().unwrap_or(0), count);
+                    self.refresh_display(RefreshReason::Content);
+                } else if count > 1 {
+                    self.open_jump("search", self.search_page.min(count - 1) + 1);
+                }
             }
-            "jump" => self.open_jump("search", self.search_page + 1),
             _ => {}
         }
         Ok(())
@@ -618,9 +622,13 @@ impl App {
         }
         if self.search_scope == "shelf" || self.demo {
             match local_search_preview(&self.store, &self.query, self.search_scope == "shelf") {
-                Ok((results, status)) => {
+                Ok(results) => {
+                    self.search_status = if results.is_empty() {
+                        tr("no_results")
+                    } else {
+                        String::new()
+                    };
                     self.search_results = results;
-                    self.search_status = status;
                 }
                 Err(error)
                     if error
@@ -739,6 +747,8 @@ impl App {
                 search.set_query_width(0.0);
                 search.set_composition_width(0.0);
                 search.set_candidates(model(Vec::new()));
+                search.set_results_visible(false);
+                search.set_no_results(false);
             }
             return Ok(());
         }
@@ -820,6 +830,12 @@ impl App {
             self.platform.logical_viewport_size(),
             &metrics,
         );
+        let no_results = self.search_purpose == "books"
+            && results.is_empty()
+            && !self.query.query.trim().is_empty()
+            && self.query.composition.is_empty()
+            && self.search_status == tr("no_results");
+        let results_visible = !results.is_empty() || no_results;
         search.set_recent(model(recent.into_iter().map(Into::into).collect()));
         search.set_recent_chips(model(chips));
         search.set_recent_rows(rows);
@@ -830,17 +846,8 @@ impl App {
         search.set_caps(self.query.caps);
         search.set_page(self.search_page as i32 + 1);
         search.set_page_count(count as i32);
-        search.set_status(
-            if self.search_status.is_empty() && !self.search_results.is_empty() {
-                i18n::format(
-                    "search_result_count",
-                    &[("count", self.search_results.len().to_string())],
-                )
-            } else {
-                self.search_status.clone()
-            }
-            .into(),
-        );
+        search.set_results_visible(results_visible);
+        search.set_no_results(no_results);
         self.schedule_visible_covers();
         Ok(())
     }
@@ -850,16 +857,11 @@ fn local_search_preview(
     store: &Store,
     input: &PinyinInput,
     shelf_only: bool,
-) -> Result<(Vec<BookMetadata>, String)> {
+) -> Result<Vec<BookMetadata>> {
     if input.query.trim().is_empty() {
-        return Ok((vec![], String::new()));
+        return Ok(Vec::new());
     }
-    let results = store.search_book_metadata(&input.query, shelf_only)?;
-    let status = i18n::format(
-        "search_result_count",
-        &[("count", results.len().to_string())],
-    );
-    Ok((results, status))
+    store.search_book_metadata(&input.query, shelf_only)
 }
 
 fn layout_recent_queries(
@@ -869,11 +871,12 @@ fn layout_recent_queries(
     metrics: &TextMetrics,
 ) -> (Vec<RecentSearchChip>, i32) {
     let available = viewport.0.saturating_sub(profile.page_margin() * 2) as f32;
-    let (font_size, padding, gap) = if profile.is_scribe() {
-        (18.0, 40.0, 12.0)
+    let (font_size, padding) = if profile.is_scribe() {
+        (18.0, 40.0)
     } else {
-        (16.0, 32.0, 10.0)
+        (16.0, 32.0)
     };
+    let gap = 12.0;
     let mut x = 0.0;
     let mut row = 0;
     let mut chips = Vec::new();
@@ -898,16 +901,16 @@ fn layout_recent_queries(
 }
 
 fn search_page_size(profile: DeviceProfile, viewport: (u32, u32), keyboard: bool) -> usize {
-    let maximum = if profile.is_scribe() {
-        if keyboard { 7 } else { 11 }
-    } else if keyboard {
-        5
-    } else {
-        9
+    let maximum = match (profile.is_scribe(), keyboard) {
+        (true, false) => 15,
+        (true, true) => 11,
+        (false, false) => 9,
+        (false, true) => 5,
     };
-    let reserved = 28 + 60 + 48 + 41 + if keyboard { 300 } else { 48 };
+    // The pager shares the scope row; only the touch keyboard takes bottom space.
+    let reserved = 28 + 60 + 49 + if keyboard { 300 } else { 0 };
     let available = (viewport.1 as usize).saturating_sub(reserved);
-    (available / 72).max(1).min(maximum)
+    (available / 72).clamp(1, maximum)
 }
 
 pub(super) fn session_for_api_key(
@@ -923,10 +926,75 @@ pub(super) fn session_for_api_key(
 
 #[cfg(test)]
 mod tests {
+    use super::super::underline_projection_tests::{Fixture, isolated};
     use super::*;
+    use slint::Model;
+
+    fn search_result_state_case() -> Result<()> {
+        let fixture = Fixture::new("Search result projection fixture.", Vec::new(), false)?;
+        {
+            let ui = fixture.ui();
+            let search = ui.global::<SearchModel>();
+            let shell = ui.global::<ShellModel>();
+            let mut app = fixture.app();
+            let title = "Search result projection title";
+            let recent = "A previous search";
+            app.store.remember_query(recent)?;
+            app.store
+                .upsert_book(&Book::new("search-projection-0", title))?;
+            app.dispatch("library", "search", "shelf")?;
+            app.dispatch("search", "key", "s")?;
+            assert!(search.get_keyboard_visible());
+            assert!(!search.get_results_visible() && !search.get_no_results());
+            assert_eq!(search.get_recent().row_data(0).unwrap().as_str(), recent);
+
+            app.dispatch("search", "edit-query", title)?;
+            assert!(search.get_results_visible() && !search.get_no_results());
+            assert_eq!((search.get_page(), search.get_page_count()), (1, 1));
+            assert_eq!(search.get_results().row_count(), 1);
+            app.dispatch("search", "jump", "")?;
+            assert!(shell.get_dialog_kind().is_empty());
+            app.dispatch("search", "key", "submit")?;
+            assert!(!search.get_keyboard_visible());
+            assert!(search.get_results_visible());
+
+            for index in 1..11 {
+                app.store
+                    .upsert_book(&Book::new(format!("search-projection-{index}"), title))?;
+            }
+            app.render_search()?;
+            assert_eq!((search.get_page(), search.get_page_count()), (1, 2));
+            assert_eq!(search.get_results().row_count(), 9);
+            app.dispatch("search", "page", "1")?;
+            assert_eq!((search.get_page(), search.get_page_count()), (2, 2));
+            assert_eq!(search.get_results().row_count(), 2);
+            app.dispatch("search", "jump", "")?;
+            assert_eq!(shell.get_dialog_kind().as_str(), "jump");
+            assert_eq!(shell.get_dialog_input().as_str(), "2");
+            app.dispatch("shell", "dialog-outside", "")?;
+
+            app.dispatch("search", "edit-query", "No fixture matches this title")?;
+            app.dispatch("search", "key", "submit")?;
+            assert!(search.get_results_visible() && search.get_no_results());
+            assert_eq!((search.get_page(), search.get_page_count()), (1, 1));
+            assert_eq!(search.get_results().row_count(), 0);
+            app.dispatch("search", "clear", "")?;
+            assert!(search.get_keyboard_visible());
+            assert!(!search.get_results_visible() && !search.get_no_results());
+        }
+        fixture.finish()
+    }
 
     #[test]
-    fn composing_pinyin_keeps_recent_queries_without_an_empty_result_count() -> Result<()> {
+    fn one_page_search_results_keep_the_pager_without_a_jump_action() -> Result<()> {
+        isolated(
+            "app::auth::tests::one_page_search_results_keep_the_pager_without_a_jump_action",
+            search_result_state_case,
+        )
+    }
+
+    #[test]
+    fn composing_pinyin_keeps_recent_queries_without_matching_uncommitted_text() -> Result<()> {
         let store = Store::open(":memory:")?;
         store.remember_query("Previous title")?;
         store.upsert_book(&Book {
@@ -940,9 +1008,8 @@ mod tests {
         let mut input = PinyinInput::default();
         for character in "shi".chars() {
             input.press(&character.to_string());
-            let (books, status) = local_search_preview(&store, &input, true)?;
+            let books = local_search_preview(&store, &input, true)?;
             assert!(books.is_empty());
-            assert!(status.is_empty());
             assert!(input.query.is_empty());
             assert_eq!(store.recent_queries(4)?, recent);
         }
@@ -954,13 +1021,9 @@ mod tests {
             ..Default::default()
         })?;
         assert!(input.choose(&candidate));
-        let (books, status) = local_search_preview(&store, &input, true)?;
+        let books = local_search_preview(&store, &input, true)?;
         assert_eq!(books.len(), 1);
         assert_eq!(books[0].id, "candidate-book");
-        assert_eq!(
-            status,
-            i18n::format("search_result_count", &[("count", "1".into())])
-        );
         assert_eq!(store.recent_queries(4)?, recent);
         Ok(())
     }
@@ -980,9 +1043,8 @@ mod tests {
         input.press("h");
         input.press("i");
         let during = local_search_preview(&store, &input, true)?;
-        assert_eq!(during.0.len(), before.0.len());
-        assert_eq!(during.0[0].id, before.0[0].id);
-        assert_eq!(during.1, before.1);
+        assert_eq!(during.len(), before.len());
+        assert_eq!(during[0].id, before[0].id);
         assert_eq!(input.query, "Committed");
         assert_eq!(input.composition, "shi");
         Ok(())
@@ -1018,7 +1080,7 @@ mod tests {
                 assert!(chip.x + chip.width <= available);
             }
             assert!(chips.windows(2).all(|pair| {
-                pair[1].row > pair[0].row || pair[1].x >= pair[0].x + pair[0].width + 8.0
+                pair[1].row > pair[0].row || pair[1].x >= pair[0].x + pair[0].width + 12.0
             }));
         }
     }
@@ -1063,32 +1125,26 @@ mod tests {
     }
 
     #[test]
-    fn search_pages_fit_the_reserved_controls_on_every_profile() {
-        for profile in [
-            DeviceProfile::Paperwhite5,
-            DeviceProfile::Paperwhite6,
-            DeviceProfile::Scribe,
-            DeviceProfile::Scribe2025,
+    fn search_pages_fill_the_space_below_the_scope_row_on_every_profile() {
+        for (profile, closed, open) in [
+            (DeviceProfile::Paperwhite5, 9, 5),
+            (DeviceProfile::Paperwhite6, 9, 5),
+            (DeviceProfile::Scribe, 15, 11),
+            (DeviceProfile::Scribe2025, 15, 11),
         ] {
-            for keyboard in [false, true] {
-                let reserved = 28 + 60 + 48 + 41 + if keyboard { 300 } else { 48 };
-                assert!(
-                    search_page_size(profile, profile.logical_size(), keyboard) * 72 + reserved
-                        <= profile.logical_size().1 as usize
-                );
+            for (keyboard, expected) in [(false, closed), (true, open)] {
+                let viewport = profile.logical_size();
+                let reserved = 137 + if keyboard { 300 } else { 0 };
+                let rows = search_page_size(profile, viewport, keyboard);
+                assert_eq!(rows, expected, "{profile:?}, keyboard={keyboard}");
+                assert!(rows * 72 + reserved <= viewport.1 as usize);
             }
         }
-        assert!(
-            search_page_size(
-                DeviceProfile::Paperwhite5,
-                DeviceProfile::Paperwhite5.logical_size(),
-                true,
-            ) < search_page_size(
-                DeviceProfile::Paperwhite6,
-                DeviceProfile::Paperwhite6.logical_size(),
-                true,
-            )
-        );
+        let profile = DeviceProfile::Paperwhite6;
+        assert_eq!(search_page_size(profile, (636, 848), false), 9);
+        assert_eq!(search_page_size(profile, (636, 848), true), 5);
+        assert_eq!(search_page_size(profile, (636, 768), false), 8);
+        assert_eq!(search_page_size(profile, (636, 768), true), 4);
     }
 }
 

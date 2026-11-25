@@ -104,6 +104,8 @@ fn assert_scribe_prefix(fixture: &Fixture, full: &str) -> String {
     let detail = fixture.ui().global::<DetailModel>();
     let shown = detail.get_intro_preview().to_string();
     assert!(detail.get_intro_available());
+    assert!(detail.get_intro_prefix_truncated());
+    assert!(detail.get_intro_preview_lines().row_count() > 0);
     assert!(!shown.is_empty());
     assert!(shown.chars().count() <= BOOK_INTRODUCTION_PREVIEW_SCALARS);
     let prefix = shown.strip_suffix('\u{2026}').unwrap_or(&shown);
@@ -114,20 +116,53 @@ fn assert_scribe_prefix(fixture: &Fixture, full: &str) -> String {
     shown
 }
 
-fn full_tab(fixture: &Fixture, full: &str, expected_preview: &str) -> Result<()> {
+fn full_dialog(fixture: &Fixture, full: &str, expected_preview: &str) -> Result<()> {
+    let mut state = fixture.app();
+    let previous_route = state.route.clone();
+    let previous_tab = state.detail_tab.clone();
+    let previous_page = state.detail_page;
+    let previous_anchor = anchor(&state);
+    let detail = fixture.ui().global::<DetailModel>();
+    reset_reads(&state);
+    state.dispatch("detail", "intro-open", "")?;
+    assert_eq!(state.route, previous_route);
+    assert_eq!(state.detail_tab, previous_tab);
+    assert_eq!(state.detail_page, previous_page);
+    assert_eq!(anchor(&state), previous_anchor);
+    assert_eq!(detail.get_intro_dialog_text().as_str(), full);
+    assert!(detail.get_intro_dialog_lines().row_count() > 0);
+    assert!(detail.get_intro().is_empty());
+    assert_eq!(detail.get_intro_preview().as_str(), expected_preview);
+    assert_eq!(state.store.book_read_stats().intro_copies, 1);
+    assert_eq!(state.store.book_read_stats().intro_bytes, full.len());
+    assert_eq!(state.store.book_introduction_read_stats().metadata_reads, 1);
+
+    reset_reads(&state);
+    state.dispatch("detail", "intro-close", "")?;
+    assert!(detail.get_intro_dialog_text().is_empty());
+    assert_eq!(detail.get_intro_dialog_lines().row_count(), 0);
+    assert_eq!(state.route, previous_route);
+    assert_eq!(state.detail_tab, previous_tab);
+    assert_eq!(state.detail_page, previous_page);
+    assert_eq!(anchor(&state), previous_anchor);
+    assert_no_full_introduction(&state);
+    Ok(())
+}
+
+fn full_tab(fixture: &Fixture, full: &str) -> Result<()> {
     let mut state = fixture.app();
     let previous_route = state.route.clone();
     let previous_anchor = anchor(&state);
-    reset_reads(&state);
-    // This is the same Detail tab action used by the preview's full-text entry.
-    state.dispatch("detail", "tab", "intro")?;
     let detail = fixture.ui().global::<DetailModel>();
+    reset_reads(&state);
+    state.dispatch("detail", "tab", "intro")?;
     assert_eq!(state.route, previous_route);
     assert_eq!(anchor(&state), previous_anchor);
     assert_eq!(state.detail_tab, "intro");
     assert_eq!(detail.get_tab().as_str(), "intro");
     assert_eq!(detail.get_intro().as_str(), full);
-    assert_eq!(detail.get_intro_preview().as_str(), expected_preview);
+    assert!(detail.get_intro_preview().is_empty());
+    assert!(detail.get_intro_dialog_text().is_empty());
     assert_eq!(detail.get_publisher().as_str(), "Preview fixture publisher");
     assert_eq!(state.store.book_read_stats().intro_copies, 1);
     assert_eq!(state.store.book_read_stats().intro_bytes, full.len());
@@ -180,7 +215,9 @@ fn scribe_preview() -> Result<()> {
         state.dispatch("detail", "tab", tab)?;
         assert_eq!(state.route, Route::Detail(BOOK.into()));
         assert_eq!(fixture.ui().global::<DetailModel>().get_tab().as_str(), tab);
-        assert!(fixture.ui().global::<DetailModel>().get_intro().is_empty());
+        let detail = fixture.ui().global::<DetailModel>();
+        assert!(detail.get_intro().is_empty());
+        assert!(detail.get_intro_dialog_text().is_empty());
         assert_no_full_introduction(&state);
         assert_eq!(anchor(&state), previous_anchor);
         let shown = assert_scribe_prefix(&fixture, &full);
@@ -190,11 +227,32 @@ fn scribe_preview() -> Result<()> {
             assert_eq!(shown, preview);
         }
     }
+    {
+        let mut state = fixture.app();
+        reset_reads(&state);
+        state.dispatch("detail", "intro-open", "")?;
+        assert!(
+            fixture
+                .ui()
+                .global::<DetailModel>()
+                .get_intro_dialog_text()
+                .is_empty()
+        );
+        assert!(!fixture.ui().global::<ShellModel>().get_toast().is_empty());
+        state.dispatch("detail", "tab", "intro")?;
+        assert_eq!(
+            fixture.ui().global::<DetailModel>().get_tab().as_str(),
+            "toc"
+        );
+        assert_no_full_introduction(&state);
+    }
     metadata(&connection, rusqlite::types::Value::Text(METADATA.into()))?;
-    full_tab(&fixture, &full, &preview)?;
-    assert!(fixture.ui().global::<DetailModel>().get_intro_available());
+    for tab in ["toc", "notes", "reviews"] {
+        fixture.app().dispatch("detail", "tab", tab)?;
+        full_dialog(&fixture, &full, &preview)?;
+        assert_eq!(assert_scribe_prefix(&fixture, &full), preview);
+    }
     fixture.app().dispatch("detail", "tab", "toc")?;
-    assert_eq!(assert_scribe_prefix(&fixture, &full), preview);
 
     let spaced = "  First paragraph.\r\n\r\n  Second paragraph.\n \nThird paragraph.\u{2028}\u{2029}Fourth paragraph.  ";
     let compact = "First paragraph.\nSecond paragraph.\nThird paragraph.\nFourth paragraph.";
@@ -212,7 +270,13 @@ fn scribe_preview() -> Result<()> {
             .as_str(),
         compact
     );
-    full_tab(&fixture, spaced, compact)?;
+    assert!(
+        !fixture
+            .ui()
+            .global::<DetailModel>()
+            .get_intro_prefix_truncated()
+    );
+    full_dialog(&fixture, spaced, compact)?;
     assert_eq!(raw_introduction(&connection)?, spaced_raw);
 
     connection.execute("UPDATE books SET intro=x'80' WHERE id=?1", [BOOK])?;
@@ -285,7 +349,7 @@ fn paperwhite_preview() -> Result<()> {
     }
     connection.execute("UPDATE books SET intro=?1 WHERE id=?2", params![full, BOOK])?;
     metadata(&connection, rusqlite::types::Value::Text(METADATA.into()))?;
-    full_tab(&fixture, &full, "")?;
+    full_tab(&fixture, &full)?;
     assert!(!fixture.ui().global::<DetailModel>().get_intro_available());
     empty_book_clears_fields(&fixture)?;
     drop(connection);

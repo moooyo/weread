@@ -63,6 +63,19 @@ export component DashedOutline inherits Rectangle {
     DashedRule { x: root.width - root.stroke; y: root.radius / 2; width: root.stroke; height: root.height - root.radius; line-color: root.stroke-color; stroke: root.stroke; vertical: true; }
 }
 
+// Every tappable surface requests the fast waveform when pressed and a UI
+// refresh when released or cancelled, so the inverted press state appears at
+// once on e-ink and does not linger as ghosting after a cancelled touch.
+export component PressArea inherits TouchArea {
+    pointer-event(event) => {
+        if event.kind == PointerEventKind.down {
+            Theme.refresh("press");
+        } else if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel {
+            Theme.refresh("release");
+        }
+    }
+}
+
 export component SwipeTouchArea inherits TouchArea {
     callback tapped();
     callback swiped(int);
@@ -83,6 +96,9 @@ export component SwipeTouchArea inherits TouchArea {
             } else if abs(self.mouse-y - root.start-y) >= 64px {
                 root.suppress-click = true;
             }
+            Theme.refresh("release");
+        }
+        if event.kind == PointerEventKind.cancel {
             Theme.refresh("release");
         }
     }
@@ -118,9 +134,8 @@ export component ActionButton inherits Rectangle {
         vertical-alignment: center;
         overflow: elide;
     }
-    touch := TouchArea {
+    touch := PressArea {
         enabled: root.enabled;
-        pointer-event(event) => { if event.kind == PointerEventKind.down { Theme.refresh("press"); } else if event.kind == PointerEventKind.up { Theme.refresh("release"); } }
         clicked => { root.clicked(); }
     }
 }
@@ -156,24 +171,43 @@ export component IconButton inherits Rectangle {
             vertical-alignment: center;
         }
     }
-    touch := TouchArea { enabled: root.enabled; pointer-event(event) => { if event.kind == PointerEventKind.down { Theme.refresh("press"); } else if event.kind == PointerEventKind.up { Theme.refresh("release"); } } clicked => { root.clicked(); } }
+    touch := PressArea { enabled: root.enabled; clicked => { root.clicked(); } }
 }
 
-export component PageBar inherits Rectangle {
-    in property <int> page: 1;
-    in property <int> count: 1;
-    callback turn(int);
+export component HeaderPager inherits Rectangle {
+    in property <int> current: 1;
+    in property <int> total: 1;
+    callback step(int);
     callback jump();
+    private property <string> page-label: root.current + " / " + root.total;
+    private property <length> label-width: max(56px, page-caption.preferred-width + 4px);
+    width: 96px + root.label-width;
     height: 48px;
-    HorizontalLayout {
-        padding-left: Theme.page-margin;
-        padding-right: Theme.page-margin;
-        ActionButton { text: Strings.previous-page; quiet: true; enabled: root.page > 1; clicked => { root.turn(-1); } }
-        Rectangle { horizontal-stretch: 1; }
-        ActionButton { text: root.page + " / " + root.count; quiet: true; clicked => { root.jump(); } }
-        Rectangle { horizontal-stretch: 1; }
-        ActionButton { text: Strings.next-page; quiet: true; enabled: root.page < root.count; clicked => { root.turn(1); } }
+    IconButton { x: 0px; y: 0px; width: 48px; icon: "back"; label: Strings.page-back; enabled: root.current > 1; clicked => { root.step(-1); } }
+    Rectangle {
+        x: 48px; y: 0px; width: root.label-width; height: parent.height;
+        background: page-touch.pressed ? Theme.ink : Theme.paper;
+        accessible-role: button;
+        accessible-label: root.page-label;
+        accessible-enabled: root.total > 1;
+        page-caption := Text {
+            text: root.page-label; font-family: Theme.ui-font; font-size: 17px;
+            color: page-touch.pressed ? Theme.paper : Theme.ink;
+            horizontal-alignment: center; vertical-alignment: center;
+        }
+        page-touch := PressArea { enabled: root.total > 1; clicked => { root.jump(); } }
     }
+    IconButton { x: parent.width - 48px; y: 0px; width: 48px; icon: "next"; label: Strings.page-forward; enabled: root.current < root.total; clicked => { root.step(1); } }
+}
+
+export component Toast inherits Rectangle {
+    in property <string> message;
+    x: Theme.page-margin;
+    height: 52px;
+    border-width: 2px;
+    border-color: Theme.ink;
+    background: Theme.paper;
+    Text { x: 16px; width: parent.width - 32px; text: root.message; color: Theme.ink; font-family: Theme.ui-font; font-size: 16px; vertical-alignment: center; overflow: elide; }
 }
 
 export component PageHeader inherits Rectangle {
@@ -234,7 +268,7 @@ export component ToggleRow inherits Rectangle {
         }
     }
     Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
-    touch := TouchArea { enabled: root.enabled; pointer-event(event) => { if event.kind == PointerEventKind.down { Theme.refresh("press"); } else if event.kind == PointerEventKind.up { Theme.refresh("release"); } } clicked => { root.toggled(); } }
+    touch := PressArea { enabled: root.enabled; clicked => { root.toggled(); } }
 }
 
 export component Choice inherits Rectangle {
@@ -254,7 +288,7 @@ export component Choice inherits Rectangle {
     accessible-label: root.text;
     accessible-enabled: root.enabled;
     label := Text { text: root.text; color: !root.enabled ? Theme.muted : root.selected || touch.pressed ? Theme.paper : Theme.ink; font-family: Theme.ui-font; font-size: 16px; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
-    touch := TouchArea { enabled: root.enabled; pointer-event(event) => { if event.kind == PointerEventKind.down { Theme.refresh("press"); } else if event.kind == PointerEventKind.up { Theme.refresh("release"); } } clicked => { root.clicked(); } }
+    touch := PressArea { enabled: root.enabled; clicked => { root.clicked(); } }
 }
 
 export component FilterChip inherits Rectangle {
@@ -278,7 +312,7 @@ export component FilterChip inherits Rectangle {
         if !root.enabled: DashedOutline { x: 0px; y: 0px; width: parent.width; height: parent.height; radius: 0px; }
         caption := Text { x: 0px; y: 0px; width: parent.width; height: parent.height; text: root.text; font-family: Theme.ui-font; font-size: root.text-size; font-weight: root.selected ? 700 : 400; color: !root.enabled ? Theme.muted : root.selected || touch.pressed ? Theme.paper : Theme.ink; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
     }
-    touch := TouchArea { enabled: root.enabled; pointer-event(event) => { if event.kind == PointerEventKind.down { Theme.refresh("press"); } else if event.kind == PointerEventKind.up { Theme.refresh("release"); } } clicked => { root.clicked(); } }
+    touch := PressArea { enabled: root.enabled; clicked => { root.clicked(); } }
 }
 
 export struct SegmentedOption { id: string, label: string }
@@ -303,7 +337,7 @@ export component SegmentedControl inherits Rectangle {
             Rectangle { x: 0px; y: 0px; width: parent.width; height: parent.height; border-radius: 0px; background: parent.fill; }
             Text { text: option.label; font-family: Theme.ui-font; font-size: 16px; font-weight: root.value == option.id ? 700 : 400; color: !root.enabled ? Theme.muted : root.value == option.id || touch.pressed ? Theme.paper : Theme.ink; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
             if index > 0: Rectangle { x: 0px; y: 0px; width: 1px; height: parent.height; background: root.enabled ? Theme.ink : Theme.line; }
-            touch := TouchArea { enabled: root.enabled; clicked => { root.chosen(option.id); } }
+            touch := PressArea { enabled: root.enabled; clicked => { root.chosen(option.id); } }
         }
     }
     if root.enabled: Rectangle { x: 0px; y: 0px; width: parent.width; height: parent.height; background: transparent; border-width: 2px; border-color: Theme.ink; border-radius: 0px; }
@@ -426,5 +460,5 @@ export component RadioChoiceRow inherits Rectangle {
         Text { text: root.description; font-family: Theme.ui-font; font-size: 14px; color: touch.pressed ? Theme.paper : Theme.secondary; vertical-alignment: center; }
     }
     Rectangle { x: 0px; y: parent.height - 1px; width: parent.width; height: 1px; background: Theme.line; }
-    touch := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
+    touch := PressArea { enabled: root.enabled; clicked => { root.clicked(); } }
 }

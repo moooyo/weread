@@ -864,7 +864,7 @@ impl App {
                 task_id,
                 completed: _,
                 total: _,
-                title,
+                title: _,
                 waiting: _,
                 blocked: _,
             } => {
@@ -881,9 +881,6 @@ impl App {
                             library.get_status().is_empty()
                                 || library.get_books().row_count() > self.library_page_size()
                         });
-                    if let Some(ui) = self.ui.upgrade() {
-                        ui.global::<ShellModel>().set_dialog_chapter(title.into());
-                    }
                     let task = self.current_download.as_ref().unwrap();
                     let progress = self.store.download_chapter_progress(&task.id)?;
                     // Progress can trail a different worker's durable failure.
@@ -2287,6 +2284,16 @@ impl App {
             shell.set_task_label(
                 download_recovery::chapter_summary_label(completed, total, waiting, blocked).into(),
             );
+            shell.set_dialog_completed(
+                i18n::format(
+                    "download_progress_completed",
+                    &[
+                        ("done", completed.to_string()),
+                        ("total", total.to_string()),
+                    ],
+                )
+                .into(),
+            );
             shell.set_dialog_progress(if total == 0 {
                 0.0
             } else {
@@ -2361,18 +2368,6 @@ impl App {
                                 tile.cached = book.cached_chapters > 0;
                                 state.set_book(tile);
                             }
-                            state.set_summary(
-                                i18n::format(
-                                    "cache_summary",
-                                    &[
-                                        ("progress", (book.progress * 100.0).round().to_string()),
-                                        ("cached", book.cached_chapters.to_string()),
-                                        ("total", book.total_chapters.to_string()),
-                                    ],
-                                )
-                                .into(),
-                            );
-                            state.set_chapter_summary(download_chapter_summary(&book).into());
                             if book.cached_chapters > 0 {
                                 state.set_can_read(true);
                             }
@@ -2407,40 +2402,38 @@ impl App {
                 }
                 Route::Reader(id, _) => {
                     if let Some(changes) = changes.get(id) {
-                        if let Some(book) = self.store.book_metadata_by_id(id)? {
-                            let state = ui.global::<ReaderModel>();
-                            state.set_chapter_summary(download_chapter_summary(&book).into());
-                            let rows = state.get_chapters();
-                            for index in 0..rows.row_count() {
-                                if let Some(mut row) = rows
-                                    .row_data(index)
-                                    .filter(|row| changes.chapters.contains_key(row.id.as_str()))
-                                {
-                                    let content_status = changes.chapters[row.id.as_str()];
-                                    row.cached = content_status == ContentStatus::Full;
-                                    let label = match content_status {
-                                        ContentStatus::Full => String::new(),
-                                        ContentStatus::Preview => tr("content_preview"),
-                                        ContentStatus::Locked => tr("content_locked"),
-                                        ContentStatus::Unknown => tr("content_unverified"),
-                                    };
-                                    row.meta = if row.current {
-                                        if label.is_empty() {
-                                            tr("current_chapter")
-                                        } else {
-                                            format!("{} · {label}", tr("current_chapter"))
-                                        }
+                        let state = ui.global::<ReaderModel>();
+                        let rows = state.get_chapters();
+                        for index in 0..rows.row_count() {
+                            if let Some(mut row) = rows
+                                .row_data(index)
+                                .filter(|row| changes.chapters.contains_key(row.id.as_str()))
+                            {
+                                let content_status = changes.chapters[row.id.as_str()];
+                                row.cached = content_status == ContentStatus::Full;
+                                let label = match content_status {
+                                    ContentStatus::Full => String::new(),
+                                    ContentStatus::Preview => tr("content_preview"),
+                                    ContentStatus::Locked => tr("content_locked"),
+                                    ContentStatus::Unknown => tr("content_unverified"),
+                                };
+                                row.meta = if row.current {
+                                    if label.is_empty() {
+                                        tr("current_chapter")
                                     } else {
-                                        label
+                                        format!("{} · {label}", tr("current_chapter"))
                                     }
-                                    .into();
-                                    rows.set_row_data(index, row);
+                                } else {
+                                    label
                                 }
+                                .into();
+                                rows.set_row_data(index, row);
                             }
                         }
                     }
                 }
-                Route::Settings if matches!(self.settings_subpage.as_str(), "" | "storage") => {
+                // Only the Downloads tab shows the storage total.
+                Route::Settings if self.settings_subpage == "storage" => {
                     self.render_settings()?;
                 }
                 _ => {}
@@ -2578,16 +2571,6 @@ impl App {
             ui.global::<ShellModel>().set_task_label("".into());
         }
     }
-}
-
-fn download_chapter_summary(book: &BookMetadata) -> String {
-    i18n::format(
-        "chapter_summary",
-        &[
-            ("total", book.total_chapters.to_string()),
-            ("cached", book.cached_chapters.to_string()),
-        ],
-    )
 }
 
 fn remap_reader_history(history: &mut [Route], book_id: &str, reindex: &CatalogReindex<'_>) {
@@ -3174,8 +3157,8 @@ mod tests {
                         .iter()
                         .map(|row| row.id.to_string())
                         .collect();
-                    assert_eq!(visible.len(), 10);
-                    assert_eq!(visible[0], "book-10");
+                    assert_eq!(visible.len(), 14);
+                    assert_eq!(visible[0], "book-14");
                     assert!(app.pending_covers.is_empty());
                     assert_eq!(app.deferred_cover_refill, Some(Route::Library));
                     release_unpolled_cover_work(&runtime, &mut app, capacity)?;
@@ -3193,7 +3176,7 @@ mod tests {
                         app.pending_covers,
                         BTreeSet::from([visible[0].clone(), visible[1].clone()])
                     );
-                    assert!(!app.pending_covers.contains("book-15"));
+                    assert!(!app.pending_covers.contains("book-13"));
                     assert_eq!(app.jobs.cover_capacity(), 0);
                 }
                 "detail" => {
@@ -3322,7 +3305,7 @@ mod tests {
                         .iter()
                         .map(|row| row.id.to_string())
                         .collect();
-                    assert_eq!(visible[0], "short-7");
+                    assert_eq!(visible[0], "short-8");
                     release_unpolled_cover_work(&runtime, &mut app, capacity)?;
                     app.tick()?;
                     assert_eq!(

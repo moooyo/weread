@@ -19,6 +19,7 @@ const OWNERS: usize = 12;
 const COPIES: usize = 3;
 const ARTICLES: usize = 11;
 const TITLE_REPEAT: usize = 256;
+const OFFLINE_PAGE_SIZE: usize = 8;
 
 struct ProjectionUi;
 
@@ -334,7 +335,7 @@ fn row_source_bytes(ui: &AppWindow) -> usize {
         .sum()
 }
 
-fn view_snapshot(ui: &AppWindow) -> (Vec<(String, String, String, i32, bool)>, String, i32) {
+fn view_snapshot(ui: &AppWindow) -> (Vec<(String, String, String, i32, bool)>, String, i32, i32) {
     let global = ui.global::<AuxiliaryModel>();
     (
         rows(ui)
@@ -349,8 +350,9 @@ fn view_snapshot(ui: &AppWindow) -> (Vec<(String, String, String, i32, bool)>, S
                 )
             })
             .collect(),
-        global.get_publications_subtitle().to_string(),
+        global.get_publications_title().to_string(),
         global.get_publications_page(),
+        global.get_publications_page_count(),
     )
 }
 
@@ -377,10 +379,6 @@ fn assert_retained(state: &App) -> Result<()> {
     Ok(())
 }
 
-fn total_unread() -> usize {
-    (0..OWNERS).filter(|account| account % 3 != 0).count() * (ARTICLES - 1)
-}
-
 fn duplicate_owners() -> Result<()> {
     let fixture = Fixture::new()?;
     let cached = fixture.cache_snapshot()?;
@@ -389,7 +387,7 @@ fn duplicate_owners() -> Result<()> {
         let mut state = instance.app.borrow_mut();
         state.dispatch("shell", "tab", "mp")?;
         let visible = rows(&instance.ui).len();
-        assert_eq!(visible, 7);
+        assert_eq!(visible, OFFLINE_PAGE_SIZE);
         let stats = state.publication_stats.get();
         assert_eq!(stats.admitted_account_records, OWNERS * COPIES);
         assert_eq!(stats.owner_summaries, OWNERS);
@@ -407,25 +405,11 @@ fn duplicate_owners() -> Result<()> {
             assert_eq!(row.title.as_str(), account_name(index));
             assert_eq!(row.subtitle.as_str(), article_title(index, ARTICLES - 1));
         }
-        let expected = format!(
-            "{} · {}",
-            i18n::format(
-                "mp_summary",
-                &[
-                    ("count", OWNERS.to_string()),
-                    ("unread", total_unread().to_string())
-                ]
-            ),
-            tr("local_unread")
-        );
-        assert_eq!(
-            instance
-                .ui
-                .global::<AuxiliaryModel>()
-                .get_publications_subtitle()
-                .as_str(),
-            expected
-        );
+        let global = instance.ui.global::<AuxiliaryModel>();
+        assert_eq!(global.get_publications_title(), tr("publications"));
+        assert_eq!(global.get_publications_page(), 1);
+        assert_eq!(global.get_publications_page_count(), 2);
+        assert_eq!(global.get_publications_status(), tr("offline_banner"));
         assert_retained(&state)?;
         // A new render gets a new borrowed projection, with no cross-account
         // memo or repeated work proportional to the old duplicate count.
@@ -463,10 +447,13 @@ fn visible_rows() -> Result<()> {
         state.dispatch("auxiliary", "mp.page", "1")?;
         assert_eq!(
             row_ids(&instance.ui),
-            (7..OWNERS).map(owner).collect::<Vec<_>>()
+            (OFFLINE_PAGE_SIZE..OWNERS).map(owner).collect::<Vec<_>>()
         );
         let second = state.publication_stats.get();
-        assert_eq!(second.account_rows - first.account_rows, OWNERS - 7);
+        assert_eq!(
+            second.account_rows - first.account_rows,
+            OWNERS - OFFLINE_PAGE_SIZE
+        );
         assert_eq!(
             second.row_source_bytes - first.row_source_bytes,
             row_source_bytes(&instance.ui)
@@ -475,14 +462,17 @@ fn visible_rows() -> Result<()> {
         // descriptors before copying any title or author from the old cache.
         state.dispatch("auxiliary", "mp.account", &owner(4))?;
         let article_first = state.publication_stats.get();
-        assert_eq!(article_first.article_rows - second.article_rows, 7);
+        assert_eq!(
+            article_first.article_rows - second.article_rows,
+            OFFLINE_PAGE_SIZE
+        );
         assert_eq!(
             article_first.row_source_bytes - second.row_source_bytes,
             row_source_bytes(&instance.ui)
         );
         assert_eq!(
             row_ids(&instance.ui),
-            (4..ARTICLES)
+            (ARTICLES - OFFLINE_PAGE_SIZE..ARTICLES)
                 .rev()
                 .map(|index| article_id(4, index))
                 .collect::<Vec<_>>()
@@ -491,12 +481,15 @@ fn visible_rows() -> Result<()> {
         let article_second = state.publication_stats.get();
         assert_eq!(
             row_ids(&instance.ui),
-            (0..4)
+            (0..ARTICLES - OFFLINE_PAGE_SIZE)
                 .rev()
                 .map(|index| article_id(4, index))
                 .collect::<Vec<_>>()
         );
-        assert_eq!(article_second.article_rows - article_first.article_rows, 4);
+        assert_eq!(
+            article_second.article_rows - article_first.article_rows,
+            ARTICLES - OFFLINE_PAGE_SIZE
+        );
         assert_eq!(
             article_second.row_source_bytes - article_first.row_source_bytes,
             row_source_bytes(&instance.ui)
@@ -521,15 +514,29 @@ fn filters_and_unread() -> Result<()> {
         state.dispatch("auxiliary", "mp.sort", "name")?;
         assert_eq!(
             row_ids(&instance.ui),
-            (5..OWNERS).rev().map(owner).collect::<Vec<_>>()
+            (OWNERS - OFFLINE_PAGE_SIZE..OWNERS)
+                .rev()
+                .map(owner)
+                .collect::<Vec<_>>()
         );
         state.dispatch("auxiliary", "mp.sort", "unread")?;
         let unread = (0..OWNERS)
             .filter(|index| index % 3 != 0)
-            .take(7)
+            .take(OFFLINE_PAGE_SIZE)
             .map(owner)
             .collect::<Vec<_>>();
         assert_eq!(row_ids(&instance.ui), unread);
+        let global = instance.ui.global::<AuxiliaryModel>();
+        assert_eq!(global.get_publications_page(), 1);
+        assert_eq!(global.get_publications_page_count(), 1);
+        state.dispatch("auxiliary", "mp.jump", "")?;
+        assert!(
+            instance
+                .ui
+                .global::<ShellModel>()
+                .get_dialog_kind()
+                .is_empty()
+        );
         state.dispatch("auxiliary", "mp.sort", "recent")?;
         state.dispatch("auxiliary", "mp.edit-query", "Ignored duplicate")?;
         assert!(rows(&instance.ui).is_empty());
@@ -599,24 +606,15 @@ fn account_switch() -> Result<()> {
         assert_eq!(switched.owner_summaries - before.owner_summaries, OWNERS);
         assert_eq!(switched.presence_reads - before.presence_reads, ARTICLES);
         state.dispatch("auxiliary", "mp.page", "1")?;
-        for row in rows(&instance.ui) {
+        let global = instance.ui.global::<AuxiliaryModel>();
+        let rows = rows(&instance.ui);
+        assert_eq!(global.get_publications_page(), 2);
+        assert_eq!(global.get_publications_page_count(), 2);
+        assert_eq!(rows.len(), ARTICLES - OFFLINE_PAGE_SIZE);
+        assert!(rows.iter().any(|row| row.id == article_id(8, 2)));
+        for row in rows {
             assert_eq!(row.cached, row.id.as_str() != article_id(8, 2));
         }
-        let summary = i18n::format(
-            "articles_summary",
-            &[
-                ("count", ARTICLES.to_string()),
-                ("cached", (ARTICLES - 1).to_string()),
-            ],
-        );
-        assert_eq!(
-            instance
-                .ui
-                .global::<AuxiliaryModel>()
-                .get_publications_subtitle()
-                .as_str(),
-            summary
-        );
         assert_retained(&state)?;
     }
     assert_eq!(fixture.cache_snapshot()?, cached);
@@ -710,7 +708,10 @@ fn rejection_boundaries() -> Result<()> {
         })?;
         assert_eq!(view_snapshot(&instance.ui), original);
         assert_eq!(state.publication_stats.get().rejections, 0);
-        assert_eq!(state.publication_stats.get().account_rows, 7);
+        assert_eq!(
+            state.publication_stats.get().account_rows,
+            OFFLINE_PAGE_SIZE
+        );
         state
             .publication_stats
             .set(PublicationProjectionStats::default());
@@ -751,7 +752,10 @@ fn rejection_boundaries() -> Result<()> {
             ..Default::default()
         })?;
         assert_eq!(state.publication_stats.get().rejections, 0);
-        assert_eq!(state.publication_stats.get().article_rows, 7);
+        assert_eq!(
+            state.publication_stats.get().article_rows,
+            OFFLINE_PAGE_SIZE
+        );
         assert_eq!(view_snapshot(&instance.ui), articles);
         assert_retained(&state)?;
     }

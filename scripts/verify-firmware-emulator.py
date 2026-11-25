@@ -2,9 +2,9 @@
 """Run pinned Kindle firmware-emulator cases on the Linux verification host."""
 
 import argparse
-import hashlib
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 import threading
@@ -24,7 +24,8 @@ PROFILES = {
         "library_pill": (100, 1580, 212, 1640),
         "settings_pill": (1060, 1580, 1176, 1640),
         "settings_tap": (1116, 1616),
-        "exit_tap": (170, 1135),
+        # Exit sits at the right end of the row above the navigation.
+        "exit_tap": (1104, 1504),
         "confirm_tap": (1084, 998),
         "detail_tap": (222, 620),
         "reader_tap": (360, 520),
@@ -38,13 +39,13 @@ PROFILES = {
         "library_pill": (174, 2350, 286, 2410),
         "settings_pill": (1576, 2350, 1688, 2410),
         "settings_tap": (1632, 2380),
-        "exit_tap": (200, 1136),
+        "exit_tap": (1668, 2256),
         "confirm_tap": (1362, 1388),
         "detail_tap": (220, 600),
-        "reader_tap": (784, 640),
+        # Scribe Detail retains the primary action in its independent left pane.
+        "reader_tap": (300, 1320),
     },
 }
-LOGS = "/mnt/us/weread/data/logs"
 LOCK = "/tmp/weread-launcher.lock"
 
 
@@ -52,20 +53,41 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--emulator-root", type=Path, required=True)
     parser.add_argument("--guest-ssh", type=Path, required=True)
-    parser.add_argument("--binary", type=Path, required=True)
+    parser.add_argument("--binary", type=Path, required=True, help="Host path of the deployed candidate")
+    parser.add_argument("--deployed-name", help="Expected immutable guest ELF basename from the deployment record")
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--guest-home", default="/mnt/us/weread",
+                        help="Absolute application home in this disposable guest")
+    parser.add_argument("--guest-entry", default="/mnt/us/documents/weread.sh",
+                        help="Absolute document launcher path in this disposable guest")
     parser.add_argument("--machine", default="weread-pw6-5201")
     parser.add_argument("--device-profile", choices=tuple(PROFILES), default="pw6")
-    parser.add_argument("--case", choices=("all", *CASES), default="all")
+    parser.add_argument("--case", choices=("all", *CASES, "walkthrough"), default="all")
+    parser.add_argument("--only", help="Comma-separated walkthrough groups; requires --case walkthrough")
     parser.add_argument("--sample-memory", action="store_true")
     args = parser.parse_args()
+    if args.only and args.case != "walkthrough":
+        parser.error("--only requires --case walkthrough")
+    if args.sample_memory and args.case == "walkthrough":
+        parser.error("--sample-memory is for the launcher smoke cases")
+    if not args.binary.is_file():
+        parser.error("--binary must identify the deployed host executable")
+    for path in (args.guest_home, args.guest_entry):
+        if not re.fullmatch(r"/[A-Za-z0-9_./-]+", path) or ".." in Path(path).parts:
+            parser.error("guest paths must be absolute with no parent traversal")
+    logs = f"{args.guest_home}/data/logs"
+    entry = [str(args.guest_ssh), "env", f"WEREAD_HOME={args.guest_home}",
+             "sh", args.guest_entry, "--detached"]
     profile = PROFILES[args.device_profile]
+    args.output_dir = args.output_dir.resolve()
     args.output_dir.mkdir(parents=True, exist_ok=True)
     report = {
+        "machine": args.machine,
         "model": profile["model"],
         "firmware": "5.20.1",
         "experimental_display": profile["experimental_display"],
-        "binary_sha256": hashlib.sha256(args.binary.read_bytes()).hexdigest(),
+        "host_binary": str(args.binary.resolve()),
+        "binary_bytes": args.binary.stat().st_size,
         "cases": [],
     }
 
@@ -77,7 +99,7 @@ def main():
 
     def guest(*command, check=True, data=None):
         return subprocess.run(
-            [str(args.guest_ssh), *command], input=data, capture_output=True,
+            [str(args.guest_ssh), *map(str, command)], input=data, capture_output=True,
             check=check, timeout=20,
         )
 
@@ -141,11 +163,33 @@ def main():
     firmware = guest("cat", "/etc/prettyversion.txt").stdout.decode().strip()
     assert firmware.startswith("Kindle 5.20.1 "), firmware
     report["firmware_identity"] = firmware
-    binary_name = f"weread-{report['binary_sha256'][:12]}"
-    configured_binary = guest("cat", f"{LOGS}/test-binary").stdout.decode().strip()
-    assert configured_binary == binary_name, configured_binary
-    guest_hash = guest("sha256sum", f"/mnt/us/weread/app/{binary_name}").stdout.decode().split()[0]
-    assert guest_hash == report["binary_sha256"], guest_hash
+    binary_name = guest("cat", f"{logs}/test-binary").stdout.decode().strip()
+    assert re.fullmatch(r"weread-[0-9a-f]{12}", binary_name), binary_name
+    if args.deployed_name is not None:
+        assert binary_name == args.deployed_name, binary_name
+    guest_bytes = int(guest("stat", "-c", "%s", f"{args.guest_home}/app/{binary_name}").stdout.strip())
+    assert guest_bytes == report["binary_bytes"], (guest_bytes, report["binary_bytes"])
+    report["deployed_binary"] = binary_name
+
+    if args.case == "walkthrough":
+        from firmware_walkthrough import Walkthrough
+
+        directory = args.output_dir / "walkthrough"
+        directory.mkdir(exist_ok=False)
+        record = {"case": "walkthrough", "result": "running"}
+        report["cases"].append(record)
+        save_report()
+        try:
+            walk = Walkthrough(args, profile, directory, record, guest, qmp, capture, restored, read_pid, logs, LOCK, entry)
+            record["result"] = "passed" if walk.run() else "failed"
+        except Exception as error:
+            record["result"] = "failed"
+            record["error"] = str(error)
+            raise
+        finally:
+            save_report()
+        print(json.dumps({"report": str(args.output_dir / "report.json"), "result": record["result"]}), flush=True)
+        return 0 if record["result"] == "passed" else 1
 
     for case in CASES if args.case == "all" else (args.case,):
         directory = args.output_dir / case
@@ -161,20 +205,20 @@ def main():
         started = time.monotonic()
         try:
             guest("test", "!", "-d", LOCK)
-            guest("tee", f"{LOGS}/test-case", data=(case + "\n").encode())
-            guest("tee", f"{LOGS}/application.log", data=b"")
-            guest("rm", "-f", f"{LOGS}/final-native.png",
-                  f"{LOGS}/final-native.metadata.json", f"{LOGS}/native.pid")
+            guest("tee", f"{logs}/test-case", data=(case + "\n").encode())
+            guest("tee", f"{logs}/application.log", data=b"")
+            guest("rm", "-f", f"{logs}/final-native.png",
+                  f"{logs}/final-native.metadata.json", f"{logs}/native.pid")
             with (directory / "launcher.log").open("wb") as output:
                 process = subprocess.Popen(
-                    [str(args.guest_ssh), "sh", "/mnt/us/documents/weread.sh", "--detached"],
+                    entry,
                     stdout=output, stderr=subprocess.STDOUT,
                 )
             if args.sample_memory:
                 for _ in range(90):
                     if process.poll() is not None:
                         raise RuntimeError(f"Application exited before PID sampling: {process.returncode}")
-                    result = guest("cat", f"{LOGS}/native.pid", check=False)
+                    result = guest("cat", f"{logs}/native.pid", check=False)
                     pid = result.stdout.decode().strip()
                     if result.returncode == 0 and pid.isdecimal() and int(pid) > 1:
                         memory_thread = threading.Thread(
@@ -214,7 +258,7 @@ def main():
                     qmp("tap", *profile["reader_tap"], "--hold", 0.1)
                     time.sleep(1)
                     capture(directory, "reader")
-                    guest("kill", "-TERM", read_pid(f"{LOGS}/native.pid"))
+                    guest("kill", "-TERM", read_pid(f"{logs}/native.pid"))
                 else:
                     guest("kill", "-TERM", read_pid(f"{LOCK}/pid"))
 
@@ -225,7 +269,7 @@ def main():
             time.sleep(1)
             capture(directory, "restored-home")
             if case != "recovery":
-                raw_metadata = guest("cat", f"{LOGS}/final-native.metadata.json").stdout
+                raw_metadata = guest("cat", f"{logs}/final-native.metadata.json").stdout
                 (directory / "native.metadata.json").write_bytes(raw_metadata)
                 metadata = json.loads(raw_metadata)
                 expected_route = {"interactive": "settings", "reader": "reader"}.get(case, "library")
@@ -236,7 +280,7 @@ def main():
                 assert metadata["logical_size"] == profile["logical_size"], metadata
                 assert metadata["window_size"] == metadata["snapshot_size"] == list(profile["physical_size"]), metadata
                 assert metadata["scale_factor"] == 2, metadata
-                (directory / "native.png").write_bytes(guest("cat", f"{LOGS}/final-native.png").stdout)
+                (directory / "native.png").write_bytes(guest("cat", f"{logs}/final-native.png").stdout)
                 record["metadata"] = metadata
             record["result"] = "passed"
         except Exception as error:
@@ -266,11 +310,12 @@ def main():
                     "coverage": "Periodic /proc sampling; not an exhaustive peak measurement",
                 }
             record["elapsed_seconds"] = round(time.monotonic() - started, 3)
-            result = guest("cat", f"{LOGS}/application.log", check=False)
+            result = guest("cat", f"{logs}/application.log", check=False)
             (directory / "application.log").write_bytes(result.stdout + result.stderr)
             save_report()
             print(json.dumps(record), flush=True)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

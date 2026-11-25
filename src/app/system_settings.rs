@@ -114,7 +114,6 @@ struct SavedReturnContext {
     detail_reviews: Vec<RemoteReview>,
     detail_review_latest: bool,
     settings_subpage: String,
-    settings_page: usize,
     publication_account: Option<String>,
     publication_query: String,
     publication_sort: String,
@@ -366,7 +365,6 @@ impl App {
             detail_reviews: self.reviews.clone(),
             detail_review_latest: self.review_latest,
             settings_subpage: self.settings_subpage.clone(),
-            settings_page: self.settings_page,
             publication_account: self.mp_account.clone(),
             publication_query: self.mp_query.clone(),
             publication_sort: self.mp_sort.clone(),
@@ -429,7 +427,6 @@ impl App {
         self.library_page = saved.library_page;
         self.library_sort = saved.library_sort;
         self.settings_subpage = saved.settings_subpage;
-        self.settings_page = saved.settings_page;
         self.mp_account = saved.publication_account;
         self.mp_query = saved.publication_query;
         self.mp_sort = saved.publication_sort;
@@ -505,8 +502,7 @@ mod tests {
             detail_page: 1,
             detail_reviews: vec![],
             detail_review_latest: true,
-            settings_subpage: "device".into(),
-            settings_page: 0,
+            settings_subpage: "storage".into(),
             publication_account: None,
             publication_query: String::new(),
             publication_sort: "recent".into(),

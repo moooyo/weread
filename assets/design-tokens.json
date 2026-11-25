@@ -375,7 +375,7 @@
         "perPage": 6
       },
       "libraryList": {
-        "perPage": 7
+        "perPage": 8
       },
       "mpAccounts": {
         "perPage": 7
@@ -398,7 +398,7 @@
         "perPage": 15
       },
       "libraryList": {
-        "perPage": 10
+        "perPage": 13
       },
       "mpAccounts": {
         "perPage": 9

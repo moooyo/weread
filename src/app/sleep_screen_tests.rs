@@ -274,7 +274,7 @@ fn sleep_cover_setting_is_enabled_saved_and_refreshes_preparation() -> Result<()
     {
         let mut app = fixture.app();
         set_book_metadata(&mut app, "")?;
-        app.settings_subpage = "device".into();
+        app.settings_subpage = "display".into();
         app.render_settings()?;
         let settings = fixture.ui().global::<AuxiliaryModel>();
         let row = settings

@@ -287,6 +287,13 @@ fn run_background_checkpoints(
         ui.global::<ShellModel>().get_task_label()
     );
     assert!(!ui.global::<LibraryModel>().get_status().is_empty());
+    assert_eq!(
+        ui.global::<ShellModel>().get_dialog_completed().as_str(),
+        i18n::format(
+            "download_progress_completed",
+            &[("done", "2".into()), ("total", "3".into())],
+        )
+    );
     assert_eq!(cover_accesses(&access)?, 0);
 
     let due = state.download_ui_refresh_at;
@@ -316,7 +323,10 @@ fn run_detail_checkpoint(ui: &AppWindow, application: &Rc<RefCell<App>>, _: &Pat
     seed(&mut state, 2)?;
     state.navigate(Route::Detail("fixture-book".into()), false)?;
     let access = cover_access_spy(&mut state)?;
-    let original_rows = ui.global::<DetailModel>().get_chapters();
+    let detail = ui.global::<DetailModel>();
+    let original_rows = detail.get_chapters();
+    let summary = detail.get_summary();
+    assert_eq!(summary.as_str(), tr("read_not_started"));
     let task = begin_task(&mut state, vec![0, 1], false)?;
     let (packet, mut reply) = packet_event(
         &state,
@@ -332,7 +342,8 @@ fn run_detail_checkpoint(ui: &AppWindow, application: &Rc<RefCell<App>>, _: &Pat
     assert!(original_rows.row_data(0).unwrap().cached);
     assert!(ui.global::<DetailModel>().get_book().cached);
     assert!(ui.global::<DetailModel>().get_book().has_cover);
-    assert!(ui.global::<DetailModel>().get_can_read());
+    assert!(detail.get_can_read());
+    assert_eq!(detail.get_summary(), summary);
     assert_eq!(state.store.task(&task.id)?.unwrap().next_index, 1);
     assert_eq!(cover_accesses(&access)?, 0);
     Ok(())
@@ -814,8 +825,8 @@ fn a_book_first_cached_in_a_checkpoint_batch_enters_the_downloaded_filter() -> R
 fn run_list_retry_layout(ui: &AppWindow, application: &Rc<RefCell<App>>, _: &Path) -> Result<()> {
     let mut state = application.borrow_mut();
     seed(&mut state, 2)?;
-    state.profile = DeviceProfile::Paperwhite5;
-    state.platform = Arc::new(Platform::new(DeviceProfile::Paperwhite5, false)?);
+    state.profile = DeviceProfile::Paperwhite6;
+    state.platform = Arc::new(Platform::new(DeviceProfile::Paperwhite6, false)?);
     crate::platform::configure_window(ui.window(), &state.platform)?;
     state.prefs.view_mode = "list".into();
     state.online = true;
@@ -826,7 +837,7 @@ fn run_list_retry_layout(ui: &AppWindow, application: &Rc<RefCell<App>>, _: &Pat
         ))?;
     }
     let access = cover_access_spy(&mut state)?;
-    assert_eq!(ui.global::<LibraryModel>().get_books().row_count(), 7);
+    assert_eq!(ui.global::<LibraryModel>().get_books().row_count(), 9);
     assert_eq!(ui.global::<LibraryModel>().get_page_count(), 2);
     let task = begin_task(&mut state, vec![0, 1], false)?;
     // A timer-driven retry sets the shell label after the previous library render.
@@ -853,8 +864,8 @@ fn run_list_retry_layout(ui: &AppWindow, application: &Rc<RefCell<App>>, _: &Pat
         },
     );
     assert!(!state.handle_job(progress)?);
-    assert_eq!(ui.global::<LibraryModel>().get_books().row_count(), 6);
-    assert_eq!(ui.global::<LibraryModel>().get_page_count(), 3);
+    assert_eq!(ui.global::<LibraryModel>().get_books().row_count(), 8);
+    assert_eq!(ui.global::<LibraryModel>().get_page_count(), 2);
     let first_accesses = cover_accesses(&access)?;
     assert!(first_accesses > 0);
     let progress = event(
@@ -870,7 +881,7 @@ fn run_list_retry_layout(ui: &AppWindow, application: &Rc<RefCell<App>>, _: &Pat
     );
     assert!(!state.handle_job(progress)?);
     assert_eq!(cover_accesses(&access)?, first_accesses);
-    assert_eq!(ui.global::<LibraryModel>().get_books().row_count(), 6);
+    assert_eq!(ui.global::<LibraryModel>().get_books().row_count(), 8);
     Ok(())
 }
 

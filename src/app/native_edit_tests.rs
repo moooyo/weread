@@ -219,6 +219,18 @@ impl Fixture {
         self.ui.as_ref().unwrap()
     }
 
+    fn open_search_jump(&self) {
+        // The numeric editor tests start from a paged result model. Single-page
+        // jump activation is tested independently by the Search projection tests.
+        let mut state = self.app();
+        state.search_results = (0..24)
+            .map(|index| BookMetadata::from(&Book::new(format!("jump-{index}"), "Jump fixture")))
+            .collect();
+        state
+            .search_action("jump", "")
+            .expect("Open the Search jump dialog");
+    }
+
     fn paste_text(&self, text: &str) {
         self.clipboard.borrow_mut().default = Some(text.into());
     }
@@ -783,10 +795,7 @@ fn genuine_native_search_note_and_book_switches_apply_the_current_input_scope() 
 fn numeric_dialog_scope() -> Result<()> {
     let query = "q".repeat(SEARCH_INPUT_SCALARS);
     let fixture = Fixture::new(&query)?;
-    fixture
-        .ui()
-        .global::<SearchModel>()
-        .invoke_event("jump".into(), "".into());
+    fixture.open_search_jump();
     let editor = NativeEditor::find(fixture.ui().window(), EditorKind::Numeric);
     editor.select(0..editor.text().len());
     fixture.paste_text("42");
@@ -1422,10 +1431,7 @@ fn install_jump_limits(fixture: &Fixture, limits: JumpEditLimits) {
 
 fn jump_low_limits() -> Result<()> {
     let fixture = Fixture::new("Jump draft")?;
-    fixture
-        .ui()
-        .global::<SearchModel>()
-        .invoke_event("jump".into(), "".into());
+    fixture.open_search_jump();
     install_jump_limits(
         &fixture,
         JumpEditLimits {
@@ -1530,10 +1536,7 @@ fn genuine_jump_low_quota_preserves_paste_ime_undo_and_closed_dialog_context() -
 
 fn jump_production_limits() -> Result<()> {
     let fixture = Fixture::new("Jump draft")?;
-    fixture
-        .ui()
-        .global::<SearchModel>()
-        .invoke_event("jump".into(), "".into());
+    fixture.open_search_jump();
     let editor = NativeEditor::find(fixture.ui().window(), EditorKind::Numeric);
     let leading = format!("{}1", "0".repeat(190));
     assert!(leading.len() > 128 && leading.len() < JUMP_EDIT_LIMITS.scalars);

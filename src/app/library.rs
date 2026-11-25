@@ -266,6 +266,47 @@ fn detail_metadata_text(metadata: Option<&serde_json::Value>, key: &str) -> Stri
         .unwrap_or_else(|| tr("metadata_unavailable"))
 }
 
+const SCRIBE_INTRO_WIDTH: f32 = 256.0;
+const SCRIBE_INTRO_DIALOG_WIDTH: u32 = 580;
+const INTRO_DIALOG_HORIZONTAL_PADDING: u32 = 48;
+
+fn introduction_lines(
+    text: &str,
+    width: f32,
+    font_size: f32,
+    line_height: f32,
+    metrics: &TextMetrics,
+) -> ModelRc<IntroductionLine> {
+    // The bounded sidebar is always measured. A very large full introduction
+    // keeps native wrapping rather than creating a Slint item for each line.
+    if text.is_empty() || text.len() > 32 * 1024 {
+        return ModelRc::default();
+    }
+    let layout = crate::reader::Layout {
+        width,
+        height: 1024.0,
+        font_size,
+        line_height,
+        indent: 0,
+        paragraph_gap: 0.0,
+        justify: true,
+    };
+    match Paginator::try_new(text, &layout, metrics) {
+        Ok(paginator) => model(
+            paginator
+                .pages
+                .into_iter()
+                .flat_map(|page| page.lines)
+                .map(|line| IntroductionLine {
+                    letter_spacing: line.letter_spacing(&layout, metrics),
+                    text: line.text.into(),
+                })
+                .collect(),
+        ),
+        Err(_) => ModelRc::default(),
+    }
+}
+
 fn detail_date(timestamp: i64) -> String {
     (timestamp > 0)
         .then(|| chrono::DateTime::from_timestamp(timestamp, 0))
@@ -909,14 +950,13 @@ impl App {
                 .is_some_and(|ui| !ui.global::<ShellModel>().get_task_label().is_empty());
         let (_, height) = self.platform.logical_viewport_size();
         let navigation = if self.profile.is_scribe() { 76 } else { 64 };
+        // The pager shares the title/sort row. The status bar carries the
+        // offline state, so only an actual shelf notice takes another row.
         let available = height.saturating_sub(
             self.app_status_bar_height()
                 + navigation
                 + 52
-                + 52
                 + 48
-                + 48
-                + if self.online { 0 } else { 36 }
                 + if self.download_notice_visible() {
                     48
                 } else if has_status {
@@ -997,10 +1037,6 @@ impl App {
             "select" => {
                 self.selecting_books = !self.selecting_books;
                 self.selected_books.clear();
-                if self.selecting_books {
-                    self.prefs.view_mode = "cover".into();
-                    self.library_page = 0;
-                }
             }
             "book" => {
                 if self.selecting_books {
@@ -1035,10 +1071,6 @@ impl App {
                 );
             }
             "jump" => self.open_jump("library", self.library_page + 1),
-            "login" => {
-                self.navigate(Route::Login, true)?;
-                self.begin_login();
-            }
             "import" => {
                 self.scan_imports()?;
             }
@@ -1075,6 +1107,7 @@ impl App {
         };
         self.detail_id = id.into();
         if changed {
+            self.close_detail_introduction();
             self.review_context = None;
             self.detail_tab = "toc".into();
             self.selecting_chapters = false;
@@ -1120,9 +1153,9 @@ impl App {
         };
         let book = snapshot.book;
         let introduction = snapshot.introduction;
-        // The fixed Scribe sidebar receives only a bounded text prefix. Full
-        // introduction and publisher metadata remain exclusive to that tab.
-        let (intro_preview, intro_available) = if self.profile.is_scribe() {
+        // The always-visible Scribe sidebar does not load the full description.
+        // The full-text action and the Paperwhite Introduction tab load it on demand.
+        let (intro_preview, intro_available, intro_prefix_truncated) = if self.profile.is_scribe() {
             match self.store.book_introduction_preview(&book.id) {
                 Ok(Some(preview)) => {
                     // Empty paragraphs can occupy the elided final line without
@@ -1154,9 +1187,9 @@ impl App {
                     } else {
                         compact
                     };
-                    (text, available)
+                    (text, available, preview.has_more)
                 }
-                Ok(None) => (String::new(), false),
+                Ok(None) => (String::new(), false, false),
                 Err(error)
                     if error
                         .downcast_ref::<crate::store::BookMetadataLimit>()
@@ -1165,12 +1198,12 @@ impl App {
                             .downcast_ref::<crate::store::BookMetadataUnavailable>()
                             .is_some() =>
                 {
-                    (tr("introduction_unavailable"), false)
+                    (tr("introduction_unavailable"), false, false)
                 }
                 Err(error) => return Err(error),
             }
         } else {
-            (String::new(), false)
+            (String::new(), false, false)
         };
         let state = ui.global::<DetailModel>();
         let metadata = self.store.chapter_metadata_with_presence(&book.id)?;
@@ -1203,37 +1236,35 @@ impl App {
         let annotation_count = self.store.annotation_count(&book.id)?;
         state.set_book(self.book_tile(&book, 0, 0));
         state.set_author(book.author.clone().into());
+        // No rating source exists yet; show the known category instead of a placeholder.
         state.set_rating(
-            if self.profile.is_scribe() && !book.category.trim().is_empty() {
-                format!("{} · {}", tr("rating_unavailable"), book.category)
+            if self.profile.is_scribe() {
+                book.category.trim().to_string()
             } else {
-                tr("rating_unavailable")
+                String::new()
             }
             .into(),
         );
         state.set_summary(
-            i18n::format(
-                "cache_summary",
-                &[
-                    ("progress", (book.progress * 100.0).round().to_string()),
-                    ("cached", book.cached_chapters.to_string()),
-                    ("total", book.total_chapters.to_string()),
-                ],
-            )
+            if book.finished || book.progress >= 1.0 {
+                tr("read_finished")
+            } else if book.progress > 0.0 {
+                format!("{} {:.0}%", tr("read_to"), book.progress * 100.0)
+            } else {
+                tr("read_not_started")
+            }
             .into(),
         );
-        state.set_chapter_summary(
-            i18n::format(
-                "chapter_summary",
-                &[
-                    ("total", book.total_chapters.to_string()),
-                    ("cached", book.cached_chapters.to_string()),
-                ],
-            )
-            .into(),
-        );
+        state.set_intro_preview_lines(introduction_lines(
+            &intro_preview,
+            SCRIBE_INTRO_WIDTH,
+            18.0,
+            1.7,
+            &self.detail_introduction_metrics(&ui),
+        ));
         state.set_intro_preview(intro_preview.into());
         state.set_intro_available(intro_available);
+        state.set_intro_prefix_truncated(intro_prefix_truncated);
         if let Some(introduction) = introduction {
             state.set_intro(introduction.intro.into());
             state.set_publisher(
@@ -1262,9 +1293,6 @@ impl App {
             .into(),
         );
         state.set_published(tr("metadata_unavailable").into());
-        // The stored upstream update value can describe reading progress or a new
-        // chapter. It is not evidence of when book information was refreshed.
-        state.set_update_label(tr("book_update_unavailable").into());
         state.set_catalog_label(
             if book.total_chapters > 0 || !chapters.is_empty() {
                 known_tab_count(
@@ -1285,7 +1313,7 @@ impl App {
             )
             .into(),
         );
-        let note_summary = if matches!(self.detail_tab.as_str(), "intro" | "notes") {
+        let note_summary = if self.detail_tab == "intro" {
             match self.store.annotation_summary_counts(&book.id) {
                 Ok(annotation_summary) => i18n::format(
                     "notes_summary",
@@ -1309,10 +1337,7 @@ impl App {
         } else {
             String::new()
         };
-        state.set_note_summary(note_summary.clone().into());
-        state.set_notes_summary(
-            i18n::format("notes_by_chapter", &[("summary", note_summary)]).into(),
-        );
+        state.set_note_summary(note_summary.into());
         state.set_tab(self.detail_tab.clone().into());
         state.set_status(self.detail_status.clone().into());
         state.set_selecting(self.selecting_chapters && self.detail_tab == "toc");
@@ -1422,10 +1447,89 @@ impl App {
         Ok(())
     }
 
+    fn detail_introduction_metrics(&self, ui: &AppWindow) -> TextMetrics {
+        let family = ui.global::<Theme>().get_serif_font();
+        self.fonts
+            .iter()
+            .find(|font| font.available && font.family.as_str() == family.as_str())
+            .map(|font| font.metrics_for_weight(400).clone())
+            .unwrap_or_default()
+    }
+
+    fn open_detail_introduction(&mut self, id: &str) -> Result<()> {
+        if !self.profile.is_scribe() || !matches!(&self.route, Route::Detail(book) if book == id) {
+            return Ok(());
+        }
+        let Some(ui) = self.ui.upgrade() else {
+            return Ok(());
+        };
+        let state = ui.global::<DetailModel>();
+        if state.get_book().id.as_str() != id
+            || !state.get_intro_available()
+            || !state.get_intro_dialog_text().is_empty()
+            || !ui.global::<ShellModel>().get_dialog_kind().is_empty()
+        {
+            return Ok(());
+        }
+        let introduction = match self.store.book_introduction(id) {
+            Ok(Some(introduction)) if !introduction.intro.trim().is_empty() => introduction.intro,
+            Ok(_) => {
+                self.show_toast("no_introduction");
+                return Ok(());
+            }
+            Err(error)
+                if error
+                    .downcast_ref::<crate::store::BookMetadataLimit>()
+                    .is_some()
+                    || error
+                        .downcast_ref::<crate::store::BookMetadataUnavailable>()
+                        .is_some() =>
+            {
+                self.show_toast("introduction_unavailable");
+                return Ok(());
+            }
+            Err(error) => return Err(error),
+        };
+        let viewport = self.platform.logical_viewport_size().0;
+        let width = viewport
+            .saturating_sub(self.profile.page_margin() * 2)
+            .min(SCRIBE_INTRO_DIALOG_WIDTH)
+            .saturating_sub(INTRO_DIALOG_HORIZONTAL_PADDING);
+        state.set_intro_dialog_lines(introduction_lines(
+            &introduction,
+            width as f32,
+            19.0,
+            1.8,
+            &self.detail_introduction_metrics(&ui),
+        ));
+        state.set_intro_dialog_text(introduction.into());
+        Ok(())
+    }
+
+    fn close_detail_introduction(&self) -> bool {
+        let Some(ui) = self.ui.upgrade() else {
+            return false;
+        };
+        let state = ui.global::<DetailModel>();
+        if state.get_intro_dialog_text().is_empty() {
+            return false;
+        }
+        state.set_intro_dialog_text(Default::default());
+        state.set_intro_dialog_lines(Default::default());
+        true
+    }
+
     pub(super) fn detail_action(&mut self, action: &str, value: &str) -> Result<()> {
         let id = self.detail_id.clone();
         match action {
+            "intro-open" => self.open_detail_introduction(&id)?,
+            "intro-close" => {
+                self.close_detail_introduction();
+            }
             "back" => {
+                if self.close_detail_introduction() {
+                    return Ok(());
+                }
                 let reader_menu = if matches!(
                     self.history.last(),
                     Some(Route::Reader(book, _)) if book == &id
@@ -1468,8 +1572,14 @@ impl App {
                 }
             }
             "tab" => {
-                if !matches!(value, "intro" | "toc" | "reviews" | "notes") {
-                    return Ok(());
+                let value = match value {
+                    "intro" if self.profile.is_scribe() => "toc",
+                    "intro" | "toc" | "reviews" | "notes" => value,
+                    _ => return Ok(()),
+                };
+                self.close_detail_introduction();
+                if self.detail_tab == "reviews" && value != "reviews" {
+                    self.detail_status.clear();
                 }
                 let position = if value == "toc" {
                     self.detail_current_chapter_ordinal(&id)?
@@ -1562,11 +1672,7 @@ impl App {
                     .unwrap_or(1);
                 self.detail_page = move_page(self.detail_page, value.parse().unwrap_or(0), count);
             }
-            "jump"
-                if self.detail_tab == "reviews"
-                    || self.detail_tab == "notes"
-                    || self.detail_tab == "toc" && !self.selecting_chapters =>
-            {
+            "jump" if matches!(self.detail_tab.as_str(), "toc" | "reviews" | "notes") => {
                 self.open_jump("detail", self.detail_page + 1)
             }
             "download" => {
@@ -2157,7 +2263,7 @@ impl App {
                 .into(),
             );
             shell.set_dialog_size("".into());
-            shell.set_dialog_chapter("".into());
+            shell.set_dialog_completed("".into());
         }
         Ok(())
     }
@@ -2418,25 +2524,47 @@ impl App {
                         }
                     }
                     "jump" => {
-                        let page = self
-                            .ui
-                            .upgrade()
-                            .map(|ui| {
-                                ui.global::<ShellModel>()
-                                    .get_dialog_input()
-                                    .as_str()
-                                    .parse::<usize>()
-                                    .unwrap_or(1)
-                                    .saturating_sub(1)
-                            })
-                            .unwrap_or(0);
-                        match self.jump_target.as_str() {
-                            "library" => self.library_page = page,
-                            "detail" => self.detail_page = page,
-                            "search" => self.search_page = page,
-                            "mp" => self.mp_page = page,
-                            "settings" => self.settings_page = page,
-                            _ => {}
+                        if let Some(ui) = self.ui.upgrade() {
+                            let page = ui
+                                .global::<ShellModel>()
+                                .get_dialog_input()
+                                .as_str()
+                                .parse::<usize>()
+                                .unwrap_or(1)
+                                .saturating_sub(1);
+                            let bounded = |count: i32| page.min(count.max(1) as usize - 1);
+                            match self.jump_target.as_str() {
+                                "library" => {
+                                    self.library_page =
+                                        bounded(ui.global::<LibraryModel>().get_page_count())
+                                }
+                                "detail" => {
+                                    self.detail_page =
+                                        bounded(ui.global::<DetailModel>().get_page_count())
+                                }
+                                "search" => {
+                                    self.search_page =
+                                        bounded(ui.global::<SearchModel>().get_page_count())
+                                }
+                                "mp" => {
+                                    self.mp_page = bounded(
+                                        ui.global::<AuxiliaryModel>().get_publications_page_count(),
+                                    )
+                                }
+                                "reader-thought" => {
+                                    self.reader.thought_page =
+                                        bounded(ui.global::<ReaderModel>().get_thought_pages())
+                                }
+                                "reader-toc" => {
+                                    self.reader.toc_page =
+                                        bounded(ui.global::<ReaderModel>().get_chapter_pages())
+                                }
+                                "article-list" => {
+                                    self.article_list_page =
+                                        bounded(ui.global::<ArticleModel>().get_list_pages())
+                                }
+                                _ => {}
+                            }
                         }
                     }
                     _ => {}
@@ -2446,10 +2574,6 @@ impl App {
                 self.close_dialog();
                 let id = self.detail_id.clone();
                 self.load_detail(&id)?;
-            }
-            "more-import" => {
-                self.close_dialog();
-                self.scan_imports()?;
             }
             "more-clear" => {
                 self.confirm_action("clear-book", "clear_book_cache", "clear_book_hint", "clear")
@@ -3188,7 +3312,7 @@ mod tests {
                 1863,
                 DeviceProfile::Scribe.detail_page_size((930, 1240), "toc")
             ),
-            99
+            94
         );
     }
 

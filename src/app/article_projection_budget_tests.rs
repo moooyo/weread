@@ -185,7 +185,8 @@ struct Snapshot {
         String,
         String,
         bool,
-        String,
+        i32,
+        i32,
         i32,
         i32,
         Vec<(String, String, String, bool)>,
@@ -243,7 +244,8 @@ impl Snapshot {
                 global.get_meta().to_string(),
                 global.get_next_title().to_string(),
                 global.get_has_next(),
-                global.get_list_summary().to_string(),
+                global.get_list_page(),
+                global.get_list_pages(),
                 global.get_page(),
                 global.get_page_count(),
                 row_snapshot(ui),
@@ -328,7 +330,8 @@ impl Snapshot {
                 global.get_meta().to_string(),
                 global.get_next_title().to_string(),
                 global.get_has_next(),
-                global.get_list_summary().to_string(),
+                global.get_list_page(),
+                global.get_list_pages(),
                 global.get_page(),
                 global.get_page_count(),
                 row_snapshot(ui)
@@ -353,7 +356,7 @@ fn hidden_history() -> Result<()> {
         state.render_article()?;
         let stats = article_projection_stats();
         assert_eq!(stats.owner_visits, 17);
-        assert_eq!(stats.presence_reads, 17);
+        assert_eq!(stats.presence_reads, 0);
         assert_eq!(stats.rows, 0);
         assert_eq!(stats.row_source_bytes, 0);
         assert!(row_snapshot(fixture.ui()).is_empty());
@@ -370,17 +373,9 @@ fn hidden_history() -> Result<()> {
             fixture.ui().global::<ArticleModel>().get_account().as_str(),
             "First owner name"
         );
-        assert_eq!(
-            fixture
-                .ui()
-                .global::<ArticleModel>()
-                .get_list_summary()
-                .as_str(),
-            i18n::format(
-                "articles_summary",
-                &[("count", "17".into()), ("cached", "2".into())]
-            )
-        );
+        let global = fixture.ui().global::<ArticleModel>();
+        assert_eq!(global.get_list_page(), 1);
+        assert_eq!(global.get_list_pages(), 2);
         assert_eq!(state.store.chapter_body_read_count(), body_reads);
         assert_eq!(
             state
@@ -399,13 +394,20 @@ fn visible_pages(profile: DeviceProfile) -> Result<()> {
         let mut state = fixture.app();
         state.navigate(Route::Article(CURRENT.into()), true)?;
         let global = fixture.ui().global::<ArticleModel>();
-        global.set_list_open(true);
-        let size = if profile.is_scribe() { 11 } else { 8 };
+        let shell = fixture.ui().global::<ShellModel>();
+        state.dispatch("article", "article.list-jump", "")?;
+        assert!(shell.get_dialog_kind().is_empty());
+        let size = if profile.is_scribe() { 12 } else { 9 };
         for page in 0..2 {
-            global.set_list_page(page + 1);
             reset_article_projection_stats();
             let reads = state.store.chapter_body_read_count();
-            state.render_article()?;
+            if page == 0 {
+                state.dispatch("article", "article.list", "true")?;
+            } else {
+                state.dispatch("article", "article.list-page", "1")?;
+            }
+            assert_eq!(global.get_list_page(), page + 1);
+            assert_eq!(global.get_list_pages(), 2);
             let rows = row_snapshot(fixture.ui());
             let start = page as usize * size;
             assert_eq!(
@@ -421,13 +423,23 @@ fn visible_pages(profile: DeviceProfile) -> Result<()> {
             let stats = article_projection_stats();
             assert_eq!(stats.rows, rows.len());
             assert_eq!(stats.row_source_bytes, expected);
-            assert_eq!(stats.presence_reads, 17);
+            assert_eq!(stats.presence_reads, rows.len());
             assert_eq!(state.store.chapter_body_read_count(), reads);
             if page == 0 {
                 assert!(rows[1].3);
                 assert!(!rows[2].3);
                 assert_eq!(rows[1].1, "");
             }
+        }
+        for (value, page) in [("1", 1), ("999", 2)] {
+            state.dispatch("article", "article.list-jump", "")?;
+            assert_eq!(shell.get_dialog_kind().as_str(), "jump");
+            assert_eq!(shell.get_dialog_input(), global.get_list_page().to_string());
+            shell.set_dialog_input(value.into());
+            state.dispatch("shell", "dialog-primary", "")?;
+            assert!(shell.get_dialog_kind().is_empty());
+            assert_eq!(global.get_list_page(), page);
+            assert_eq!(state.article_list_page, (page - 1) as usize);
         }
     }
     fixture.finish()
@@ -460,11 +472,21 @@ fn next_empty_and_owner_switch() -> Result<()> {
         assert!(fixture.ui().global::<ArticleModel>().get_has_next());
         assert!(state.pending_articles.is_empty());
         state.navigate(Route::Article("other-article".into()), true)?;
-        fixture.ui().global::<ArticleModel>().set_list_open(true);
         reset_article_projection_stats();
-        state.render_article()?;
+        state.dispatch("article", "article.list", "true")?;
+        let global = fixture.ui().global::<ArticleModel>();
+        assert_eq!(global.get_list_page(), 1);
+        assert_eq!(global.get_list_pages(), 1);
         assert_eq!(row_snapshot(fixture.ui())[0].0, "other-article");
         assert_eq!(article_projection_stats().presence_reads, 1);
+        state.dispatch("article", "article.list-jump", "")?;
+        assert!(
+            fixture
+                .ui()
+                .global::<ShellModel>()
+                .get_dialog_kind()
+                .is_empty()
+        );
         assert_eq!(state.mp_articles[OWNER].len(), 17);
         assert_eq!(
             state
@@ -514,7 +536,7 @@ fn output_boundaries() -> Result<()> {
             || state.render_article(),
         )?;
         retained.assert_retained(&state, fixture.ui())?;
-        assert_eq!(article_projection_stats().rows, 8);
+        assert_eq!(article_projection_stats().rows, 9);
     }
     fixture.finish()
 }
@@ -810,7 +832,7 @@ macro_rules! case {
 }
 
 case!(
-    article_hidden_history_keeps_next_and_cached_summary_without_list_copies,
+    article_hidden_history_keeps_next_without_list_copies_or_presence_reads,
     hidden_history
 );
 case!(

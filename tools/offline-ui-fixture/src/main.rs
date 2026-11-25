@@ -63,7 +63,7 @@ struct Arguments {
     offline: bool,
     #[arg(long, default_value_t = 1_200)]
     exit_after_ms: u64,
-    #[arg(long, value_parser = ["login-qr", "login-loading", "login-expired", "login-code", "login-code-empty", "detail-reviews", "detail-notes", "article-qr", "sleep-cover", "sleep-title", "sleep-neutral", "image-processing-default", "image-processing-software", "image-processing-hardware", "image-processing-persisted"])]
+    #[arg(long, value_parser = ["login-qr", "login-loading", "login-expired", "login-code", "login-code-empty", "detail-reviews", "detail-notes", "detail-download", "detail-downloading", "article-qr", "sleep-cover", "sleep-title", "sleep-neutral", "image-processing-default", "image-processing-software", "image-processing-hardware", "image-processing-persisted"])]
     fixture: Option<String>,
     /// Create only public synthetic current-layout data for a separate offline process.
     #[arg(long)]
@@ -430,15 +430,27 @@ fn run(arguments: Arguments) -> Result<()> {
                         match action.action.as_str() {
                             "hide" => timer_fixture_visible.set(false),
                             "show" => timer_fixture_visible.set(true),
-                            "capture" => capture_fixture_checkpoint(
-                                &ui,
-                                &fixture_capture,
-                                profile,
-                                &timer_platform,
-                                fixture.as_deref(),
-                                timer_fixture_visible.get(),
-                                &action.value,
-                            )?,
+                            "capture" => {
+                                // A slow timer can batch a visibility change and its capture.
+                                // Publish the requested overlay before taking that checkpoint.
+                                let visible = timer_fixture_visible.get();
+                                apply_fixture(
+                                    &ui,
+                                    fixture.as_deref(),
+                                    &fixture_qr,
+                                    &fixture_cover,
+                                    visible,
+                                );
+                                capture_fixture_checkpoint(
+                                    &ui,
+                                    &fixture_capture,
+                                    profile,
+                                    &timer_platform,
+                                    fixture.as_deref(),
+                                    visible,
+                                    &action.value,
+                                )?;
+                            }
                             _ => bail!("Unsupported fixture action {}", action.action),
                         }
                     } else if action.section == "pointer" {
@@ -1234,6 +1246,66 @@ fn apply_fixture(
             detail.set_status("".into());
             detail.set_selecting(false);
         }
+        Some("detail-download" | "detail-downloading") => {
+            let shell = ui.global::<ShellModel>();
+            let downloading = fixture == Some("detail-downloading");
+            shell.set_dialog_kind(
+                if downloading {
+                    "downloading"
+                } else {
+                    "download"
+                }
+                .into(),
+            );
+            shell.set_dialog_title(
+                i18n::text(if downloading {
+                    "download"
+                } else {
+                    "download_all"
+                })
+                .into(),
+            );
+            shell.set_dialog_body("".into());
+            shell.set_dialog_secondary(
+                i18n::text(if downloading {
+                    "cancel_download"
+                } else {
+                    "cancel"
+                })
+                .into(),
+            );
+            shell.set_dialog_primary(
+                i18n::text(if downloading {
+                    "background_download"
+                } else {
+                    "begin_download"
+                })
+                .into(),
+            );
+            if downloading {
+                shell.set_dialog_completed(
+                    i18n::format(
+                        "download_progress_completed",
+                        &[("done", "12".into()), ("total", "219".into())],
+                    )
+                    .into(),
+                );
+                shell.set_dialog_progress(12.0 / 219.0);
+            } else {
+                shell.set_dialog_summary(
+                    i18n::format(
+                        "download_catalog_summary",
+                        &[
+                            ("total", "222".into()),
+                            ("cached", "3".into()),
+                            ("selected", "219".into()),
+                        ],
+                    )
+                    .into(),
+                );
+                shell.set_dialog_size("".into());
+            }
+        }
         Some("article-qr") => {
             let article = ui.global::<ArticleModel>();
             article.set_qr(qr.clone());
@@ -1436,7 +1508,10 @@ fn model_state(
             "title": sleep.get_title().to_string(), "author": sleep.get_author().to_string(),
             "cover_size": [sleep_cover_size.width, sleep_cover_size.height]},
         "shell": {"route": shell.get_route().to_string(), "dialog_kind": shell.get_dialog_kind().to_string(),
-            "selection_count": shell.get_selection_count(), "online": shell.get_online()},
+            "dialog_summary": shell.get_dialog_summary().to_string(), "dialog_completed": shell.get_dialog_completed().to_string(),
+            "dialog_progress": shell.get_dialog_progress(),
+            "selection_count": shell.get_selection_count(), "selection_label": shell.get_selection_label().to_string(),
+            "toast": shell.get_toast().to_string(), "online": shell.get_online()},
         "library": {"page": library.get_page(), "page_count": library.get_page_count(),
             "view_mode": library.get_view_mode().to_string(), "selecting": library.get_selecting(),
             "book_ids": library.get_books().iter().map(|book| book.id.to_string()).collect::<Vec<_>>(),
@@ -1451,7 +1526,8 @@ fn model_state(
         "search": {"query": search.get_query().to_string(), "composition": search.get_composition().to_string(),
             "query_width": search.get_query_width(), "composition_width": search.get_composition_width(),
             "scope": search.get_scope().to_string(), "keyboard_visible": search.get_keyboard_visible(),
-            "status": search.get_status().to_string(), "result_count": search.get_results().row_count(),
+            "results_visible": search.get_results_visible(), "no_results": search.get_no_results(),
+            "page": search.get_page(), "page_count": search.get_page_count(), "result_count": search.get_results().row_count(),
             "results": search.get_results().iter().map(|entry| json!({"id": entry.id.to_string(),
                 "title": entry.title.to_string()})).collect::<Vec<_>>(),
             "recent": search.get_recent().iter().map(|value| value.to_string()).collect::<Vec<_>>(),
@@ -1470,6 +1546,7 @@ fn model_state(
             "font_size": reader.get_font_size(), "font_choice": reader.get_font_choice().to_string(),
             "font_family": reader.get_font_family().to_string(), "page": reader.get_page(), "page_count": reader.get_page_count(),
             "toc_open": reader.get_toc_open(), "toc_tab": reader.get_toc_tab().to_string(),
+            "chapter_page": reader.get_chapter_page(), "chapter_pages": reader.get_chapter_pages(),
             "thought_open": reader.get_thought_open(), "thought_position": reader.get_thought_position().to_string(),
             "thought_title": reader.get_thought_title().to_string(), "note_id": reader.get_note_id().to_string(),
             "thought_page": reader.get_thought_page(), "thought_pages": reader.get_thought_pages(),
@@ -1496,6 +1573,8 @@ fn model_state(
             "font_size": article.get_font_size(), "font_choice": article.get_font_choice().to_string(),
             "font_family": article.get_font_family().to_string(), "starred": article.get_starred(),
             "qr_open": article.get_qr_open(), "list_open": article.get_list_open(), "page": article.get_page(),
+            "list_page": article.get_list_page(), "list_pages": article.get_list_pages(),
+            "image_summary": article.get_image_summary().to_string(),
             "page_count": article.get_page_count(), "blocks": article.get_blocks().iter().map(|block| json!({
                 "id": block.id.to_string(), "kind": block.kind.to_string(), "height": block.height,
                 "text": block.text.to_string(), "letter_spacing": block.letter_spacing,

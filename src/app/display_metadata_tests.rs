@@ -513,16 +513,6 @@ impl RetainedReader {
     }
 }
 
-fn cached_summary() -> String {
-    i18n::format(
-        "articles_summary",
-        &[
-            ("count", ARTICLES.to_string()),
-            ("cached", (ARTICLES - 1).to_string()),
-        ],
-    )
-}
-
 fn assert_presence_rows(rows: ModelRc<ReaderEntry>) {
     assert!(rows.row_count() > 0);
     let absent = article_id(2);
@@ -540,13 +530,6 @@ fn publication_display() -> Result<()> {
         state.navigate(Route::Publications, true)?;
         let reads = state.store.chapter_body_read_count();
         state.dispatch("auxiliary", "mp.account", ACCOUNT)?;
-        assert_eq!(
-            instance
-                .ui
-                .global::<AuxiliaryModel>()
-                .get_publications_subtitle(),
-            cached_summary()
-        );
         assert!(
             instance
                 .ui
@@ -631,18 +614,16 @@ fn article_display() -> Result<()> {
         assert_eq!(visible, (1, article_body(0).len()));
         for _ in 0..8 {
             state.render()?;
-            assert!(!instance.ui.global::<ArticleModel>().get_list_open());
-            assert_eq!(
-                instance.ui.global::<ArticleModel>().get_list_summary(),
-                cached_summary()
-            );
+            let global = instance.ui.global::<ArticleModel>();
+            assert!(!global.get_list_open());
+            assert_eq!(global.get_articles().row_count(), 0);
             assert_eq!(state.store.chapter_body_read_count(), reads);
             retained.assert_unchanged(&state)?;
         }
         state.dispatch("article", "article.list", "true")?;
         assert!(instance.ui.global::<ArticleModel>().get_list_open());
         let rows = instance.ui.global::<ArticleModel>().get_articles();
-        assert_eq!(rows.row_count(), 8);
+        assert_eq!(rows.row_count(), 9);
         assert_eq!(rows.row_data(0).unwrap().id, article_id(0));
         assert!(rows.row_data(1).unwrap().cached);
         assert!(!rows.row_data(2).unwrap().cached);
@@ -650,8 +631,8 @@ fn article_display() -> Result<()> {
         state.dispatch("article", "article.list-page", "1")?;
         assert_eq!(instance.ui.global::<ArticleModel>().get_list_page(), 2);
         let rows = instance.ui.global::<ArticleModel>().get_articles();
-        assert_eq!(rows.row_count(), ARTICLES - 8);
-        assert_eq!(rows.row_data(0).unwrap().id, article_id(8));
+        assert_eq!(rows.row_count(), ARTICLES - 9);
+        assert_eq!(rows.row_data(0).unwrap().id, article_id(9));
         assert_presence_rows(rows);
         state.dispatch("article", "article.list", "false")?;
         assert!(!instance.ui.global::<ArticleModel>().get_list_open());

@@ -383,7 +383,7 @@ fn run_reader_mark_scenario() -> Result<()> {
             app.load_reader("reader-render-fixture", 0, Some(0))?;
             app.render()?;
             assert!(!app.reader.notes_panel);
-            assert_eq!(app.prefs.popup_position, "side");
+            assert_eq!(app.prefs.popup_position, "center");
 
             let (layout, _) = app.reader_geometry();
             let first = &app.reader.paginator.as_ref().unwrap().current_page().lines[0];
@@ -438,7 +438,7 @@ fn run_reader_mark_scenario() -> Result<()> {
             assert!(!has_mark(&ui, &local_mark_drawing_id(&app, &note)));
             app.reader_action("turn", "-1")?;
             app.reader_action("font-size-select", "38")?;
-            app.reader_action("panel", "true")?;
+            app.reader_action("thought-position", "side")?;
             app.render()?;
             assert_mark_paints_ink(&ui, &adapter, &local_mark_drawing_id(&app, &note));
             assert_eq!(
@@ -456,8 +456,8 @@ fn run_reader_mark_scenario() -> Result<()> {
         app.load_reader("reader-render-fixture", 0, Some(note.start))?;
         app.render()?;
         assert!(
-            !app.reader.notes_panel,
-            "Reopening reading must start with the full text measure"
+            app.reader.notes_panel,
+            "Reopening reading must restore the saved side-note preference"
         );
         let restored = app.store.annotations("reader-render-fixture")?.remove(0);
         assert_eq!(

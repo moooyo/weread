@@ -248,7 +248,9 @@ fn collect_transport(runtime: &tokio::runtime::Runtime, app: &App) -> Result<Vec
 }
 
 fn drain_article_preparation(app: &mut App) -> Result<()> {
-    let deadline = Instant::now() + Duration::from_secs(3);
+    // This harness shares a Linux worker with firmware emulation and builds.
+    // It checks ordering and eventual settlement, not image processing speed.
+    let deadline = Instant::now() + Duration::from_secs(12);
     while app.article_preparation.is_busy() {
         ensure!(
             Instant::now() < deadline,

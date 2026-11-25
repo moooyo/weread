@@ -33,6 +33,9 @@ mod statistics_year_budget_tests;
 #[path = "qr_input_budget_tests.rs"]
 mod qr_input_budget_tests;
 
+/// Settings tabs in display order: Sync, Reading, Downloads and Display.
+const SETTINGS_TABS: [&str; 4] = ["sync", "notes", "storage", "display"];
+
 const MAX_PUBLICATION_OWNER_BYTES: usize = 4096;
 const MAX_PUBLICATION_ARTICLE_ID_BYTES: usize = 4096;
 const MAX_PUBLICATION_ACCOUNT_RECORDS: usize = 8192;
@@ -716,10 +719,8 @@ fn article_parse_failure(error: crate::article::ArticleParseError) -> anyhow::Er
 }
 
 struct ArticleListProjection<'a> {
-    articles: &'a [MpArticle],
     next: Option<&'a MpArticle>,
     rows: Vec<(&'a MpArticle, bool)>,
-    cached: usize,
     page: usize,
     pages: usize,
 }
@@ -790,7 +791,13 @@ impl App {
                 );
                 self.refresh_display(RefreshReason::Content);
             }
-            "mp.jump" => self.open_jump("mp", self.mp_page + 1),
+            "mp.jump" => {
+                if self.ui.upgrade().is_some_and(|ui| {
+                    ui.global::<AuxiliaryModel>().get_publications_page_count() > 1
+                }) {
+                    self.open_jump("mp", self.mp_page + 1);
+                }
+            }
             "stats.period" if ["week", "month", "year", "total"].contains(&value) => {
                 self.stats_period = value.into();
                 self.stats_offset = 0;
@@ -841,31 +848,10 @@ impl App {
                     .copied();
             }
             "stats.open" if !value.is_empty() => self.open_detail(value)?,
-            "settings.open"
-                if ["sync", "notes", "storage", "display", "device", "about"].contains(&value) =>
-            {
+            "settings.open" if SETTINGS_TABS.contains(&value) => {
                 self.settings_subpage = value.into();
-                self.settings_page = 0;
                 self.settings_status.clear();
             }
-            "settings.back" => {
-                self.settings_subpage.clear();
-                self.settings_page = 0;
-                self.settings_status.clear();
-            }
-            "settings.page" => {
-                let count = self
-                    .ui
-                    .upgrade()
-                    .map(|ui| ui.global::<AuxiliaryModel>().get_settings_page_count())
-                    .unwrap_or(1);
-                self.settings_page = move_page(
-                    self.settings_page,
-                    value.parse().unwrap_or(0),
-                    count.max(1) as usize,
-                );
-            }
-            "settings.jump" => self.open_jump("settings", self.settings_page + 1),
             "settings.toggle" | "settings.increase" | "settings.decrease" => {
                 let enabled = self
                     .setting_rows()?
@@ -913,7 +899,6 @@ impl App {
                     if value == "keep_awake" {
                         self.start_task_wake_guard();
                     }
-                    self.settings_status = tr("local_saved");
                 }
             }
             "settings.choice" => {
@@ -1009,8 +994,8 @@ impl App {
         let mut filter = PublicationFilterBudget::new();
         let query = self.publication_filter_lowercase(&mut filter, self.mp_query.trim(), true)?;
         let account_id = self.mp_account.clone();
-        let page_size = self.publication_page_size(account_id.is_some());
-        let (rows, page, pages, title, subtitle) = if let Some(account_id) = &account_id {
+        let page_size = self.publication_page_size();
+        let (rows, page, pages, title) = if let Some(account_id) = &account_id {
             let account = accounts.iter().find(|account| &account.id == account_id);
             let mut articles = self
                 .mp_articles
@@ -1040,22 +1025,8 @@ impl App {
             }
             let pages = page_count(projected.len(), page_size);
             let page = self.mp_page.min(pages - 1);
-            let subtitle = i18n::format(
-                "articles_summary",
-                &[
-                    ("count", projected.len().to_string()),
-                    (
-                        "cached",
-                        projected
-                            .iter()
-                            .filter(|entry| entry.cached)
-                            .count()
-                            .to_string(),
-                    ),
-                ],
-            );
             // Sort and page borrowed descriptors before materializing any
-            // title/author text, including when the article list is hidden.
+            // title/author text.
             admit_publication_article_rows(
                 projected.iter().skip(page * page_size).take(page_size),
                 limits.visible_metadata_bytes,
@@ -1073,7 +1044,6 @@ impl App {
                 account
                     .map(|account| slint::SharedString::from(account.name.as_str()))
                     .unwrap_or_else(|| tr("publications").into()),
-                subtitle,
             )
         } else {
             let mut accounts = accounts;
@@ -1141,24 +1111,6 @@ impl App {
             }
             let pages = page_count(projected.len(), page_size);
             let page = self.mp_page.min(pages - 1);
-            let subtitle = format!(
-                "{} · {}",
-                i18n::format(
-                    "mp_summary",
-                    &[
-                        ("count", projected.len().to_string()),
-                        (
-                            "unread",
-                            projected
-                                .iter()
-                                .map(|entry| u64::from(entry.unread.min(i32::MAX as u32)))
-                                .sum::<u64>()
-                                .to_string(),
-                        ),
-                    ],
-                ),
-                tr("local_unread"),
-            );
             // The index and summaries borrow current cache data only for this
             // render. Hidden owners never copy their latest titles into rows.
             admit_publication_account_rows(
@@ -1171,11 +1123,10 @@ impl App {
                 .take(page_size)
                 .map(|entry| self.publication_account_row(entry))
                 .collect::<Vec<_>>();
-            (rows, page, pages, tr("publications").into(), subtitle)
+            (rows, page, pages, tr("publications").into())
         };
         self.mp_page = page;
         global.set_publications_title(title);
-        global.set_publications_subtitle(subtitle.into());
         global.set_publications_rows(model(rows));
         global.set_publications_query(self.mp_query.clone().into());
         global.set_publications_sort(self.mp_sort.clone().into());
@@ -1285,12 +1236,9 @@ impl App {
         Ok(lowercase.contains(query))
     }
 
-    fn publication_page_size(&self, articles: bool) -> usize {
-        let design_page_size = match (articles, self.profile.is_scribe()) {
-            (true, true) => 8,
-            (false, true) => 9,
-            (_, false) => 7,
-        };
+    /// Fit 72-pixel rows below the search and sort/pager headers. Without a
+    /// status line this fits 14 rows on Scribe and 9 on Paperwhite 6.
+    fn publication_page_size(&self) -> usize {
         let (_, height) = self.platform.logical_viewport_size();
         let navigation = if self.profile.is_scribe() { 76 } else { 64 };
         let status_height = if !self.online || !self.mp_status.is_empty() {
@@ -1299,9 +1247,11 @@ impl App {
             0
         };
         let content_height = height.saturating_sub(
-            self.app_status_bar_height() + navigation + 52 + 52 + 48 + 48 + status_height,
+            // The thin header rule can share the last row's divider pixel
+            // with the bottom navigation at the nominal Paperwhite viewport.
+            self.app_status_bar_height() + navigation + 52 + 48 + status_height,
         );
-        design_page_size.min((content_height / 72).max(1) as usize)
+        (content_height / 72).max(1) as usize
     }
 
     fn publication_article_read(&self, id: &str) -> Result<bool> {
@@ -1583,9 +1533,9 @@ impl App {
             calendar_label: report.calendar_label,
             preferences: report.preferences,
             status: if report.bars_unavailable {
-                format!("{} · {}", tr("stats_local"), tr("stats_unavailable"))
+                tr("stats_unavailable")
             } else {
-                tr("stats_local")
+                String::new()
             },
             offset: report.offset,
             range_start: report.range_start,
@@ -1805,31 +1755,13 @@ impl App {
     }
 
     pub(super) fn render_settings(&mut self) -> Result<()> {
-        let rows = self.setting_rows()?;
-        let (_, height) = self.platform.logical_viewport_size();
-        let navigation = if self.profile.is_scribe() { 76 } else { 64 };
-        let main = self.settings_subpage.is_empty();
-        let statusbar = self.app_status_bar_height();
-        let capacity = height
-            .saturating_sub(
-                statusbar + navigation + 56 + 56 + 48 + if main { 104 + 128 } else { 0 },
-            )
-            .max(72);
-        let mut pages: Vec<Vec<SettingEntry>> = vec![vec![]];
-        let mut used = 0;
-        for row in rows {
-            let row_height = setting_row_height(&row, self.profile.is_scribe());
-            if used + row_height > capacity && !pages.last().is_some_and(Vec::is_empty) {
-                pages.push(vec![]);
-                used = 0;
-            }
-            used += row_height;
-            pages
-                .last_mut()
-                .expect("at least one settings page")
-                .push(row);
+        // One of the four tabs is always open; an unknown or retired subpage
+        // falls back to Sync.
+        if !SETTINGS_TABS.contains(&self.settings_subpage.as_str()) {
+            self.settings_subpage = "sync".into();
         }
-        self.settings_page = self.settings_page.min(pages.len().saturating_sub(1));
+        let groups = self.setting_rows_for("", 0);
+        let rows = self.setting_rows()?;
         let Some(ui) = self.ui.upgrade() else {
             return Ok(());
         };
@@ -1842,13 +1774,8 @@ impl App {
             .as_ref()
             .map(|session| session.account_name.clone())
             .filter(|name| !name.trim().is_empty())
-            .unwrap_or_else(|| {
-                tr(if session.is_some() {
-                    "account"
-                } else {
-                    "local_account"
-                })
-            });
+            // The app always runs signed in; a nameless session shows "账号".
+            .unwrap_or_else(|| tr("account"));
         global.set_settings_account_name(account.clone().into());
         global.set_settings_account_initial(
             account
@@ -1858,27 +1785,19 @@ impl App {
                 .unwrap_or_default()
                 .into(),
         );
-        global.set_settings_account_detail(
-            tr(if self.demo {
-                "demo_notice"
-            } else if session.is_some() {
-                "login_local"
-            } else {
-                "empty_library_hint"
-            })
-            .into(),
-        );
         global.set_settings_account_active(session.is_some() && !self.demo);
         global.set_settings_subpage(self.settings_subpage.clone().into());
-        global.set_settings_title(tr(settings_title(&self.settings_subpage)).into());
-        global.set_settings_rows(model(pages[self.settings_page].clone()));
-        global.set_settings_page((self.settings_page + 1) as i32);
-        global.set_settings_page_count(pages.len() as i32);
+        global.set_settings_rows(model(rows));
+        global.set_settings_groups(model(groups));
+        // Only messages that need attention are shown: results of an explicit
+        // action, or a reading-time report problem on the Sync tab.
         global.set_settings_status(
-            if self.settings_subpage == "sync" {
-                self.read_report_summary()
-            } else {
+            if !self.settings_status.is_empty() {
                 self.settings_status.clone()
+            } else if self.settings_subpage == "sync" {
+                self.read_report_notice().unwrap_or_default()
+            } else {
+                String::new()
             }
             .into(),
         );
@@ -1886,6 +1805,27 @@ impl App {
     }
 
     fn setting_rows(&self) -> Result<Vec<SettingEntry>> {
+        // Only the Downloads tab shows the cache size.
+        let cache_bytes = if self.settings_subpage == "storage" {
+            self.settings_cache_bytes()?
+        } else {
+            0
+        };
+        Ok(self.setting_rows_for(&self.settings_subpage, cache_bytes))
+    }
+
+    fn settings_cache_bytes(&self) -> Result<u64> {
+        let storage = self.store.summary()?;
+        Ok(storage
+            .body_bytes
+            .saturating_add(self.cache.usage()?)
+            .saturating_add(self.book_assets.usage()?))
+    }
+
+    /// Rows for one Settings tab, or the four tabs themselves for `""`.
+    /// Rows that can never work on this device are left out instead of shown
+    /// disabled, and dependent rows appear only while their parent applies.
+    fn setting_rows_for(&self, subpage: &str, cache_bytes: u64) -> Vec<SettingEntry> {
         let preferences = &self.prefs;
         let remote = self.jobs.capabilities();
         let hardware = self.platform.capabilities();
@@ -1895,329 +1835,218 @@ impl App {
             .is_some_and(|session| session.has_web_session())
             && !self.demo;
         let source = remote.remote_progress && !self.demo;
-        let storage = self.store.summary()?;
-        let cache_bytes = storage
-            .body_bytes
-            .saturating_add(self.cache.usage()?)
-            .saturating_add(self.book_assets.usage()?);
-        let rows = match self.settings_subpage.as_str() {
-            "" => vec![
-                setting(
-                    "sync",
-                    "reading_sync",
-                    "link",
-                    tr(if preferences.report_time {
-                        "enabled"
-                    } else {
-                        "disabled"
-                    }),
-                    false,
-                    true,
-                    "",
-                ),
-                setting(
-                    "notes",
-                    "highlights_thoughts",
-                    "link",
-                    popup_label(&preferences.popup_position),
-                    false,
-                    true,
-                    "",
-                ),
-                setting(
-                    "storage",
-                    "downloads_storage",
-                    "link",
-                    size_label(cache_bytes),
-                    false,
-                    true,
-                    "",
-                ),
-                setting(
-                    "display",
-                    "display_refresh",
-                    "link",
-                    tr(if preferences.view_mode == "list" {
-                        "list_view"
-                    } else {
-                        "cover_view"
-                    }),
-                    false,
-                    true,
-                    "",
-                ),
-                setting(
-                    "device",
-                    "device_network",
-                    "link",
-                    self.profile.name().into(),
-                    false,
-                    true,
-                    "",
-                ),
-                setting(
-                    "about",
-                    "about",
-                    "link",
-                    env!("CARGO_PKG_VERSION").into(),
-                    false,
-                    true,
-                    "",
-                ),
-            ],
-            "sync" => vec![
-                setting(
+        let mut rows = Vec::new();
+        match subpage {
+            "" => {
+                for (id, title) in [
+                    ("sync", "sync"),
+                    ("notes", "settings_tab_reading"),
+                    ("storage", "download"),
+                    ("display", "settings_tab_display"),
+                ] {
+                    rows.push(setting(id, title, "link", String::new(), false, true));
+                }
+            }
+            "sync" => {
+                rows.push(setting(
                     "pull_on_open",
                     "pull_on_open",
                     "toggle",
                     String::new(),
                     preferences.pull_on_open,
                     source,
-                    "",
-                ),
-                setting(
+                ));
+                rows.push(setting(
                     "push_on_close",
                     "push_on_close",
                     "toggle",
                     String::new(),
                     preferences.push_on_close,
                     web,
-                    "",
-                ),
-                setting(
+                ));
+                rows.push(setting(
                     "ask_on_conflict",
                     "ask_on_conflict",
                     "toggle",
                     String::new(),
                     preferences.ask_on_conflict,
                     source,
-                    "",
-                ),
-                setting(
+                ));
+                rows.push(setting(
                     "report_time",
                     "report_time",
                     "toggle",
                     String::new(),
                     preferences.report_time,
                     web,
-                    "",
-                ),
-                setting(
-                    "report_reader_only",
-                    "report_reader_only",
-                    "toggle",
-                    String::new(),
-                    preferences.report_reader_only,
-                    preferences.report_time && web,
-                    "",
-                ),
-                setting(
-                    "report_target",
-                    "report_target",
-                    "info",
-                    tr("automatic"),
-                    false,
-                    false,
-                    "",
-                ),
-            ],
+                ));
+                if preferences.report_time {
+                    rows.push(nested(setting(
+                        "report_reader_only",
+                        "report_reader_only",
+                        "toggle",
+                        String::new(),
+                        preferences.report_reader_only,
+                        web,
+                    )));
+                }
+            }
             "notes" => {
-                let mut rows = vec![
-                    setting(
-                        "popular",
-                        "show_popular",
-                        "toggle",
-                        String::new(),
-                        preferences.popular,
-                        true,
-                        "",
-                    ),
-                    setting(
-                        "mine",
-                        "show_mine",
-                        "toggle",
-                        String::new(),
-                        preferences.mine,
-                        true,
-                        "",
-                    ),
-                    setting_choice(
-                        "popup_position",
-                        "notes_position",
-                        &preferences.popup_position,
-                        if self.profile.is_scribe() {
-                            &[
-                                ("side", "side_panel"),
-                                ("center", "center_popup"),
-                                ("bottom", "bottom_popup"),
-                            ]
-                        } else {
-                            &[("center", "center_popup"), ("bottom", "bottom_popup")]
-                        },
-                        true,
-                        "",
-                    ),
-                    setting(
-                        "edge_guard",
-                        "edge_guard",
-                        "toggle",
-                        String::new(),
-                        preferences.edge_guard,
-                        true,
-                        "",
-                    ),
-                    setting(
-                        "edge_region",
-                        "edge_region",
-                        "stepper",
-                        format!("{}%", preferences.edge_region),
-                        false,
-                        preferences.edge_guard,
-                        "",
-                    ),
-                    setting(
+                rows.push(setting_choice(
+                    "tap_mode",
+                    "tap_zones",
+                    &preferences.reader.tap_mode,
+                    &[
+                        ("default", "tap_zone_default"),
+                        ("mirrored", "tap_zone_mirrored"),
+                        ("swipe", "swipe_only"),
+                    ],
+                    true,
+                ));
+                rows.push(setting_choice(
+                    "popup_position",
+                    "notes_position",
+                    &preferences.popup_position,
+                    if self.profile.is_scribe() {
+                        &[
+                            ("side", "side_panel"),
+                            ("center", "center_popup"),
+                            ("bottom", "bottom_popup"),
+                        ]
+                    } else {
+                        &[("center", "center_popup"), ("bottom", "bottom_popup")]
+                    },
+                    true,
+                ));
+                if preferences.popup_position != "side" {
+                    rows.push(nested(setting(
                         "popup_height",
                         "popup_height",
                         "stepper",
                         format!("{}%", preferences.popup_height),
                         false,
-                        preferences.popup_position != "side",
-                        "",
-                    ),
-                    setting(
-                        "popup_turn",
-                        "popup_turn",
+                        true,
+                    )));
+                }
+                rows.push(setting(
+                    "popular",
+                    "show_popular",
+                    "toggle",
+                    String::new(),
+                    preferences.popular,
+                    true,
+                ));
+                rows.push(setting(
+                    "mine",
+                    "show_mine",
+                    "toggle",
+                    String::new(),
+                    preferences.mine,
+                    true,
+                ));
+                if self.profile.is_scribe() && hardware.pen {
+                    rows.push(setting(
+                        "pen_highlight",
+                        "pen_highlight",
                         "toggle",
                         String::new(),
-                        false,
-                        false,
-                        "update_unavailable",
-                    ),
-                ];
-                if self.profile.is_scribe() {
-                    rows.insert(
-                        3,
-                        setting(
-                            "pen_highlight",
-                            "pen_highlight",
-                            "toggle",
-                            String::new(),
-                            false,
-                            false,
-                            "pending_verification",
-                        ),
-                    );
+                        preferences.pen_highlight,
+                        true,
+                    ));
                 }
-                rows
+                rows.push(setting(
+                    "edge_guard",
+                    "edge_guard",
+                    "toggle",
+                    String::new(),
+                    preferences.edge_guard,
+                    true,
+                ));
+                if preferences.edge_guard {
+                    rows.push(nested(setting(
+                        "edge_region",
+                        "edge_region",
+                        "stepper",
+                        format!("{}%", preferences.edge_region),
+                        false,
+                        true,
+                    )));
+                }
             }
-            "storage" => vec![
-                setting(
+            "storage" => {
+                rows.push(setting(
                     "download_concurrency",
                     "download_concurrency",
                     "stepper",
                     preferences.download_concurrency.to_string(),
                     false,
                     true,
-                    "",
-                ),
-                setting(
+                ));
+                rows.push(setting(
                     "download_images",
                     "download_images",
                     "toggle",
                     String::new(),
                     preferences.download_images,
                     true,
-                    "",
-                ),
-                setting(
+                ));
+                rows.push(setting(
                     "download_article_images",
                     "download_article_images",
                     "toggle",
                     String::new(),
                     preferences.download_article_images,
                     true,
-                    "",
-                ),
-                setting(
+                ));
+                rows.push(setting(
                     "prefetch",
                     "prefetch",
                     "toggle",
                     String::new(),
                     preferences.prefetch,
                     remote.chapter_content && !self.demo,
-                    "",
-                ),
-                setting(
-                    "prefetch_notes",
-                    "prefetch_notes",
-                    "toggle",
-                    String::new(),
-                    false,
-                    false,
-                    "update_unavailable",
-                ),
-                setting(
-                    "cache_directory",
-                    "cache_directory",
-                    "info",
-                    self.data_dir.display().to_string(),
-                    false,
-                    false,
-                    "",
-                ),
-                setting(
+                ));
+                if hardware.keep_awake {
+                    rows.push(setting(
+                        "keep_awake",
+                        "keep_awake",
+                        "toggle",
+                        String::new(),
+                        preferences.keep_awake,
+                        true,
+                    ));
+                }
+                rows.push(setting(
                     "clear_cache",
                     "clear_cache",
                     "action",
                     size_label(cache_bytes),
                     false,
                     true,
-                    "",
-                ),
-                setting(
+                ));
+                rows.push(setting(
                     "scan_local",
                     "scan_local",
                     "action",
                     String::new(),
                     false,
                     true,
-                    "",
-                ),
-            ],
+                ));
+            }
             "display" => {
-                let mut rows = vec![
-                    setting_choice(
-                        "view_mode",
-                        "shelf_view",
-                        &preferences.view_mode,
-                        if self.profile.is_scribe() {
-                            &[("cover", "cover_view"), ("list", "list_view")]
-                        } else {
-                            &[("list", "list_view"), ("cover", "cover_view")]
-                        },
-                        true,
-                        "",
-                    ),
-                    setting_choice(
-                        "image_dithering",
-                        "image_dithering",
-                        preferences.image_dithering.as_str(),
-                        &[
-                            ("off", "image_dithering_off"),
-                            ("software", "image_dithering_software"),
-                            ("hardware", "image_dithering_hardware"),
-                        ],
-                        true,
-                        if preferences.image_dithering
-                            == crate::preferences::ImageDithering::Hardware
-                            && !self.platform.hardware_y4_available()
-                        {
-                            "image_dithering_fallback"
-                        } else {
-                            ""
-                        },
-                    ),
-                    setting_choice(
+                rows.push(setting_choice(
+                    "image_dithering",
+                    "image_dithering",
+                    preferences.image_dithering.as_str(),
+                    &[
+                        ("off", "image_dithering_off"),
+                        ("software", "image_dithering_software"),
+                        ("hardware", "image_dithering_hardware"),
+                    ],
+                    true,
+                ));
+                if hardware.explicit_refresh {
+                    rows.push(setting_choice(
                         "refresh_interval",
                         "full_refresh",
                         &preferences.reader.refresh_interval.to_string(),
@@ -2227,145 +2056,39 @@ impl App {
                             ("12", "twelve_pages"),
                             ("0", "never"),
                         ],
-                        hardware.explicit_refresh,
-                        if hardware.explicit_refresh {
-                            ""
-                        } else {
-                            "pending_verification"
-                        },
-                    ),
-                    setting(
-                        "flash_on_navigation",
-                        "flash_on_navigation",
-                        "toggle",
-                        String::new(),
-                        preferences.flash_on_navigation && hardware.explicit_refresh,
-                        hardware.explicit_refresh,
-                        if hardware.explicit_refresh {
-                            ""
-                        } else {
-                            "pending_verification"
-                        },
-                    ),
-                    setting_choice(
-                        "tap_mode",
-                        "tap_zones",
-                        &preferences.reader.tap_mode,
-                        &[
-                            ("default", "tap_zone_default"),
-                            ("mirrored", "tap_zone_mirrored"),
-                            ("swipe", "swipe_only"),
-                        ],
                         true,
-                        "",
-                    ),
-                    setting(
-                        "night_mode",
-                        "night_mode",
+                    ));
+                    rows.push(setting(
+                        "flash_on_navigation",
+                        "flash_on_navigation",
                         "toggle",
                         String::new(),
-                        preferences.dark_mode,
-                        hardware.application_dark_mode,
-                        if hardware.application_dark_mode {
-                            ""
-                        } else {
-                            "application_dark_mode_unavailable"
-                        },
-                    ),
-                ];
-                if self.profile.is_scribe() {
-                    rows.insert(
-                        1,
-                        setting_choice(
-                            "screen_orientation",
-                            "screen_orientation",
-                            "portrait",
-                            &[
-                                ("portrait", "portrait"),
-                                ("landscape", "landscape"),
-                                ("auto", "orientation_auto"),
-                            ],
-                            false,
-                            "pending_verification",
-                        ),
-                    );
+                        preferences.flash_on_navigation,
+                        true,
+                    ));
                 }
-                rows
-            }
-            "device" => vec![
-                setting(
-                    "keep_awake",
-                    "keep_awake",
-                    "toggle",
-                    String::new(),
-                    preferences.keep_awake && hardware.keep_awake,
-                    hardware.keep_awake,
-                    if hardware.keep_awake {
-                        ""
-                    } else {
-                        "hardware_unavailable"
-                    },
-                ),
-                setting(
+                rows.push(setting(
                     "sleep_cover",
                     "sleep_cover",
                     "toggle",
                     String::new(),
                     preferences.sleep_cover,
                     true,
-                    "",
-                ),
-            ],
-            "about" => vec![
-                setting(
-                    "version",
-                    "version",
-                    "info",
-                    env!("CARGO_PKG_VERSION").into(),
-                    false,
-                    false,
-                    "",
-                ),
-                setting(
-                    "check_update",
-                    "check_update",
-                    "action",
-                    String::new(),
-                    false,
-                    false,
-                    "no_update_channel",
-                ),
-                setting(
-                    "auto_update",
-                    "auto_update",
-                    "toggle",
-                    String::new(),
-                    false,
-                    false,
-                    "no_update_channel",
-                ),
-                setting(
-                    "update_proxy",
-                    "update_proxy",
-                    "toggle",
-                    String::new(),
-                    false,
-                    false,
-                    "no_update_channel",
-                ),
-                setting(
-                    "license",
-                    "license",
-                    "info",
-                    tr("license_pending"),
-                    false,
-                    false,
-                    "",
-                ),
-            ],
-            _ => Vec::new(),
-        };
-        Ok(rows)
+                ));
+                if hardware.application_dark_mode {
+                    rows.push(setting(
+                        "night_mode",
+                        "night_mode",
+                        "toggle",
+                        String::new(),
+                        preferences.dark_mode,
+                        true,
+                    ));
+                }
+            }
+            _ => {}
+        }
+        rows
     }
 
     fn choose_setting(&mut self, id: &str, choice: &str) -> Result<()> {
@@ -2387,27 +2110,16 @@ impl App {
         if !self.prefs.set_choice(id, choice) {
             return Ok(());
         }
-        if id == "view_mode" {
-            self.library_page = 0;
-        }
         self.prefs.normalize_for_device(self.profile.is_scribe());
         self.save_preferences()?;
         if id == "refresh_interval" {
             self.platform
                 .set_reader_refresh_interval(self.prefs.reader.refresh_interval)?;
         }
-        self.settings_status = tr("local_saved");
         Ok(())
     }
 
     fn setting_action(&mut self, id: &str) -> Result<()> {
-        if id == "login" {
-            self.navigate(Route::Login, true)?;
-            if self.online && !self.demo {
-                self.begin_login();
-            }
-            return Ok(());
-        }
         if !self
             .setting_rows()?
             .iter()
@@ -2417,12 +2129,8 @@ impl App {
         }
         match id {
             "clear_cache" => {
-                self.confirm_action(
-                    "clear-cache",
-                    "cache_confirm",
-                    "cache_confirm",
-                    "clear_cache",
-                );
+                // The Downloads usage also includes retained local data.
+                self.confirm_action("clear-cache", "cache_confirm", "", "clear_cache");
                 Ok(())
             }
             "scan_local" => self.scan_imports(),
@@ -2491,28 +2199,28 @@ impl App {
 
     fn article_list_projection<'a>(
         &'a self,
-        global: &ArticleModel,
+        open: bool,
         budget: &mut ArticleProjectionBudget,
     ) -> Result<ArticleListProjection<'a>> {
         let articles = self
             .mp_articles
             .get(&self.article.account_id)
             .map(Vec::as_slice)
-            .unwrap_or(&[]);
-        let size = if self.profile.is_scribe() { 11 } else { 8 };
+            .unwrap_or_default();
+        let (_, height) = self.platform.logical_viewport_size();
+        let row_height = if self.profile.is_scribe() { 92 } else { 80 };
+        let size = (height.saturating_sub(96) / row_height).max(1) as usize;
         let pages = page_count(articles.len(), size);
-        let page = (global.get_list_page().max(1) as usize - 1).min(pages - 1);
+        let page = self.article_list_page.min(pages - 1);
         let start = page * size;
         let end = (start + size).min(articles.len());
-        let visible = if global.get_list_open() {
-            &articles[start..end]
-        } else {
-            &[]
-        };
+        let visible = if open { &articles[start..end] } else { &[] };
         // History stays resident and unchanged. The complete borrowed ID work
         // is admitted before any key, title, or row from this operation exists.
         for article in articles {
             budget.record(&article.id, &self.article.id)?;
+            #[cfg(test)]
+            observe_article_projection(|stats| stats.owner_visits += 1);
         }
         let position = articles
             .iter()
@@ -2533,25 +2241,15 @@ impl App {
             )?;
         }
         let mut rows = Vec::with_capacity(visible.len());
-        let mut cached = 0usize;
-        for (index, article) in articles.iter().enumerate() {
+        for article in visible {
             let key = budget.key("article:", &article.id)?;
-            let available = self.store.chapter_body_present(&key, 0)?;
-            cached += usize::from(available);
+            rows.push((article, self.store.chapter_body_present(&key, 0)?));
             #[cfg(test)]
-            observe_article_projection(|stats| {
-                stats.owner_visits += 1;
-                stats.presence_reads += 1;
-            });
-            if global.get_list_open() && index >= start && index < end {
-                rows.push((article, available));
-            }
+            observe_article_projection(|stats| stats.presence_reads += 1);
         }
         Ok(ArticleListProjection {
-            articles,
             next,
             rows,
-            cached,
             page,
             pages,
         })
@@ -2776,6 +2474,7 @@ impl App {
         } = prepared;
         self.article.id = id;
         self.article.account_id = account_id;
+        self.article_list_page = 0;
         self.article.body = body;
         self.article.html = html;
         self.install_article_layout(layout);
@@ -3134,7 +2833,7 @@ impl App {
                 requested: usize::MAX,
             })?)?;
         }
-        let projection = self.article_list_projection(&global, &mut budget)?;
+        let projection = self.article_list_projection(global.get_list_open(), &mut budget)?;
         let images = self.article.image_work.images();
         for image in images {
             budget.record(&image.id, &image.id)?;
@@ -3186,13 +2885,6 @@ impl App {
                 ..Default::default()
             });
         }
-        let list_summary = i18n::format(
-            "articles_summary",
-            &[
-                ("count", projection.articles.len().to_string()),
-                ("cached", projection.cached.to_string()),
-            ],
-        );
         let image_summary = i18n::format(
             "article_image_summary",
             &[
@@ -3331,11 +3023,11 @@ impl App {
         );
         global.set_has_next(projection.next.is_some());
         global.set_next_title(next_title.into());
-        global.set_list_summary(list_summary.into());
         global.set_image_summary(image_summary.into());
         global.set_articles(model(entries));
         global.set_list_page((projection.page + 1) as i32);
         global.set_list_pages(projection.pages as i32);
+        self.article_list_page = projection.page;
         self.publish_article_images(blocks, image_scene)
     }
 
@@ -3392,13 +3084,16 @@ impl App {
                 global.set_menu(true);
             }
             "article.list" => global.set_list_open(value == "true"),
-            "article.list-page" => {
-                let next = move_page(
-                    global.get_list_page().max(1) as usize - 1,
+            "article.list-page" if global.get_list_open() => {
+                self.article_list_page = move_page(
+                    self.article_list_page,
                     value.parse().unwrap_or(0),
                     global.get_list_pages().max(1) as usize,
                 );
-                global.set_list_page((next + 1) as i32);
+                self.refresh_display(RefreshReason::Content);
+            }
+            "article.list-jump" if global.get_list_open() && global.get_list_pages() > 1 => {
+                self.open_jump("article-list", self.article_list_page + 1);
             }
             "article.open" => {
                 let mut budget = ArticleProjectionBudget::new();
@@ -3718,24 +3413,26 @@ fn setting(
     value: String,
     checked: bool,
     enabled: bool,
-    note: &str,
 ) -> SettingEntry {
     SettingEntry {
         id: id.into(),
         title: tr(title).into(),
-        subtitle: if note.is_empty() {
-            String::new()
-        } else {
-            tr(note)
-        }
-        .into(),
+        subtitle: Default::default(),
         value: value.into(),
         kind: kind.into(),
         checked,
         enabled,
+        nested: false,
         options: Default::default(),
         selected_value: Default::default(),
     }
+}
+
+/// Mark a row that only applies while the row above it is on; it is indented
+/// beneath that row.
+fn nested(mut entry: SettingEntry) -> SettingEntry {
+    entry.nested = true;
+    entry
 }
 
 fn setting_choice(
@@ -3744,9 +3441,8 @@ fn setting_choice(
     selected: &str,
     options: &[(&str, &str)],
     enabled: bool,
-    note: &str,
 ) -> SettingEntry {
-    let mut entry = setting(id, title, "choice", String::new(), false, enabled, note);
+    let mut entry = setting(id, title, "choice", String::new(), false, enabled);
     entry.selected_value = selected.into();
     entry.options = model(
         options
@@ -3758,43 +3454,6 @@ fn setting_choice(
             .collect(),
     );
     entry
-}
-
-fn setting_row_height(row: &SettingEntry, scribe: bool) -> u32 {
-    if row.kind.as_str() == "choice" {
-        let base = if scribe { 104 } else { 100 };
-        base + if row.subtitle.is_empty() {
-            0
-        } else if scribe {
-            30
-        } else {
-            28
-        }
-    } else if row.subtitle.is_empty() {
-        56
-    } else {
-        72
-    }
-}
-
-fn settings_title(subpage: &str) -> &str {
-    match subpage {
-        "sync" => "reading_sync",
-        "notes" => "highlights_thoughts",
-        "storage" => "downloads_storage",
-        "display" => "display_refresh",
-        "device" => "device_network",
-        "about" => "about",
-        _ => "settings",
-    }
-}
-
-fn popup_label(position: &str) -> String {
-    tr(match position {
-        "side" => "side_panel",
-        "bottom" => "bottom_popup",
-        _ => "center_popup",
-    })
 }
 
 fn date_label(timestamp: i64) -> String {
@@ -3879,5 +3538,138 @@ fn size_label(bytes: u64) -> String {
         format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
     } else {
         format!("{} KB", bytes.div_ceil(1024))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::underline_projection_tests::{Fixture, isolated};
+    use super::*;
+    use crate::platform::{DeviceControl, PlatformCapabilities, PlatformError};
+
+    struct PenDevice;
+
+    impl DeviceControl for PenDevice {
+        fn capabilities(&self) -> PlatformCapabilities {
+            PlatformCapabilities {
+                pen: true,
+                ..Default::default()
+            }
+        }
+        fn brightness(&self) -> Result<u8, PlatformError> {
+            Err(PlatformError::Unsupported("brightness"))
+        }
+        fn set_brightness(&self, _: u8) -> Result<(), PlatformError> {
+            Err(PlatformError::Unsupported("brightness"))
+        }
+        fn warmth(&self) -> Result<u8, PlatformError> {
+            Err(PlatformError::Unsupported("warmth"))
+        }
+        fn set_warmth(&self, _: u8) -> Result<(), PlatformError> {
+            Err(PlatformError::Unsupported("warmth"))
+        }
+        fn battery_percentage(&self) -> Result<u8, PlatformError> {
+            Err(PlatformError::Unsupported("battery"))
+        }
+        fn set_inverted(&self, _: bool) -> Result<(), PlatformError> {
+            Err(PlatformError::Unsupported("hardware_inversion"))
+        }
+        fn reset_idle_timer(&self) -> Result<(), PlatformError> {
+            Err(PlatformError::Unsupported("keep_awake"))
+        }
+    }
+
+    fn settings_pen() -> Result<()> {
+        let fixture =
+            Fixture::new_for_profile("Fixture reader.", vec![], false, DeviceProfile::Scribe)?;
+        {
+            let mut app = fixture.app();
+            app.dispatch("shell", "tab", "settings")?;
+            app.dispatch("auxiliary", "settings.open", "notes")?;
+            let global = fixture.ui().global::<AuxiliaryModel>();
+            let pen_row = || {
+                global
+                    .get_settings_rows()
+                    .iter()
+                    .find(|row| row.id == "pen_highlight")
+            };
+            assert!(pen_row().is_none());
+            app.dispatch("auxiliary", "settings.toggle", "pen_highlight")?;
+            assert!(!app.prefs.pen_highlight);
+
+            app.platform = Arc::new(Platform::with_control(
+                app.profile,
+                false,
+                Arc::new(PenDevice),
+            ));
+            app.render_settings()?;
+            let rows: Vec<_> = global.get_settings_rows().iter().collect();
+            let index = rows
+                .iter()
+                .position(|row| row.id == "pen_highlight")
+                .unwrap();
+            assert_eq!(rows[index - 1].id, "mine");
+            assert_eq!(rows[index + 1].id, "edge_guard");
+            assert!(rows[index].enabled && !rows[index].checked);
+            app.dispatch("auxiliary", "settings.toggle", "pen_highlight")?;
+            assert!(pen_row().unwrap().checked);
+            assert!(
+                app.store
+                    .setting::<AppPreferences>("preferences")?
+                    .unwrap()
+                    .pen_highlight
+            );
+
+            app.profile = DeviceProfile::Paperwhite6;
+            app.platform = Arc::new(Platform::with_control(
+                app.profile,
+                false,
+                Arc::new(PenDevice),
+            ));
+            app.render_settings()?;
+            assert!(pen_row().is_none());
+            app.dispatch("auxiliary", "settings.toggle", "pen_highlight")?;
+            assert!(app.prefs.pen_highlight);
+        }
+        fixture.finish()
+    }
+
+    #[test]
+    fn settings_pen_requires_a_capable_scribe_and_persists_the_value() -> Result<()> {
+        isolated(
+            "app::auxiliary::tests::settings_pen_requires_a_capable_scribe_and_persists_the_value",
+            settings_pen,
+        )
+    }
+
+    fn publication_geometry() -> Result<()> {
+        let fixture = Fixture::new("Fixture reader.", vec![], false)?;
+        {
+            let mut app = fixture.app();
+            for (profile, full, with_status) in [
+                (DeviceProfile::Scribe, 14, 13),
+                (DeviceProfile::Paperwhite6, 9, 8),
+            ] {
+                app.profile = profile;
+                app.platform = Arc::new(Platform::new(profile, false)?);
+                app.online = true;
+                app.mp_status.clear();
+                assert_eq!(app.publication_page_size(), full);
+                app.mp_status = tr("synchronizing");
+                assert_eq!(app.publication_page_size(), with_status);
+                app.mp_status.clear();
+                app.online = false;
+                assert_eq!(app.publication_page_size(), with_status);
+            }
+        }
+        fixture.finish()
+    }
+
+    #[test]
+    fn publication_pages_fit_below_the_compact_header_on_both_profiles() -> Result<()> {
+        isolated(
+            "app::auxiliary::tests::publication_pages_fit_below_the_compact_header_on_both_profiles",
+            publication_geometry,
+        )
     }
 }

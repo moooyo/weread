@@ -17,7 +17,6 @@ import json
 import os
 from pathlib import Path
 import sqlite3
-import struct
 import sys
 from typing import Any, Callable, Iterable
 
@@ -62,35 +61,21 @@ def ink_ratio(image: Image.Image, box: tuple[int, int, int, int], *, maximum: in
     return sum(histogram[:maximum + 1]) / (area.width * area.height)
 
 
-def software_cover(source: Image.Image, target: tuple[int, int]) -> tuple[Image.Image, dict[str, Any]]:
-    """Use the pinned Slint 1.17.1 software renderer's integer RGB sampler."""
-    def f32(value: float) -> float:
-        return struct.unpack("f", struct.pack("f", value))[0]
-
+def prepared_cover(source: Image.Image, target: tuple[int, int]) -> tuple[Image.Image, dict[str, Any]]:
+    """Independent reference for the ordinary, non-dithered Article picture."""
     source = source.convert("L")
     width, height = target
     original_width, original_height = source.size
-    ratio = max(f32(width / original_width), f32(height / original_height))
-    clip_width, clip_height = original_width, original_height
-    clip_x = clip_y = 0
-    visible_width, visible_height = f32(width / ratio), f32(height / ratio)
-    if original_width > visible_width:
-        difference = int(f32(original_width - visible_width))
-        clip_width -= difference
-        clip_x += difference // 2
-    if original_height > visible_height:
-        difference = int(f32(original_height - visible_height))
-        clip_height -= difference
-        clip_y += difference // 2
-    dx, dy = max(1, (clip_width << 8) // width), max(1, (clip_height << 8) // height)
-    source_pixels = source.load()
-    expected = Image.new("L", target)
-    expected_pixels = expected.load()
-    for y in range(height):
-        sample_y = clip_y + ((dy * y) >> 8)
-        for x in range(width):
-            expected_pixels[x, y] = source_pixels[clip_x + ((dx * x) >> 8), sample_y]
-    return expected, {"source_rect": [clip_x, clip_y, clip_width, clip_height], "dx_fixed_8": dx, "dy_fixed_8": dy, "sampling": "Slint 1.17.1 integer crop and fixed-point nearest RGB"}
+    if original_width * height >= original_height * width:
+        crop_width = max(1, min(original_width, (original_height * width + height // 2) // height))
+        crop_height = original_height
+    else:
+        crop_width = original_width
+        crop_height = max(1, min(original_height, (original_width * height + width // 2) // width))
+    x, y = (original_width - crop_width) // 2, (original_height - crop_height) // 2
+    gray = source.crop((x, y, x + crop_width, y + crop_height)).resize(target, Image.Resampling.BILINEAR)
+    raster = gray.point([min(15, (value + 8) // 17) * 17 for value in range(256)])
+    return raster, {"source_rect": [x, y, crop_width, crop_height], "sampling": "center crop, triangle filter, standard Gray4 quantization"}
 
 
 def matching_capture(first: ui.Capture, second: ui.Capture, box: tuple[int, int, int, int], *, maximum: float = 0.001) -> dict[str, Any]:
@@ -100,18 +85,28 @@ def matching_capture(first: ui.Capture, second: ui.Capture, box: tuple[int, int,
 
 
 def locate_primary(image: Image.Image) -> tuple[int, int, int, int]:
-    """Find the actual filled Scribe read button before choosing pointer points."""
-    x0, x1 = 210, 580
-    rows = [ink_ratio(image, (x0, y, x1, y + 1), maximum=64) > 0.5 for y in range(260, 380)]
-    candidates = [(260 + start, 260 + end) for start, end in runs(rows, 40)]
+    """Find the filled Scribe read action in the independent left pane."""
+    x0, x1, y0, y1 = 42, 94, 430, 810
+    # Sample the filled strip left of the centered label, not the white glyphs.
+    rows = [ink_ratio(image, (x0, y, x1, y + 1), maximum=64) > 0.95 for y in range(y0, y1)]
+    candidates = [(y0 + start, y0 + end) for start, end in runs(rows, 40)]
     require(len(candidates) == 1, f"Expected one filled read-button band, found {candidates}")
     top, bottom = candidates[0]
     require(bottom - top == 48, f"The actual primary button is {bottom - top}px high, expected the complete 48px target")
-    edges = horizontal_runs(image, top + 8, 160, 650, tone=64, minimum=150)
+    edges = horizontal_runs(image, top + 8, 20, 310, tone=64, minimum=180)
     require(len(edges) == 1, f"Could not identify the actual primary button sides: {edges}")
     left, right = edges[0]
-    require(180 <= left < 300 and 450 <= right <= 650, "The primary-button bounds escaped the accepted detail header")
+    require(30 <= left < 50 and 265 <= right <= 312, "The primary-button bounds escaped the summary pane")
     return left, top, right, bottom
+
+
+def pager_geometry(capture: ui.Capture, right: int, center: int) -> dict[str, Any]:
+    image = grayscale(capture.path)
+    left = right - 152
+    boxes = ((left, left + 48), (left + 48, right - 48), (right - 48, right))
+    scores = [ink_ratio(image, (a + 8, center - 15, b - 8, center + 15), maximum=170) for a, b in boxes]
+    require(all(score > 0.01 for score in scores), f"Expected visible previous, page label and next at the header's right edge: {scores}")
+    return {"pager_bounds": [left, center - 24, right, center + 24], "segment_ink_ratios": scores}
 
 
 def setting_write(database: Path, key: str, value: Any) -> None:
@@ -211,7 +206,10 @@ def fixture_article(database: Path, *, cached: bool) -> Path | None:
     temporary = cache / "design-fixture-payload.png"
     payload.save(temporary)
     data = temporary.read_bytes()
-    key = f"article-image:demo-article-0:{image_id}"
+    # Use the current runtime cache namespace and length-delimited identity.
+    fields = (b"demo-article-0", image_id.encode(), url.encode())
+    identity = b"".join(len(field).to_bytes(8, "big") + field for field in fields)
+    key = f"article-image:gray8-v2:{hashlib.sha256(identity).hexdigest()}"
     filename = f"{hashlib.sha256(key.encode()).hexdigest()}-{hashlib.sha256(data).hexdigest()}.png"
     destination = cache / filename
     temporary.rename(destination)
@@ -276,6 +274,10 @@ class DesignVerifier(ui.Verifier):
         fixture_library_pages(seed.database, mode)
         before = self.run_case(f"{name}/before", profile=profile, data_key=name)
         expected = self.run_case(f"{name}/expected-page-two", profile=profile, data_key=name, actions=[action(400, "library", "page", "1")])
+        pressed = self.run_case(f"{name}/header-pager-next", profile=profile, data_key=name,
+            actions=[action(400, "pointer", "tap", f"{width - 32},104")])
+        self.assertion(f"{name}/header-pager-has-three-visible-segments", lambda: pager_geometry(before, width - 8, 104), before)
+        self.assertion(f"{name}/header-next-pages-exactly-once", lambda: matching_capture(expected, pressed, (0, 80, width, height)), expected, pressed)
         drag = [
             action(400, "pointer", "down", f"{width - 100},300"),
             action(550, "pointer", "move", "100,300"),
@@ -296,16 +298,17 @@ class DesignVerifier(ui.Verifier):
     def catalog_detail(self, profile: str) -> None:
         width, height = ui.PROFILES[profile]
         prefix = f"design/catalog/{profile}"
-        intro = self.run_case(f"{prefix}/detail-intro", profile=profile, screen="detail", actions=[action(200, "detail", "tab", "intro")])
+        intro = self.run_case(f"{prefix}/detail-intro-request", profile=profile, screen="detail", actions=[action(200, "detail", "tab", "intro")])
         selected_intro = self.run_case(f"{prefix}/detail-selected-intro", profile=profile, screen="detail", actions=[action(200, "detail", "select"), action(400, "detail", "tab", "intro")])
-        self.assertion(f"{prefix}/selection-to-intro-clears-action-bar", lambda: matching_capture(intro, selected_intro, (0, 80, width, height)), intro, selected_intro)
+        self.assertion(f"{prefix}/selection-to-intro-clears-action-bar", lambda: matching_capture(intro, selected_intro, (0, 28, width, height)), intro, selected_intro)
         toc = self.run_case(f"{prefix}/detail-toc", profile=profile, screen="detail")
         cleared_toc = self.run_case(f"{prefix}/detail-selected-intro-toc", profile=profile, screen="detail", actions=[action(200, "detail", "select"), action(400, "detail", "tab", "intro"), action(600, "detail", "tab", "toc")])
-        self.assertion(f"{prefix}/selection-mode-remains-cleared", lambda: matching_capture(toc, cleared_toc, (0, 80, width, height)), toc, cleared_toc)
+        self.assertion(f"{prefix}/selection-mode-remains-cleared", lambda: matching_capture(toc, cleared_toc, (0, 28, width, height)), toc, cleared_toc)
         selected = self.run_case(f"{prefix}/detail-selected", profile=profile, screen="detail", actions=[action(200, "detail", "select")])
-        self.assertion(f"{prefix}/selection-divider-is-at-top", lambda: self.selection_divider(selected, profile), selected)
+        self.assertion(f"{prefix}/selection-actions-are-in-page-header", lambda: self.selection_header(toc, selected, profile), toc, selected)
         stem = "SC" if profile == "scribe" else "PW"
-        self.pair(intro, f"{stem}-Detail--intro.png", state="Detail Introduction")
+        if profile != "scribe":
+            self.pair(intro, f"{stem}-Detail--intro.png", state="Detail Introduction")
         self.pair(selected, f"{stem}-Detail--select.png", state="Detail chapter selection")
         selection_key = f"{prefix}/picked-fixture"
         selection_seed = self.run_case(f"{prefix}/picked-seed", profile=profile, screen="detail", data_key=selection_key)
@@ -314,7 +317,20 @@ class DesignVerifier(ui.Verifier):
         picked = self.observe(f"{prefix}/picked-one", profile=profile, screen="detail", data_key=selection_key, actions=pick_actions)
         self.assertion(f"{prefix}/fixture-really-selects-an-uncached-chapter", lambda: self.chapter_selection(picked, "toc", True, 1), picked)
         cleared = self.observe(f"{prefix}/picked-then-intro", profile=profile, screen="detail", data_key=selection_key, actions=[*pick_actions, action(600, "detail", "tab", "intro")])
-        self.assertion(f"{prefix}/picked-count-and-mode-clear-on-tab-change", lambda: self.chapter_selection(cleared, "intro", False, 0), cleared)
+        projected_tab = "toc" if profile == "scribe" else "intro"
+        self.assertion(f"{prefix}/picked-count-and-mode-clear-on-intro-request", lambda: self.chapter_selection(cleared, projected_tab, False, 0), cleared)
+        select_all = self.observe(f"{prefix}/picked-all-there-is-room-for", profile=profile, screen="detail", data_key=selection_key,
+            actions=[action(200, "detail", "select"), action(400, "detail", "select-page")])
+        uncached = (20 if profile == "scribe" else 8) - 3
+        self.assertion(f"{prefix}/selection-does-not-reduce-toc-capacity", lambda: self.chapter_selection(select_all, "toc", True, uncached), select_all)
+        if profile == "scribe":
+            with sqlite3.connect(picked.database) as connection:
+                short_intro, = connection.execute("SELECT intro FROM books WHERE id='demo-0'").fetchone()
+                connection.execute("UPDATE books SET intro=? WHERE id='demo-0'", (short_intro * 7,))
+            full = self.run_case(f"{prefix}/full-introduction", profile=profile, screen="detail", data_key=selection_key,
+                actions=[action(300, "detail", "intro-open")])
+            self.assertion(f"{prefix}/full-introduction-dialog-uses-design-anchor",
+                lambda: self.introduction_dialog(full), full)
 
     def catalog_primary(self, profile: str) -> None:
         width, height = ui.PROFILES[profile]
@@ -328,13 +344,10 @@ class DesignVerifier(ui.Verifier):
                 self.run_case(f"{prefix}/read-hit-{label}", profile=profile, screen="detail", actions=[action(300, "pointer", "tap", f"{x},{y}")], expected_route="reader")
             except ui.CaseFailure:
                 pass
-        for index, tab in enumerate(("intro", "toc", "reviews", "notes")):
-            try:
-                expected = self.run_case(f"{prefix}/expected-tab-{tab}", profile=profile, screen="detail", actions=[action(250, "detail", "tab", tab)])
-                tapped = self.run_case(f"{prefix}/touch-tab-{tab}", profile=profile, screen="detail", actions=[action(250, "pointer", "tap", f"{width * (index + 0.5) / 4},396")])
-                self.assertion(f"{prefix}/tab-{tab}-remains-below-buttons", lambda a=expected, b=tapped: matching_capture(a, b, (0, 80, width, height)), expected, tapped)
-            except ui.CaseFailure:
-                pass
+        for tab, x in (("toc", 430), ("reviews", 617), ("notes", 804)):
+            expected = self.run_case(f"{prefix}/expected-tab-{tab}", profile=profile, screen="detail", actions=[action(250, "detail", "tab", tab)])
+            tapped = self.run_case(f"{prefix}/touch-tab-{tab}", profile=profile, screen="detail", actions=[action(250, "pointer", "tap", f"{x},128")])
+            self.assertion(f"{prefix}/tab-{tab}-opens-in-right-pane", lambda a=expected, b=tapped: matching_capture(a, b, (336, 104, width, height)), expected, tapped)
 
     @staticmethod
     def chapter_selection(capture: ui.Capture, tab: str, selecting: bool, count: int) -> dict[str, Any]:
@@ -343,12 +356,25 @@ class DesignVerifier(ui.Verifier):
         return {"tab": detail["tab"], "selecting": detail["selecting"], "selected_count": detail["selected_count"]}
 
     @staticmethod
-    def selection_divider(capture: ui.Capture, profile: str) -> dict[str, Any]:
+    def selection_header(normal: ui.Capture, selecting: ui.Capture, profile: str) -> dict[str, Any]:
         width, height = ui.PROFILES[profile]
-        image = grayscale(capture.path)
+        image = grayscale(selecting.path)
+        box = (8, 28, width - 8, 79)
+        change = ui.pixel_difference(normal.path, selecting.path, crop=box, threshold=8)
+        require(change > 0.015, "The normal title/back/more header did not change to a selection action bar")
         lines = [y for y in range(height - 90, height) if ink_ratio(image, (4, y, width - 4, y + 1), maximum=64) > 0.97]
-        require(lines == [height - 64, height - 63], f"The selection divider is misplaced or crosses controls: {lines}")
-        return {"divider_rows": lines, "action_bar_height": 64}
+        require(not lines, f"A bottom selection action bar remains visible: {lines}")
+        require(ink_ratio(image, (width // 2 - 50, 40, width // 2 + 50, 70)) > 0.035, "The selection count is missing from the center of the header")
+        require(ink_ratio(image, (width - 145, 30, width - 12, 77), maximum=190) > 0.02, "The offline download action is not visibly outlined at the right of the header")
+        return {"header_bounds": list(box), "header_difference_ratio": change, "bottom_action_bar": False}
+
+    @staticmethod
+    def introduction_dialog(capture: ui.Capture) -> dict[str, Any]:
+        image = grayscale(capture.path)
+        left, top, right = (image.width - 580) // 2, 160, (image.width + 580) // 2
+        require(ink_ratio(image, (left + 8, top, right - 8, top + 2), maximum=64) > 0.99,
+                "The full introduction is not framed at the Scribe dialog anchor")
+        return {"dialog_top": top, "dialog_left": left, "dialog_width": right - left}
 
     def auth(self, profile: str) -> None:
         width, height = ui.PROFILES[profile]
@@ -372,14 +398,29 @@ class DesignVerifier(ui.Verifier):
             for index, term in enumerate(("古文", "稍长的搜索词", "短词", "离线搜索布局样本" * 5), 1):
                 connection.execute("INSERT INTO query_history VALUES(?,?)", (term, index))
         wrapped = self.observe(f"{prefix}/wrapped-history", profile=profile, screen="search", data_key=key)
-        self.assertion(f"{prefix}/history-uses-content-width-wrapping-capsules", lambda: self.history_capsules(wrapped, profile), wrapped)
+        self.assertion(f"{prefix}/history-uses-content-width-wrapping-chips", lambda: self.history_chips(wrapped, profile), wrapped)
+        fixture_library_pages(wrapped.database, "cover")
+        query = [action(200, "search", "scope", "shelf"), action(350, "search", "edit-query", "Page fixture")]
+        typing = self.observe(f"{prefix}/results-with-keyboard", profile=profile, screen="search", data_key=key, actions=query)
+        submitted = self.observe(f"{prefix}/results-without-keyboard", profile=profile, screen="search", data_key=key,
+            actions=[*query, action(550, "search", "key", "submit")])
+        right = width - (40 if profile == "scribe" else 8)
+        for keyboard, capture in ((True, typing), (False, submitted)):
+            rows = (11 if keyboard else 15) if profile == "scribe" else (5 if keyboard else 9)
+            self.assertion(f"{prefix}/{'with' if keyboard else 'without'}-keyboard-fits-{rows}-results",
+                lambda c=capture, k=keyboard, n=rows: self.search_results(c, k, n, right), capture)
+        empty_result = self.observe(f"{prefix}/submitted-no-matches", profile=profile, screen="search", data_key=key, actions=[
+            action(200, "search", "scope", "shelf"), action(350, "search", "edit-query", "No matching fixture"),
+            action(550, "search", "key", "submit"), action(750, "pointer", "tap", f"{right - 76},112"),
+        ])
+        self.assertion(f"{prefix}/empty-result-keeps-single-page-header-pager", lambda: self.empty_search_pager(empty_result, right), empty_result)
 
     @staticmethod
     def committed_composition(capture: ui.Capture, profile: str) -> dict[str, Any]:
         search = capture.state["search"]
         require(search["query"] == "古文" and search["composition"] == "shi", "Committed text and uncommitted pinyin were merged or lost")
         require(search["result_count"] > 0, "Composition replaced the committed query's local result set")
-        field_start = 134 if profile == "scribe" else 66
+        field_start = 126 if profile == "scribe" else 66
         left = round(field_start + search["query_width"])
         right = round(left + search["composition_width"])
         image = grayscale(capture.path)
@@ -391,7 +432,23 @@ class DesignVerifier(ui.Verifier):
         return {"query": search["query"], "composition": search["composition"], "underline_bounds": [left, underline_y, right, underline_y + 1], "committed_result_count": search["result_count"]}
 
     @staticmethod
-    def history_capsules(capture: ui.Capture, profile: str) -> dict[str, Any]:
+    def search_results(capture: ui.Capture, keyboard: bool, rows: int, right: int) -> dict[str, Any]:
+        search = capture.state["search"]
+        require(search["keyboard_visible"] is keyboard and search["results_visible"], "Results or keyboard do not match the requested state")
+        require(search["page"] == 1 and search["page_count"] == (45 + rows - 1) // rows and search["result_count"] == rows,
+                f"Search paginates a different number of result rows: {search}")
+        return {**pager_geometry(capture, right, 112), "keyboard_open": keyboard, "rows": rows, "pages": search["page_count"]}
+
+    @staticmethod
+    def empty_search_pager(capture: ui.Capture, right: int) -> dict[str, Any]:
+        search = capture.state["search"]
+        require(search["results_visible"] and search["no_results"] and search["page"] == search["page_count"] == 1,
+                "A submitted empty search lost its visible single-page header")
+        require(not capture.state["shell"]["dialog_kind"], "The single-page label wrongly opened a jump dialog")
+        return {**pager_geometry(capture, right, 112), "page": 1, "page_count": 1, "label_interaction": "inert"}
+
+    @staticmethod
+    def history_chips(capture: ui.Capture, profile: str) -> dict[str, Any]:
         search = capture.state["search"]
         chips = search["recent_chips"]
         require(len(chips) == 4 and search["recent_rows"] >= 2, "The long recent-query fixture did not wrap into multiple rows")
@@ -402,10 +459,10 @@ class DesignVerifier(ui.Verifier):
             require(chip["width"] >= 48 and chip["x"] >= 0 and chip["x"] + chip["width"] <= available + 0.001, "A recent-query target is too small or escapes its content row")
         first = chips[0]
         left, right = round(margin + first["x"]), round(margin + first["x"] + first["width"])
-        top = 218 + first["row"] * 56
+        top = 219 + first["row"] * 56
         image = grayscale(capture.path)
-        require(any(ink_ratio(image, (left + 22, y, right - 22, y + 1), maximum=190) > 0.95 for y in (top, top + 1)), "The recent-query capsule has no curved, content-width top edge at its actual position")
-        return {"rows": search["recent_rows"], "chip_geometry": chips, "first_capsule_top": top, "touch_height": 48, "row_gap": 8}
+        require(any(ink_ratio(image, (left + 2, y, right - 2, y + 1), maximum=190) > 0.95 for y in (top, top + 1)), "The recent-query chip lacks its 36px square outline")
+        return {"rows": search["recent_rows"], "chip_geometry": chips, "first_outline_top": top, "touch_height": 48, "row_gap": 8}
 
     @staticmethod
     def no_pinyin_history(database: Path) -> int:
@@ -447,8 +504,8 @@ class DesignVerifier(ui.Verifier):
     def controls(self, profile: str) -> None:
         prefix = f"design/controls/{profile}"
         for key, subpage, options, preference_path in (
-            ("view_mode", "display", ("cover", "list"), ("view_mode",)),
-            ("tap_mode", "display", ("default", "mirrored", "swipe"), ("reader", "tap_mode")),
+            ("image_dithering", "display", ("off", "software", "hardware"), ("image_dithering",)),
+            ("tap_mode", "notes", ("default", "mirrored", "swipe"), ("reader", "tap_mode")),
             ("popup_position", "notes", ("side", "center", "bottom") if profile == "scribe" else ("center", "bottom"), ("popup_position",)),
         ):
             for value in options:
@@ -464,29 +521,42 @@ class DesignVerifier(ui.Verifier):
                 self.assertion(f"{prefix}/{key}-{value}-absolute-and-idempotent", persisted, capture)
         width, _ = ui.PROFILES[profile]
         margin = 32 if profile == "scribe" else 20
-        content_width = width - margin * 2
-        view_top = 126 if profile == "scribe" else 122
-        view_x = margin + content_width * (0.75 if profile == "scribe" else 0.25)
-        pointer_view = self.run_case(f"{prefix}/view-pointer-list", profile=profile, screen="settings", actions=[
+        # Settings rows start below the status bar, the account header and the
+        # tab bar plus an 8-pixel gap. A choice row is one line: its 48-pixel
+        # segmented control is centred in the row and right-aligned at the
+        # content edge, three choices 120 (Scribe) or 100 (Paperwhite) wide.
+        rows_top, row_height = (204, 64) if profile == "scribe" else (184, 56)
+        three = 120 if profile == "scribe" else 100
+
+        def segments(row: int, count: int, option_width: int) -> tuple[int, int, int, int]:
+            top = rows_top + row * row_height + (row_height - 48) // 2
+            return (width - margin - count * option_width, top, width - margin, top + 48)
+
+        dither = segments(0, 3, three)
+        dither_x = dither[0] + three * 1.5
+        pointer_dither = self.run_case(f"{prefix}/dither-pointer-software", profile=profile, screen="settings", actions=[
             action(200, "auxiliary", "settings.open", "display"),
-            action(400, "pointer", "tap", f"{view_x},{view_top + 24}"),
-            action(600, "pointer", "tap", f"{view_x},{view_top + 24}"),
+            action(400, "pointer", "tap", f"{dither_x},{dither[1] + 24}"),
+            action(600, "pointer", "tap", f"{dither_x},{dither[1] + 24}"),
         ])
-        self.assertion(f"{prefix}/view-pointer-selects-the-specified-segment", lambda: self.preference_value(pointer_view, ("view_mode",), "list"), pointer_view)
-        self.assertion(f"{prefix}/view-segments-share-one-frame", lambda: self.segmented_frame(pointer_view, (margin, view_top, width - margin, view_top + 48), 2), pointer_view)
-        tap_top = 570 if profile == "scribe" else 422
+        self.assertion(f"{prefix}/dither-pointer-selects-the-specified-segment", lambda: self.preference_value(pointer_dither, ("image_dithering",), "software"), pointer_dither)
+        self.assertion(f"{prefix}/dither-segments-share-one-frame", lambda: self.segmented_frame(pointer_dither, dither, 3), pointer_dither)
+        # Reading tab: tap zones first, then the note position.
+        tap = segments(0, 3, three)
+        tap_x = tap[0] + three * 1.5
         pointer_tap = self.run_case(f"{prefix}/tap-pointer-mirrored", profile=profile, screen="settings", actions=[
-            action(200, "auxiliary", "settings.open", "display"),
-            action(400, "pointer", "tap", f"{width / 2},{tap_top + 24}"),
-            action(600, "pointer", "tap", f"{width / 2},{tap_top + 24}"),
+            action(200, "auxiliary", "settings.open", "notes"),
+            action(400, "pointer", "tap", f"{tap_x},{tap[1] + 24}"),
+            action(600, "pointer", "tap", f"{tap_x},{tap[1] + 24}"),
         ])
         self.assertion(f"{prefix}/tap-pointer-selects-middle-segment", lambda: self.preference_value(pointer_tap, ("reader", "tap_mode"), "mirrored"), pointer_tap)
-        popup_top = 238 if profile == "scribe" else 234
-        popup_x = margin + content_width * (5 / 6 if profile == "scribe" else 3 / 4)
+        popup_width = 120 if profile == "scribe" else 96
+        popup = segments(1, 3 if profile == "scribe" else 2, popup_width)
+        popup_x = popup[2] - popup_width / 2
         pointer_popup = self.run_case(f"{prefix}/popup-pointer-bottom", profile=profile, screen="settings", actions=[
             action(200, "auxiliary", "settings.open", "notes"),
-            action(400, "pointer", "tap", f"{popup_x},{popup_top + 24}"),
-            action(600, "pointer", "tap", f"{popup_x},{popup_top + 24}"),
+            action(400, "pointer", "tap", f"{popup_x},{popup[1] + 24}"),
+            action(600, "pointer", "tap", f"{popup_x},{popup[1] + 24}"),
         ])
         self.assertion(f"{prefix}/popup-pointer-selects-last-segment", lambda: self.preference_value(pointer_popup, ("popup_position",), "bottom"), pointer_popup)
         for route, section, tool_action, maximum in (("reader", "reader", "tool", 38 if profile == "scribe" else 32), ("article", "article", "article.tool", 32 if profile == "scribe" else 26)):
@@ -495,18 +565,21 @@ class DesignVerifier(ui.Verifier):
             self.assertion(f"{name}-absolute-and-idempotent", lambda c=capture, r=route, expected=maximum: self.font_size(c, r, expected), capture)
             self.pair(capture, f"{'SC' if profile == 'scribe' else 'PW'}-{'Reader' if route == 'reader' else 'Article'}--type.png", state=f"{route} direct typography selection", exclusions=["The chosen largest font differs from the reference default; compare scale structure only", "Fixture reading content"])
 
-        reader_y = 870 if profile == "scribe" else 524
-        reader_x = width - margin - 62
-        pointer_size = self.run_case(f"{prefix}/reader-size-pointer", profile=profile, screen="reader", actions=[
-            action(100, "reader", "menu", "true"), action(200, "reader", "tool", "type"),
-            action(400, "pointer", "tap", f"{reader_x},{reader_y}"), action(600, "pointer", "tap", f"{reader_x},{reader_y}"),
-        ])
-        self.assertion(f"{prefix}/reader-size-pointer-selects-last-scale-point", lambda: self.font_size(pointer_size, "reader", 38 if profile == "scribe" else 32), pointer_size)
-        article_y = 1_024 if profile == "scribe" else 532
-        article_size = self.run_case(f"{prefix}/article-size-pointer", profile=profile, screen="article", actions=[
-            action(200, "article", "article.tool", "type"), action(400, "pointer", "tap", f"{reader_x},{article_y}"), action(600, "pointer", "tap", f"{reader_x},{article_y}"),
-        ])
-        self.assertion(f"{prefix}/article-size-pointer-selects-last-scale-point", lambda: self.font_size(article_size, "article", 32 if profile == "scribe" else 26), article_size)
+        for route, section, menu_action, tool_action, heights, scale_offset, largest in (
+            ("reader", "reader", "menu", "tool", (384, 344), (92, 88), (38, 32)),
+            ("article", "article", "article.menu", "article.tool", (216, 308), (76, 68), (32, 26)),
+        ):
+            index = 0 if profile == "scribe" else 1
+            events = [action(100, section, menu_action, "true"), action(200, section, tool_action, "type")]
+            menu = self.run_case(f"{prefix}/{route}-typography-surface", profile=profile, screen=route, actions=events)
+            applied_height = heights[index]
+            panel_top = self.panel_geometry(menu, profile, 5 if route == "reader" else 4, applied_height)["panel_top"]
+            # The last scale point is 24px before the track end, separate from the large-A step button.
+            x, y = width - margin - 78, panel_top + scale_offset[index]
+            capture = self.run_case(f"{prefix}/{route}-size-pointer", profile=profile, screen=route,
+                actions=[*events, action(400, "pointer", "tap", f"{x},{y}"), action(600, "pointer", "tap", f"{x},{y}")])
+            self.assertion(f"{prefix}/{route}-size-pointer-selects-last-scale-point",
+                lambda c=capture, r=route, expected=largest[index]: self.font_size(c, r, expected), capture)
 
     @staticmethod
     def preference_value(capture: ui.Capture, path: tuple[str, ...], expected: Any) -> dict[str, Any]:
@@ -546,6 +619,13 @@ class DesignVerifier(ui.Verifier):
             if fixture == "article-qr":
                 self.assertion(f"{prefix}/qr-card-is-centered-and-content-sized", lambda c=capture: self.qr_geometry(c, profile), capture)
             self.pair(capture, target, state=fixture)
+        for fixture in ("login-loading", "login-expired", "login-code-empty"):
+            capture = self.observe(f"{prefix}/{fixture}", profile=profile, screen="login", fixture=fixture)
+            self.assertion(f"{prefix}/{fixture}-is-view-only", lambda c=capture, f=fixture: self.login_fixture(c, f), capture)
+        for fixture in ("detail-download", "detail-downloading"):
+            capture = self.observe(f"{prefix}/{fixture}", profile=profile, screen="detail", fixture=fixture)
+            self.assertion(f"{prefix}/{fixture}-shows-only-its-decision-or-progress-copy",
+                lambda c=capture, f=fixture: self.download_fixture(c, f), capture)
         library = self.observe(f"{prefix}/library-list", profile=profile, actions=[action(200, "library", "view")])
         self.assertion(f"{prefix}/cached-list-book-retains-download-icon", lambda: self.cached_list_icon(library, profile), library)
         self.pair(library, f"{stem}-Library--list.png", state="Library list with a cached first book")
@@ -558,13 +638,25 @@ class DesignVerifier(ui.Verifier):
             events = [action(200, "reader", "bookmark"), action(400, "reader", "menu", "true")] if route == "reader" else [action(200, "article", "article.star"), action(400, "article", "article.menu", "true")]
             capture = self.run_case(f"{prefix}/{route}-selected-header", profile=profile, screen=route, actions=events, exit_ms=3_000)
             self.assertion(f"{prefix}/{route}-header-icon-has-fixed-touch-width", lambda c=capture: self.header_icon_width(c), capture)
-        storage = self.run_case(f"{prefix}/disabled-storage", profile=profile, screen="settings", actions=[action(200, "auxiliary", "settings.open", "storage")])
-        self.assertion(f"{prefix}/disabled-switch-outline-is-dashed", lambda: self.dashed_switch(storage, profile), storage)
+        # Offline fixtures have no web session, so the Sync tab's reporting switches are disabled.
+        sync = self.run_case(f"{prefix}/disabled-sync", profile=profile, screen="settings", actions=[action(200, "auxiliary", "settings.open", "sync")])
+        self.assertion(f"{prefix}/disabled-switch-outline-is-dashed", lambda: self.dashed_switch(sync, profile), sync)
         statistics = self.run_case(f"{prefix}/stats-segments", profile=profile, screen="stats")
         top = 92 if profile == "scribe" else 84
         right = margin + 380 if profile == "scribe" else width - margin
         self.assertion(f"{prefix}/stats-periods-share-one-segmented-frame", lambda: self.segmented_frame(statistics, (margin, top, right, top + 48), 4), statistics)
-        self.pair(statistics, f"{'SC' if profile == 'scribe' else 'PW'}-Stats.png", state="Statistics week controls", exclusions=["Date-dependent local fixture values", "Written single-column statistics boundary is retained"])
+        self.pair(statistics, f"{'SC' if profile == 'scribe' else 'PW'}-Stats.png", state="Statistics week controls", exclusions=["Date-dependent reading data and source notices"])
+        for route, state, offset, actions in (
+            ("detail", "no-bottom-chrome", 24, [action(300, "detail", "download")]),
+            ("search", "keyboard-open", 316, [action(300, "search", "add", "demo-0")]),
+            ("search", "keyboard-closed", 24, [action(150, "search", "key", "submit"), action(300, "search", "add", "demo-0")]),
+            ("reader", "menu-closed", 64 if profile == "scribe" else 56, [action(300, "reader", "sync")]),
+            ("article", "menu-closed", 72 if profile == "scribe" else 56, [action(300, "article", "article.star")]),
+        ):
+            # The desktop fixture requests a local toast through the normal action handler.
+            # This checks anchoring, not the availability of an offline download or store operation.
+            toast = self.run_case(f"{prefix}/{route}-{state}-toast", profile=profile, screen=route, actions=actions)
+            self.assertion(f"{prefix}/{route}-{state}-toast-anchor", lambda c=toast, y=offset: ui.bottom_toast(c, y), toast)
 
     @staticmethod
     def header_icon_width(capture: ui.Capture) -> dict[str, Any]:
@@ -582,14 +674,18 @@ class DesignVerifier(ui.Verifier):
     def dashed_switch(capture: ui.Capture, profile: str) -> dict[str, Any]:
         image = grayscale(capture.path)
         margin = 32 if profile == "scribe" else 20
-        left = image.width - margin - 8 - 48
-        top = 206
-        values = list(image.crop((left + 7, top, left + 41, top + 1)).tobytes())
-        dash_runs = runs((value <= 190 for value in values), 1)
-        gap_runs = runs((value >= 240 for value in values), 1)
-        require(len(dash_runs) >= 3 and len(gap_runs) >= 2, "The disabled switch has a continuous normal outline instead of visible gray dashes")
-        require(min(values) >= 160, "The disabled switch outline retained enabled black ink")
-        return {"sample_line": [left + 7, top, left + 41, top + 1], "dash_runs": dash_runs, "gap_runs": gap_runs, "darkest_tone": min(values)}
+        rows_top, row_height = (204, 64) if profile == "scribe" else (184, 56)
+        # Switches are 48 x 28, right-aligned at the content edge and centred in their row.
+        left = image.width - margin - 48
+        for row in range(6):
+            top = rows_top + row * row_height + (row_height - 28) // 2
+            values = list(image.crop((left + 7, top, left + 41, top + 1)).tobytes())
+            dash_runs = runs((value <= 190 for value in values), 1)
+            gap_runs = runs((value >= 240 for value in values), 1)
+            if len(dash_runs) >= 3 and len(gap_runs) >= 2 and min(values) >= 160:
+                return {"row": row, "sample_line": [left + 7, top, left + 41, top + 1], "dash_runs": dash_runs, "gap_runs": gap_runs, "darkest_tone": min(values)}
+        require(False, "No disabled switch on the Sync tab shows a gray dashed outline")
+        return {}
 
     @staticmethod
     def fixture_boundary(capture: ui.Capture, fixture: str) -> dict[str, Any]:
@@ -597,6 +693,33 @@ class DesignVerifier(ui.Verifier):
         require(capture.state.get("shell", {}).get("online") is False, "The view fixture is not offline")
         require(ui.scalar(capture.database, "SELECT count(*) FROM download_tasks") == 0, "A view-only fixture queued a source download")
         return {"fixture": fixture, "network_disabled": True, "download_tasks": 0}
+
+    def login_fixture(self, capture: ui.Capture, fixture: str) -> dict[str, Any]:
+        boundary = self.fixture_boundary(capture, fixture)
+        login = capture.state["login"]
+        if fixture == "login-loading":
+            require(login["step"] == "qr" and login["busy"] and login["qr_size"] == [0, 0], "Loading Login exposed a usable QR")
+        elif fixture == "login-expired":
+            require(login["step"] == "qr" and not login["busy"] and login["status"] == self.labels["login_expired"],
+                    "Expired Login omitted its explicit expired state")
+        else:
+            require(login["step"] == "code" and login["code_length"] == 0 and not login["can_submit"],
+                    "The unfilled verification code was enabled")
+        return {**boundary, "login_step": login["step"], "login_status": login["status"], "upstream_exercised": False}
+
+    def download_fixture(self, capture: ui.Capture, fixture: str) -> dict[str, Any]:
+        boundary = self.fixture_boundary(capture, fixture)
+        shell = capture.state["shell"]
+        if fixture == "detail-download":
+            expected = self.labels["download_catalog_summary"].format(total=222, cached=3, selected=219)
+            require(shell["dialog_kind"] == "download" and shell["dialog_summary"] == expected and shell["dialog_completed"] == "",
+                    "Download options did not retain their decision summary")
+        else:
+            expected = self.labels["download_progress_completed"].format(done=12, total=219)
+            require(shell["dialog_kind"] == "downloading" and shell["dialog_completed"] == expected and shell["dialog_summary"] == "",
+                    "Running progress did not replace the decision summary with one completed line")
+            require(abs(shell["dialog_progress"] - 12 / 219) < 0.0001, "The fixture's progress bar has inconsistent progress")
+        return {**boundary, "visible_copy": expected, "dialog_kind": shell["dialog_kind"], "upstream_exercised": False}
 
     @staticmethod
     def cached_list_icon(capture: ui.Capture, profile: str) -> dict[str, Any]:
@@ -608,7 +731,7 @@ class DesignVerifier(ui.Verifier):
         # A 14px download icon has a centered vertical stem, a V and a separate
         # baseline. This checks the actual raster geometry before the author.
         matches = []
-        for y0 in range(210, 280):
+        for y0 in range(144, 186):
             # At 14/24 scale the centered SVG stem straddles two pixels, each
             # with approximately half coverage (127); its baseline stays black.
             stem = sum(image.getpixel((x0 + 7, y0 + dy)) <= 150 for dy in range(3, 9))
@@ -655,7 +778,7 @@ class DesignVerifier(ui.Verifier):
         stem = "SC" if profile == "scribe" else "PW"
         seed = self.run_case(f"{prefix}/seed", profile=profile, screen="reader", data_key=prefix)
         fixture = fixture_annotations(seed.database)
-        sidebar_actions = [action(200, "reader", "panel", "true")] if profile == "scribe" else []
+        sidebar_actions = [action(200, "reader", "thought-position", "side"), action(300, "reader", "menu", "false")] if profile == "scribe" else []
         default_reader = self.observe(f"{prefix}/default-reading", profile=profile, screen="reader", data_key=prefix)
         self.assertion(f"{prefix}/default-reading-retains-hidden-annotations", lambda: self.hidden_annotations(default_reader, fixture), default_reader)
         if profile == "scribe":
@@ -675,20 +798,41 @@ class DesignVerifier(ui.Verifier):
         self.assertion(f"{prefix}/my-annotation-opens-selected-note", lambda: self.opened_annotation(mine, fixture, mine=True), mine)
         close_actions = [*mine_actions, action(600, "reader", "thought-close")]
         if profile == "scribe":
-            close_actions.append(action(800, "reader", "panel", "false"))
+            close_actions.append(action(800, "reader", "thought-position", "center"))
         closed = self.observe(f"{prefix}/closed-reading", profile=profile, screen="reader", data_key=prefix, actions=close_actions)
         self.assertion(f"{prefix}/closing-annotations-restores-counts-and-empty-model", lambda: self.hidden_annotations(closed, fixture), closed)
         for tab in ("marks", "notes"):
             capture = self.observe(f"{prefix}/toc-{tab}", profile=profile, screen="reader", data_key=prefix, actions=[action(200, "reader", "toc", tab)])
             self.assertion(f"{prefix}/toc-{tab}-contains-independent-location-fields", lambda c=capture, t=tab: self.reader_entries(c, t), capture)
             self.pair(capture, f"{stem}-Reader--toc-{tab}.png", state=f"Reader populated {tab}")
-        for tool, subtool, suffix in (("type", "", "type"), ("type", "font", "type-font"), ("type", "indent", "type-indent"), ("type", "turn", "type-turn"), ("light", "", "light")):
+        for tool, subtool, suffix, heights in (
+            ("progress", "", "progress", (152, 152)), ("notes", "", "notes", (200, 200)),
+            ("light", "", "light", (272, 272)), ("type", "", "type", (384, 344)),
+            ("type", "font", "type-font", (188, 308)), ("type", "indent", "type-indent", (168, 276)),
+            ("type", "turn", "type-turn", (274, 386)),
+        ):
+            height = heights[0 if profile == "scribe" else 1]
             actions = [action(100, "reader", "menu", "true"), action(200, "reader", "tool", tool)]
             if subtool:
                 actions.append(action(400, "reader", "subtool", subtool))
             capture = self.observe(f"{prefix}/{suffix}", profile=profile, screen="reader", actions=actions)
             self.assertion(f"{prefix}/{suffix}-tool-is-open", lambda c=capture, t=tool, s=subtool: self.reader_tool(c, t, s), capture)
-            self.pair(capture, f"{stem}-Reader--{suffix}.png", state=f"Reader {suffix}")
+            self.assertion(f"{prefix}/{suffix}-content-fit-and-five-tools",
+                lambda c=capture, h=height: self.panel_geometry(c, profile, 5, h, tolerance=9), capture)
+            if tool not in ("progress", "notes"):
+                self.pair(capture, f"{stem}-Reader--{suffix}.png", state=f"Reader {suffix}")
+        reader_toast = self.run_case(f"{prefix}/progress-offline-toast", profile=profile, screen="reader", actions=[
+            action(150, "reader", "menu", "true"), action(350, "reader", "tool", "progress"), action(500, "reader", "sync"),
+        ])
+        nav = 76 if profile == "scribe" else 64
+        self.assertion(f"{prefix}/reader-toast-follows-panel-height", lambda: ui.bottom_toast(reader_toast, nav + 152 + 16), reader_toast)
+        for tool, height in (("", 0), ("images", 152)):
+            events = [action(150, "article", "article.menu", "true")]
+            if tool:
+                events.append(action(300, "article", "article.tool", tool))
+            panel = self.run_case(f"{prefix}/article-panel-{tool or 'tools-only'}", profile=profile, screen="article", actions=events)
+            self.assertion(f"{prefix}/article-{tool or 'tools-only'}-has-no-extra-band",
+                lambda c=panel, h=height: self.panel_geometry(c, profile, 4, h), panel)
         article_key = f"{prefix}/article-fixture"
         seed = self.run_case(f"{prefix}/article-seed", profile=profile, screen="article", data_key=article_key)
         fixture_article(seed.database, cached=False)
@@ -793,8 +937,9 @@ class DesignVerifier(ui.Verifier):
         require(reader["thought_count"] == 1 and reader["total_thought_count"] == 1 and len(reader["thoughts"]) == 1, "The opened thread did not publish exactly its selected annotation family")
         entry = reader["thoughts"][0]
         expected_id = f"mine:{fixture['note_id']}" if mine else fixture["review_id"]
-        require(entry["id"] == expected_id and entry["mine"] is mine
-            and entry["body"] == fixture["note_body" if mine else "review_body"], "The opened annotation did not retain the exact selected preview body")
+        expected_body = fixture["note_body" if mine else "review_body"]
+        require(entry["id"] == expected_id and entry["mine"] is mine and entry["body"] == expected_body,
+                "The opened annotation did not retain the exact selected preview body")
         require(reader["note_id"] == (fixture["note_id"] if mine else ""), "The opened thread selected an unrelated local note")
         if mine:
             require(entry["quote"] == fixture["quote"] and bool(entry["quote_lines"])
@@ -853,6 +998,21 @@ class DesignVerifier(ui.Verifier):
         return {"tool": tool, "subtool": subtool}
 
     @staticmethod
+    def panel_geometry(capture: ui.Capture, profile: str, tools: int, content_height: int, *, tolerance: int = 4) -> dict[str, Any]:
+        image = grayscale(capture.path)
+        row_top = image.height - (76 if profile == "scribe" else 64)
+        expected = row_top - content_height
+        rows = [y for y in range(expected - tolerance, expected + tolerance + 2)
+                if ink_ratio(image, (4, y, image.width - 4, y + 1), maximum=64) > 0.99]
+        require(bool(rows), f"Panel boundary near y={expected} did not fit its declared content height")
+        scores = []
+        for index in range(tools):
+            x = round(image.width * (index + 0.5) / tools)
+            scores.append(ink_ratio(image, (x - 21, row_top + 6, x + 21, image.height - 6), maximum=64))
+        require(all(score > 0.015 for score in scores), f"Some of the {tools} evenly distributed toolbar targets are blank: {scores}")
+        return {"panel_top": min(rows), "content_height": row_top - min(rows), "tool_slots": tools, "tool_ink_ratios": scores}
+
+    @staticmethod
     def article_frame(capture: ui.Capture, profile: str, *, loaded: bool) -> dict[str, Any]:
         blocks = [block for block in capture.state["article"]["blocks"] if block["kind"] == "image"]
         require(len(blocks) == 1, "The fixture image is not visible exactly once on the current article page")
@@ -863,10 +1023,8 @@ class DesignVerifier(ui.Verifier):
 
     @staticmethod
     def article_bitmap(capture: ui.Capture, payload: Path) -> dict[str, Any]:
-        # Articles deliberately use center-cover. Slint 1.17.1's software RGB
-        # path truncates fixed-point source positions; Pillow's antialiased
-        # bilinear downsampling is a different reference. The strict 2.0/2%
-        # limits are unchanged, and the frame uses no registration search.
+        # The app prepares a display-sized raster before Slint receives it.
+        # Keep the same strict pixel limits and compare at the model's exact origin.
         frame = grayscale(capture.path)
         source = grayscale(payload)
         profile = capture.metadata["profile"]
@@ -881,14 +1039,14 @@ class DesignVerifier(ui.Verifier):
         else:
             raise AssertionError("The actual article model contains no visible image block")
         require(top + target_height <= frame.height, "The article bitmap is clipped outside the viewport")
-        expected, sampler = software_cover(source, (target_width, target_height))
+        expected, sampler = prepared_cover(source, (target_width, target_height))
         actual = frame.crop((margin, top, margin + target_width, top + target_height))
         histogram = ImageChops.difference(expected, actual).histogram()
         area = target_width * target_height
         mean_error = sum(value * count for value, count in enumerate(histogram)) / area
         difference_ratio = sum(histogram[21:]) / area
         require(mean_error <= 2.0 and difference_ratio <= 0.02, f"The center-cover article bitmap failed strict raster matching: mean={mean_error}, ratio={difference_ratio}")
-        return {"bitmap_bounds": [margin, top, target_width, target_height], "bitmap_mean_error": mean_error, "bitmap_difference_ratio": difference_ratio, "exact_pixel_ratio": histogram[0] / area, "registration_search": False, "sampler": sampler, "image_fit": "center-cover", "payload_sha256": hashlib.sha256(payload.read_bytes()).hexdigest()}
+        return {"bitmap_bounds": [margin, top, target_width, target_height], "bitmap_mean_error": mean_error, "bitmap_difference_ratio": difference_ratio, "exact_pixel_ratio": histogram[0] / area, "registration_search": False, "sampler": sampler, "image_fit": "center-cover"}
 
     def tasks(self) -> list[tuple[str, Callable[[], None]]]:
         tasks = [("design/catalog/scribe/primary", lambda: self.catalog_primary("scribe"))]
@@ -911,13 +1069,13 @@ class DesignVerifier(ui.Verifier):
         status = super().run()
         report_path = self.output / "report.json"
         report = json.loads(report_path.read_text(encoding="utf-8"))
-        report["suite"] = "Design fidelity corrections for docs/DESIGN_REVIEW.md"
+        report["suite"] = "Desktop Slint layout regressions and offline presentation fixtures"
         report["count_definition"] = "Counts include individual application captures and independently recorded assertions."
         report["verification_method_corrections"] = [
             "Locate input underlines from the actual search-field top border, rather than assuming vertically centered row children.",
             "Test the 14px SVG download stem's half-covered gray pixels and its separate black arrow/baseline geometry.",
             "Measure selected header backgrounds with continuous horizontal runs so inverted white glyphs do not split the box.",
-            "Use the pinned Slint 1.17.1 integer-crop/fixed-point nearest RGB sampler for article cover images; preserve mean<=2.0 and difference>20<=2% with no registration search.",
+            "Model current article picture preparation as an independent centered crop, triangle resize and Gray4 quantization; preserve mean<=2.0 and difference>20<=2% with no registration search.",
         ]
         report["paired_comparisons"] = self.pairs
         report["coverage_limits"].extend([
@@ -927,7 +1085,7 @@ class DesignVerifier(ui.Verifier):
         ])
         if self.arguments.state_harness is not None:
             report["state_harness"] = str(self.arguments.state_harness)
-            report["state_harness_sha256"] = hashlib.sha256(self.arguments.state_harness.read_bytes()).hexdigest()
+            report["state_harness_bytes"] = self.arguments.state_harness.stat().st_size
         report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
         return status
 

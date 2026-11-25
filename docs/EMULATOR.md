@@ -77,9 +77,7 @@ ssh -N -L 5906:127.0.0.1:5906 test-env
 
 ## Application experiment
 
-Deploy the existing development bundle under the guest's `/mnt/us`. Keep the original application as `weread/app/weread.native`; use a guest-only `weread/app/weread` wrapper to append `--demo --offline`, an explicit timeout, and an application capture path. The original launcher still controls profile/firmware checks, display ownership, power-event observation, and restoration. Its current product implementation does not forward arbitrary additional CLI arguments.
-
-For repeatable final checks, keep the ELF under an immutable filename `weread-<first-12-SHA256-characters>` instead of replacing a mapped executable. Install [the test-only wrapper](../packaging/tests/emulator-wrapper.sh) as `weread/app/weread`, and write that ELF basename to `data/logs/test-binary`. Synchronize guest writes and compare the complete host/guest hashes before execution. The wrapper is not a product bundle input.
+Deploy the existing development bundle under the guest's `/mnt/us`. Keep the ELF under an immutable filename `weread-<12 lowercase hex digits>` instead of replacing a mapped executable. Install [the test-only wrapper](../packaging/tests/emulator-wrapper.sh) as `weread/app/weread`, write the deployed basename to `data/logs/test-binary`, and pass that basename as `--deployed-name`. The wrapper selects offline data, capture, and timeout options for each test case. The original launcher still controls profile/firmware checks, display ownership, power-event observation, and restoration. The wrapper is not a product bundle input.
 
 The guest-local `data/device-profile` contains `pw6`, and `data/device-allowlist` contains the exact experimental pair `pw6 5.20.1`. The additional `data/experimental-display` contains `pw6-5201-emulator`. This named specification accepts only that exact profile/firmware pair and requires visible framebuffer dimensions 1272 x 1696 with zero panning offsets. It does not accept arbitrary width/height overrides. These local entries enable this experiment and do not certify physical compatibility.
 
@@ -97,7 +95,14 @@ python3 /tmp/weread-implementation/scripts/verify-firmware-emulator.py \
   --output-dir /root/weread-emulator/artifacts/delivery-native
 ```
 
-The SSH helper uses the instance key, loopback port 4022, an instance-specific known-hosts file, and a connection timeout. The driver validates the guest firmware and ELF hash, starts the original launcher, injects hardware-path QMP taps, checks final native metadata, and checks lock cleanup, status-bar restoration, and resumed window-manager state. It retains separate QEMU screenshots and application snapshots. It does not assert pixel equivalence between unsynchronized images or measure panel timing.
+The SSH helper uses the instance key, loopback port 4022, an instance-specific known-hosts file, and a connection timeout. The driver checks the guest firmware, candidate basename when supplied, and deployed byte count. It starts the original launcher, injects QMP touch, checks final native metadata, and checks lock cleanup, status-bar restoration, and resumed window-manager state. It retains separate QEMU screenshots and application snapshots. It does not assert pixel equivalence between unsynchronized images or measure panel timing.
+
+Use `--case walkthrough` for structured offline screen coverage. To rerun a
+subset on the same deployed ELF, add a comma-separated group list such as
+`--only stats,login,sleep`. A dedicated disposable guest install can use
+`--guest-home` and `--guest-entry`. After a firmware reboot, verify that the
+stock Home window is viewable before starting another launcher case; a running
+status-bar service alone does not establish that the framework is ready.
 
 ## Verification results
 

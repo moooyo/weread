@@ -69,13 +69,14 @@ impl DeviceProfile {
         if self.is_scribe() { 15 } else { 6 }
     }
 
+    /// Upper bound for 72-pixel list rows; the Library fills the viewport up to it.
     pub const fn list_page_size(self) -> usize {
-        if self.is_scribe() { 10 } else { 7 }
+        if self.is_scribe() { 14 } else { 9 }
     }
 
-    /// Fill the current logical detail viewport with bounded short-row pages.
-    /// Long rows keep their full text and scroll within the same page. Temporary
-    /// status and selection chrome do not change page boundaries.
+    /// Fill the current logical detail viewport with bounded pages. Catalog
+    /// rows are fixed; longer reviews and notes can scroll within a page.
+    /// Temporary status and selection chrome do not change page boundaries.
     pub fn detail_page_size(self, viewport: (u32, u32), tab: &str) -> usize {
         if viewport.0 == 0 {
             return 1;
@@ -83,13 +84,12 @@ impl DeviceProfile {
         let (controls, row_height, maximum) = match tab {
             "reviews" => (if self.is_scribe() { 64 } else { 52 }, 88, 16),
             // The selected annotation reader admits at most sixteen records.
-            "notes" => (48, 96, 16),
+            "notes" => (0, 96, 16),
             _ => (48, 52, 64),
         };
-        // Status bar, full-width header, tab strip, and the fixed page bar.
+        // Status bar, page header, tabs, tab controls, and the device summary inset.
         let chrome = 28
             + 52
-            + 48
             + 48
             + controls
             + if self.is_scribe() {
@@ -140,10 +140,10 @@ mod tests {
     #[test]
     fn detail_pages_fill_the_short_row_space_on_every_profile() {
         for (profile, expected) in [
-            (DeviceProfile::Paperwhite5, [7, 4, 3]),
-            (DeviceProfile::Paperwhite6, [7, 4, 4]),
-            (DeviceProfile::Scribe, [19, 11, 10]),
-            (DeviceProfile::Scribe2025, [20, 12, 11]),
+            (DeviceProfile::Paperwhite5, [8, 4, 4]),
+            (DeviceProfile::Paperwhite6, [8, 5, 5]),
+            (DeviceProfile::Scribe, [20, 11, 11]),
+            (DeviceProfile::Scribe2025, [21, 12, 12]),
         ] {
             let actual = ["toc", "reviews", "notes"]
                 .map(|tab| profile.detail_page_size(profile.logical_size(), tab));
@@ -151,15 +151,15 @@ mod tests {
         }
         assert_eq!(
             DeviceProfile::Scribe.detail_page_size((930, 1240), "toc"),
-            19
+            20
         );
     }
 
     #[test]
     fn detail_capacity_uses_runtime_height_and_has_explicit_read_limits() {
         let profile = DeviceProfile::Paperwhite6;
-        assert_eq!(profile.detail_page_size((636, 848), "toc"), 7);
-        assert_eq!(profile.detail_page_size((636, 1100), "toc"), 12);
+        assert_eq!(profile.detail_page_size((636, 848), "toc"), 8);
+        assert_eq!(profile.detail_page_size((636, 1100), "toc"), 13);
         for tab in ["toc", "reviews", "notes"] {
             assert_eq!(profile.detail_page_size((0, u32::MAX), tab), 1);
             assert_eq!(profile.detail_page_size((636, 0), tab), 1);

@@ -1,6 +1,6 @@
 import { Theme } from "theme.slint";
 import { Strings } from "strings.slint";
-import { ActionButton, IconButton, Icon, PageBar, PageHeader, SegmentedControl, SegmentedOption, ProgressTrack, ToggleRow } from "widgets.slint";
+import { ActionButton, IconButton, Icon, HeaderPager, SegmentedControl, SegmentedOption, ProgressTrack, PressArea, SwipeTouchArea, DashedOutline } from "widgets.slint";
 
 export struct PublicationRow {
     id: string,
@@ -24,13 +24,14 @@ export struct SettingEntry {
     kind: string,
     checked: bool,
     enabled: bool,
+    // Applies only while the row above it is on; drawn indented beneath it.
+    nested: bool,
     options: [SegmentedOption],
     selected-value: string,
 }
 
 export global AuxiliaryModel {
     in-out property <string> publications-title;
-    in-out property <string> publications-subtitle;
     in-out property <string> publications-query;
     in-out property <string> publications-sort: "recent";
     in-out property <string> publications-account-id;
@@ -58,14 +59,11 @@ export global AuxiliaryModel {
     in-out property <[PreferenceEntry]> stats-preferences;
 
     in-out property <string> settings-subpage;
-    in-out property <string> settings-title;
     in-out property <string> settings-account-name;
-    in-out property <string> settings-account-detail;
     in-out property <string> settings-account-initial;
     in-out property <bool> settings-account-active: false;
     in-out property <[SettingEntry]> settings-rows;
-    in-out property <int> settings-page: 1;
-    in-out property <int> settings-page-count: 1;
+    in-out property <[SettingEntry]> settings-groups;
     in-out property <string> settings-status;
     callback event(string, string);
 }
@@ -75,11 +73,13 @@ component UnderlineTab inherits Rectangle {
     in property <bool> selected;
     callback clicked();
     min-width: 48px;
-    preferred-width: label.preferred-width + 24px;
+    preferred-width: label.preferred-width + 20px;
+    horizontal-stretch: 0;
     height: 48px;
     background: touch.pressed ? Theme.ink : Theme.paper;
-    accessible-role: button;
+    accessible-role: tab;
     accessible-label: root.text;
+    accessible-item-selected: root.selected;
     label := Text {
         text: root.text;
         color: touch.pressed ? Theme.paper : root.selected ? Theme.ink : Theme.secondary;
@@ -94,7 +94,7 @@ component UnderlineTab inherits Rectangle {
         height: 3px;
         background: Theme.ink;
     }
-    touch := TouchArea { clicked => { root.clicked(); } }
+    touch := PressArea { clicked => { root.clicked(); } }
 }
 
 component PublicationItem inherits Rectangle {
@@ -102,6 +102,7 @@ component PublicationItem inherits Rectangle {
     in property <bool> articles;
     callback open();
     callback download();
+    callback paged(int);
     height: 72px;
     background: Theme.paper;
     HorizontalLayout {
@@ -203,7 +204,8 @@ component PublicationItem inherits Rectangle {
                     Icon { y: (parent.height - 24px) / 2; kind: "next"; inverted: touch.pressed; }
                 }
             }
-            touch := TouchArea { clicked => { root.open(); } }
+            // Rows also carry the list swipe, as in Library and the article list.
+            touch := SwipeTouchArea { tapped => { root.open(); } swiped(delta) => { root.paged(delta); } }
         }
         if root.articles && !root.entry.cached: Rectangle {
             width: Theme.touch-size;
@@ -223,8 +225,7 @@ component PublicationItem inherits Rectangle {
                     kind: "download";
                     inverted: download-touch.pressed;
                 }
-                download-touch := TouchArea {
-                    pointer-event(event) => { if event.kind == PointerEventKind.down { Theme.refresh("press"); } else if event.kind == PointerEventKind.up { Theme.refresh("release"); } }
+                download-touch := PressArea {
                     clicked => { root.download(); }
                 }
             }
@@ -241,6 +242,7 @@ component PublicationItem inherits Rectangle {
 }
 
 export component PublicationScreen inherits Rectangle {
+    private property <bool> showing-accounts: AuxiliaryModel.publications-account-id == "";
     background: Theme.paper;
     VerticalLayout {
         spacing: 0px;
@@ -248,102 +250,86 @@ export component PublicationScreen inherits Rectangle {
             height: 52px;
             HorizontalLayout {
                 padding-left: Theme.page-margin;
-                padding-right: Theme.page-margin;
+                padding-right: 8px;
+                padding-top: 2px;
+                padding-bottom: 2px;
+                spacing: 8px;
                 Rectangle {
                     height: 48px;
-                    border-width: 2px;
-                    border-color: Theme.ink;
-                    border-radius: 0px;
-                    HorizontalLayout {
-                        padding-left: 4px;
-                        padding-right: 16px;
-                        spacing: 8px;
-                        IconButton {
-                            icon: "search";
-                            label: Strings.publication-search;
-                            clicked => { AuxiliaryModel.event("mp.search", AuxiliaryModel.publications-query); }
-                        }
-                        TextInput {
-                            horizontal-stretch: 1;
-                            text <=> AuxiliaryModel.publications-query;
-                            font-family: Theme.ui-font;
-                            font-size: 17px;
-                            color: Theme.ink;
-                            single-line: true;
-                            vertical-alignment: center;
-                            accessible-label: Strings.publication-search;
-                            changed has-focus => {
-                                if self.has-focus { AuxiliaryModel.event("mp.focus", ""); }
-                            }
-                            edited => { AuxiliaryModel.event("mp.edit-query", self.text); }
-                            accepted => { AuxiliaryModel.event("mp.search", self.text); }
-                        }
-                    }
-                    if AuxiliaryModel.publications-query == "": Text {
-                        x: 60px;
-                        width: parent.width - 76px;
-                        text: Strings.publication-search;
-                        font-family: Theme.ui-font;
-                        font-size: 17px;
-                        color: Theme.muted;
-                        vertical-alignment: center;
-                    }
+                    horizontal-stretch: 1;
+                    accessible-role: button;
+                    accessible-label: Strings.publication-search;
                     Rectangle {
-                        x: 0px;
-                        y: 0px;
-                        width: parent.width;
-                        height: parent.height;
-                        background: transparent;
+                        x: 0px; y: 2px; width: parent.width; height: 44px;
                         border-width: 2px;
                         border-color: Theme.ink;
-                        border-radius: 0px;
+                        background: search-touch.pressed ? Theme.ink : Theme.paper;
+                        HorizontalLayout {
+                            padding-left: 14px;
+                            padding-right: 14px;
+                            spacing: 12px;
+                            Rectangle { width: 24px; Icon { y: (parent.height - 24px) / 2; kind: "search"; inverted: search-touch.pressed; } }
+                            Text {
+                                text: AuxiliaryModel.publications-query == "" ? Strings.publication-search : AuxiliaryModel.publications-query;
+                                color: search-touch.pressed ? Theme.paper : AuxiliaryModel.publications-query == "" ? Theme.muted : Theme.ink;
+                                font-family: Theme.ui-font;
+                                font-size: 18px;
+                                vertical-alignment: center;
+                                overflow: elide;
+                                horizontal-stretch: 1;
+                            }
+                        }
                     }
+                    search-touch := PressArea { clicked => { AuxiliaryModel.event("mp.focus", ""); } }
                 }
-            }
-        }
-        Rectangle {
-            height: 52px;
-            HorizontalLayout {
-                padding-left: Theme.page-margin;
-                padding-right: Theme.page-margin;
-                spacing: 12px;
-                Text { text: Strings.publications; font-family: Theme.serif-font; font-size: 28px; font-weight: 700; vertical-alignment: center; }
-                Text { text: AuxiliaryModel.publications-subtitle; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
                 IconButton { icon: "sync"; label: Strings.sync; enabled: !AuxiliaryModel.publications-busy; text: Theme.scribe ? Strings.sync : ""; clicked => { AuxiliaryModel.event("mp.sync", ""); } }
             }
         }
         Rectangle {
             height: 48px;
-            if AuxiliaryModel.publications-account-id == "": HorizontalLayout {
-                padding-left: Theme.page-margin - 8px;
-                padding-right: Theme.page-margin;
-                spacing: 8px;
-                UnderlineTab { text: Strings.recent-update; selected: AuxiliaryModel.publications-sort == "recent"; clicked => { AuxiliaryModel.event("mp.sort", "recent"); } }
-                UnderlineTab { text: Strings.unread; selected: AuxiliaryModel.publications-sort == "unread"; clicked => { AuxiliaryModel.event("mp.sort", "unread"); } }
-                UnderlineTab { text: Strings.name; selected: AuxiliaryModel.publications-sort == "name"; clicked => { AuxiliaryModel.event("mp.sort", "name"); } }
-                Rectangle { horizontal-stretch: 1; }
+            HorizontalLayout {
+                padding-left: root.showing-accounts ? Theme.page-margin : 8px;
+                padding-right: 8px;
+                spacing: 0px;
+                if !root.showing-accounts: IconButton { icon: "back"; label: Strings.back; clicked => { AuxiliaryModel.event("mp.back", ""); } }
+                if !root.showing-accounts: Rectangle { width: 4px; }
+                Text {
+                    text: root.showing-accounts ? Strings.publications : AuxiliaryModel.publications-title;
+                    font-family: Theme.serif-font;
+                    font-size: 28px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    horizontal-stretch: root.showing-accounts ? 0 : 1;
+                }
+                if root.showing-accounts: Rectangle { width: Theme.scribe ? 16px : 8px; }
+                if root.showing-accounts: UnderlineTab { text: Strings.recent-update; selected: AuxiliaryModel.publications-sort == "recent"; clicked => { AuxiliaryModel.event("mp.sort", "recent"); } }
+                if root.showing-accounts: UnderlineTab { text: Strings.unread; selected: AuxiliaryModel.publications-sort == "unread"; clicked => { AuxiliaryModel.event("mp.sort", "unread"); } }
+                if root.showing-accounts: UnderlineTab { text: Strings.name; selected: AuxiliaryModel.publications-sort == "name"; clicked => { AuxiliaryModel.event("mp.sort", "name"); } }
+                if root.showing-accounts: Rectangle { horizontal-stretch: 1; }
+                HeaderPager {
+                    current: AuxiliaryModel.publications-page;
+                    total: AuxiliaryModel.publications-page-count;
+                    step(direction) => { AuxiliaryModel.event("mp.page", "" + direction); }
+                    jump => { AuxiliaryModel.event("mp.jump", ""); }
+                }
             }
-            if AuxiliaryModel.publications-account-id != "": HorizontalLayout {
-                padding-left: 8px;
-                padding-right: Theme.page-margin;
-                spacing: 8px;
-                IconButton { icon: "back"; text: Strings.all-publications; clicked => { AuxiliaryModel.event("mp.back", ""); } }
-                Text { text: AuxiliaryModel.publications-title; font-family: Theme.ui-font; font-size: 17px; font-weight: 700; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
-            }
-            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
         }
+        Rectangle { height: 1px; background: Theme.line; }
         Rectangle {
             vertical-stretch: 1;
             clip: true;
+            SwipeTouchArea { swiped(delta) => { AuxiliaryModel.event("mp.page", "" + delta); } }
             VerticalLayout {
                 padding-left: Theme.page-margin;
                 padding-right: Theme.page-margin;
                 spacing: 0px;
                 for entry in AuxiliaryModel.publications-rows: PublicationItem {
                     entry: entry;
-                    articles: AuxiliaryModel.publications-account-id != "";
-                    open => { AuxiliaryModel.event(AuxiliaryModel.publications-account-id == "" ? "mp.account" : "mp.article", entry.id); }
+                    articles: !root.showing-accounts;
+                    open => { AuxiliaryModel.event(root.showing-accounts ? "mp.account" : "mp.article", entry.id); }
                     download => { AuxiliaryModel.event("mp.download", entry.id); }
+                    paged(delta) => { AuxiliaryModel.event("mp.page", "" + delta); }
                 }
                 Rectangle { vertical-stretch: 1; }
             }
@@ -363,12 +349,6 @@ export component PublicationScreen inherits Rectangle {
             color: Theme.secondary;
             horizontal-alignment: center;
             vertical-alignment: center;
-        }
-        PageBar {
-            page: AuxiliaryModel.publications-page;
-            count: AuxiliaryModel.publications-page-count;
-            turn(direction) => { AuxiliaryModel.event("mp.page", "" + direction); }
-            jump => { AuxiliaryModel.event("mp.jump", ""); }
         }
     }
 }
@@ -392,7 +372,7 @@ component RankingRow inherits Rectangle {
         }
         ProgressTrack { value: root.entry.value; height: 6px; }
     }
-    touch := TouchArea { clicked => { root.clicked(); } }
+    touch := PressArea { clicked => { root.clicked(); } }
 }
 
 component StatisticsPeriodControl inherits SegmentedControl {
@@ -551,9 +531,8 @@ export component StatisticsScreen inherits Rectangle {
             }
             Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
         }
-        Rectangle {
-            vertical-stretch: Theme.scribe ? 0 : 1;
-            min-height: Theme.scribe ? 28px + AuxiliaryModel.stats-ranking.length * 48px + 12px : 0px;
+        if !Theme.scribe: Rectangle {
+            vertical-stretch: 1;
             clip: true;
             VerticalLayout {
                 padding-left: Theme.page-margin;
@@ -570,58 +549,80 @@ export component StatisticsScreen inherits Rectangle {
                 Rectangle { vertical-stretch: 1; }
             }
         }
-        if Theme.scribe && AuxiliaryModel.stats-calendar.length > 0: Rectangle {
-            height: 116px + ceil(AuxiliaryModel.stats-calendar.length / 7.0) * 20px;
-            VerticalLayout {
+        // Scribe places the ranking and the calendar side by side. Calendar days are
+        // 40px cells with legible dates instead of 16px strips.
+        if Theme.scribe: Rectangle {
+            height: max(52px + max(1, AuxiliaryModel.stats-ranking.length) * 48px, AuxiliaryModel.stats-calendar.length > 0 ? 112px + ceil(AuxiliaryModel.stats-calendar.length / 7.0) * 44px : 0px);
+            clip: true;
+            HorizontalLayout {
                 padding-left: Theme.page-margin;
                 padding-right: Theme.page-margin;
                 padding-top: 12px;
                 padding-bottom: 12px;
-                spacing: 8px;
-                HorizontalLayout {
-                    spacing: 12px;
-                    Text { text: Strings.reading-calendar; font-family: Theme.ui-font; font-size: 18px; font-weight: 700; }
-                    Text { text: AuxiliaryModel.stats-calendar-label; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; horizontal-stretch: 1; vertical-alignment: center; }
+                spacing: 32px;
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 0px;
+                    Text { text: Strings.reading-ranking; font-family: Theme.ui-font; font-size: 18px; font-weight: 700; height: 28px; }
+                    for entry[index] in AuxiliaryModel.stats-ranking: RankingRow {
+                        entry: entry;
+                        index: index;
+                        clicked => { AuxiliaryModel.event("stats.open", entry.id); }
+                    }
+                    if AuxiliaryModel.stats-ranking.length == 0: Text { text: Strings.stats-empty; font-family: Theme.ui-font; font-size: 16px; color: Theme.secondary; wrap: word-wrap; }
+                    Rectangle { vertical-stretch: 1; }
                 }
-                HorizontalLayout {
+                if AuxiliaryModel.stats-calendar.length > 0: VerticalLayout {
+                    width: (root.width - Theme.page-margin * 2 - 32px) / 2;
                     spacing: 8px;
-                    for day in AuxiliaryModel.stats-weekdays: Text { text: day; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; horizontal-alignment: center; horizontal-stretch: 1; }
-                }
-                Rectangle {
-                    height: ceil(AuxiliaryModel.stats-calendar.length / 7.0) * 20px;
-                    for level[index] in AuxiliaryModel.stats-calendar: Rectangle {
-                        x: mod(index, 7) * (parent.width + 8px) / 7;
-                        y: floor(index / 7.0) * 20px;
-                        width: (parent.width - 48px) / 7;
-                        height: 16px;
-                        border-radius: 0px;
-                        border-width: level == 0 ? 1px : 0px;
-                        border-color: Theme.line;
-                        background: level < 0 ? Theme.paper : level >= 3 ? Theme.ink : level == 2 ? Theme.muted : level == 1 ? Theme.fill : Theme.paper;
-                        Text {
-                            text: level < 0 ? "" : "" + (index - AuxiliaryModel.stats-calendar-offset + 1);
-                            color: level >= 2 ? Theme.paper : Theme.ink;
-                            font-family: Theme.ui-font;
-                            font-size: 14px;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
+                    HorizontalLayout {
+                        height: 28px;
+                        spacing: 12px;
+                        Text { text: Strings.reading-calendar; font-family: Theme.ui-font; font-size: 18px; font-weight: 700; vertical-alignment: center; }
+                        Text { text: AuxiliaryModel.stats-calendar-label; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; horizontal-stretch: 1; vertical-alignment: center; }
+                    }
+                    HorizontalLayout {
+                        height: 20px;
+                        spacing: 4px;
+                        for day in AuxiliaryModel.stats-weekdays: Text { text: day; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; horizontal-alignment: center; horizontal-stretch: 1; }
+                    }
+                    Rectangle {
+                        height: ceil(AuxiliaryModel.stats-calendar.length / 7.0) * 44px - 4px;
+                        for level[index] in AuxiliaryModel.stats-calendar: Rectangle {
+                            x: mod(index, 7) * (parent.width + 4px) / 7;
+                            y: floor(index / 7.0) * 44px;
+                            width: (parent.width - 24px) / 7;
+                            height: 40px;
+                            border-radius: 0px;
+                            border-width: level == 0 ? 1px : 0px;
+                            border-color: Theme.line;
+                            background: level < 0 ? Theme.paper : level >= 3 ? Theme.ink : level == 2 ? Theme.muted : level == 1 ? Theme.fill : Theme.paper;
+                            Text {
+                                text: level < 0 ? "" : "" + (index - AuxiliaryModel.stats-calendar-offset + 1);
+                                color: level >= 2 ? Theme.paper : Theme.ink;
+                                font-family: Theme.ui-font;
+                                font-size: 15px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
                         }
                     }
-                }
-                HorizontalLayout {
-                    height: 20px;
-                    spacing: 6px;
-                    Text { text: Strings.less; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; vertical-alignment: center; }
-                    for level in [0, 1, 2, 3]: Rectangle {
-                        width: 18px;
-                        height: 18px;
-                        border-width: level == 0 ? 1px : 0px;
-                        border-color: Theme.line;
-                        background: level == 3 ? Theme.ink : level == 2 ? Theme.muted : level == 1 ? Theme.fill : Theme.paper;
+                    HorizontalLayout {
+                        height: 20px;
+                        spacing: 6px;
+                        Text { text: Strings.less; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; vertical-alignment: center; }
+                        for level in [0, 1, 2, 3]: Rectangle {
+                            width: 18px;
+                            height: 18px;
+                            border-width: level == 0 ? 1px : 0px;
+                            border-color: Theme.line;
+                            background: level == 3 ? Theme.ink : level == 2 ? Theme.muted : level == 1 ? Theme.fill : Theme.paper;
+                        }
+                        Text { text: Strings.more-amount; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; vertical-alignment: center; }
+                        Rectangle { horizontal-stretch: 1; }
+                        Text { text: AuxiliaryModel.stats-calendar-days; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; vertical-alignment: center; horizontal-alignment: right; }
                     }
-                    Text { text: Strings.more-amount; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; vertical-alignment: center; }
-                    Rectangle { horizontal-stretch: 1; }
-                    Text { text: AuxiliaryModel.stats-calendar-days; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; vertical-alignment: center; horizontal-alignment: right; }
+                    Rectangle { vertical-stretch: 1; }
                 }
             }
         }
@@ -676,172 +677,198 @@ export component StatisticsScreen inherits Rectangle {
     }
 }
 
+// One Settings row: the name on the left, its control on the right. Rows are
+// one line high; switch and action rows invert while pressed.
 component SettingItem inherits Rectangle {
     in property <SettingEntry> entry;
     callback action();
     callback choose(string);
     callback decrease();
     callback increase();
-    height: root.entry.kind == "choice"
-        ? (Theme.scribe ? 104px : 100px) + (root.entry.subtitle == "" ? 0px : Theme.scribe ? 30px : 28px)
-        : root.entry.subtitle == "" ? 56px : 72px;
+    property <length> indent: root.entry.nested ? (Theme.scribe ? 28px : 24px) : 0px;
+    property <length> label-size: root.entry.nested ? (Theme.scribe ? 17px : 16px) : (Theme.scribe ? 18px : 17px);
+    property <color> label-color: !root.entry.enabled ? Theme.muted : root.entry.nested ? Theme.secondary : Theme.ink;
+    property <length> option-width: Theme.scribe
+        ? (root.entry.options.length >= 4 ? 88px : 120px)
+        : (root.entry.options.length >= 4 ? 72px : root.entry.options.length == 3 ? 100px : 96px);
+    height: Theme.scribe ? 64px : 56px;
     background: Theme.paper;
-    if root.entry.kind == "toggle": ToggleRow {
-        text: root.entry.title;
-        subtitle: root.entry.subtitle;
-        checked: root.entry.checked;
-        enabled: root.entry.enabled;
-        toggled => { root.action(); }
+    if root.entry.kind == "toggle": Rectangle {
+        background: toggle-touch.pressed ? Theme.ink : Theme.paper;
+        accessible-role: checkbox;
+        accessible-label: root.entry.title;
+        accessible-checkable: true;
+        accessible-checked: root.entry.checked;
+        accessible-enabled: root.entry.enabled;
+        HorizontalLayout {
+            padding-left: root.indent;
+            spacing: 16px;
+            Text { text: root.entry.title; font-family: Theme.ui-font; font-size: root.label-size; color: toggle-touch.pressed ? Theme.paper : root.label-color; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+            Rectangle {
+                width: 48px;
+                Rectangle {
+                    x: 0px; y: (parent.height - 28px) / 2; width: 48px; height: 28px;
+                    border-width: root.entry.enabled ? 2px : 0px; border-radius: 0px; border-color: Theme.ink;
+                    background: root.entry.enabled && root.entry.checked ? Theme.ink : Theme.paper;
+                    if !root.entry.enabled: DashedOutline { x: 0px; y: 0px; width: parent.width; height: parent.height; radius: 0px; }
+                    Rectangle { x: root.entry.checked ? 24px : 4px; y: 4px; width: 20px; height: 20px; border-radius: 0px; border-width: root.entry.enabled ? 0px : 2px; border-color: Theme.line; background: !root.entry.enabled ? Theme.paper : root.entry.checked ? Theme.paper : Theme.ink; }
+                }
+            }
+        }
+        toggle-touch := PressArea { enabled: root.entry.enabled; clicked => { root.action(); } }
     }
-    if root.entry.kind == "choice": VerticalLayout {
-        padding-top: 10px;
-        padding-bottom: 10px;
-        spacing: Theme.scribe ? 10px : 8px;
-        Text { text: root.entry.title; height: Theme.scribe ? 26px : 24px; font-family: Theme.ui-font; font-size: Theme.scribe ? 19px : 18px; color: root.entry.enabled ? Theme.ink : Theme.muted; vertical-alignment: center; }
-        if root.entry.subtitle != "": Text { text: root.entry.subtitle; height: 20px; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; overflow: elide; }
-        SegmentedControl {
-            options: root.entry.options;
-            value: root.entry.selected-value;
-            enabled: root.entry.enabled;
-            chosen(value) => { root.choose(value); }
+    if root.entry.kind == "choice": HorizontalLayout {
+        padding-left: root.indent;
+        spacing: 16px;
+        Text { text: root.entry.title; font-family: Theme.ui-font; font-size: root.label-size; color: root.label-color; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+        Rectangle {
+            width: root.option-width * root.entry.options.length;
+            SegmentedControl {
+                x: 0px; y: (parent.height - 48px) / 2; width: parent.width;
+                options: root.entry.options;
+                value: root.entry.selected-value;
+                enabled: root.entry.enabled;
+                chosen(value) => { root.choose(value); }
+            }
         }
     }
     if root.entry.kind == "stepper": HorizontalLayout {
-        padding-top: 4px;
-        padding-bottom: 4px;
-        spacing: 8px;
-        VerticalLayout {
-            alignment: center;
-            spacing: 4px;
-            Text { text: root.entry.title; font-family: Theme.ui-font; font-size: 18px; color: root.entry.enabled ? Theme.ink : Theme.muted; overflow: elide; }
-            if root.entry.subtitle != "": Text { text: root.entry.subtitle; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; overflow: elide; }
+        padding-left: root.indent;
+        spacing: 0px;
+        Text { text: root.entry.title; font-family: Theme.ui-font; font-size: root.label-size; color: root.label-color; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+        Rectangle {
+            width: 48px;
+            ActionButton { x: 0px; y: (parent.height - 48px) / 2; width: 48px; height: 48px; text: "−"; accessible-label: root.entry.title + " " + Strings.decrease; enabled: root.entry.enabled; clicked => { root.decrease(); } }
         }
-        Rectangle { horizontal-stretch: 1; }
-        ActionButton { text: "−"; accessible-label: root.entry.title + " " + Strings.decrease; width: 48px; enabled: root.entry.enabled; clicked => { root.decrease(); } }
-        Text { text: root.entry.value; width: 64px; font-family: Theme.ui-font; font-size: 18px; font-weight: 700; color: root.entry.enabled ? Theme.ink : Theme.muted; horizontal-alignment: center; vertical-alignment: center; }
-        ActionButton { text: "+"; accessible-label: root.entry.title + " " + Strings.increase; width: 48px; enabled: root.entry.enabled; clicked => { root.increase(); } }
-    }
-    if root.entry.kind == "info": Rectangle {
-        HorizontalLayout {
-            spacing: 12px;
-            VerticalLayout {
-                horizontal-stretch: 1;
-                alignment: center;
-                spacing: 4px;
-                Text { text: root.entry.title; font-family: Theme.ui-font; font-size: 18px; color: Theme.ink; overflow: elide; }
-                if root.entry.subtitle != "": Text { text: root.entry.subtitle; font-family: Theme.ui-font; font-size: 14px; color: Theme.secondary; overflow: elide; }
-            }
-            Text { text: root.entry.value; max-width: root.width * 0.44; horizontal-stretch: 0; font-family: Theme.ui-font; font-size: 15px; color: Theme.secondary; vertical-alignment: center; overflow: elide; }
+        Text { text: root.entry.value; width: Theme.scribe ? 72px : 56px; font-family: Theme.ui-font; font-size: 19px; font-weight: 700; color: root.entry.enabled ? Theme.ink : Theme.muted; horizontal-alignment: center; vertical-alignment: center; }
+        Rectangle {
+            width: 48px;
+            ActionButton { x: 0px; y: (parent.height - 48px) / 2; width: 48px; height: 48px; text: "+"; accessible-label: root.entry.title + " " + Strings.increase; enabled: root.entry.enabled; clicked => { root.increase(); } }
         }
     }
-    if root.entry.kind != "toggle" && root.entry.kind != "stepper" && root.entry.kind != "info" && root.entry.kind != "choice": Rectangle {
-        background: touch.pressed ? Theme.ink : Theme.paper;
+    if root.entry.kind == "action": Rectangle {
+        background: action-touch.pressed ? Theme.ink : Theme.paper;
         accessible-role: button;
         accessible-label: root.entry.title + " " + root.entry.value;
         accessible-enabled: root.entry.enabled;
         HorizontalLayout {
-            spacing: 12px;
-            VerticalLayout {
-                horizontal-stretch: 1;
-                alignment: center;
-                spacing: 4px;
-                Text { text: root.entry.title; font-family: Theme.ui-font; font-size: 18px; color: !root.entry.enabled ? Theme.muted : touch.pressed ? Theme.paper : Theme.ink; overflow: elide; }
-                if root.entry.subtitle != "": Text { text: root.entry.subtitle; font-family: Theme.ui-font; font-size: 14px; color: touch.pressed ? Theme.paper : Theme.secondary; overflow: elide; }
-            }
-            Text { text: root.entry.value; max-width: root.width * 0.44; horizontal-stretch: 0; font-family: Theme.ui-font; font-size: 15px; color: touch.pressed ? Theme.paper : Theme.secondary; vertical-alignment: center; overflow: elide; }
-            if root.entry.kind == "link": Rectangle {
+            padding-left: root.indent;
+            spacing: 8px;
+            Text { text: root.entry.title; font-family: Theme.ui-font; font-size: root.label-size; color: action-touch.pressed ? Theme.paper : root.label-color; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+            Text { text: root.entry.value; font-family: Theme.ui-font; font-size: 16px; color: action-touch.pressed ? Theme.paper : Theme.secondary; vertical-alignment: center; horizontal-stretch: 0; }
+            Rectangle {
                 width: 24px;
-                horizontal-stretch: 0;
-                Icon { x: 0px; y: (parent.height - 24px) / 2; kind: "next"; inverted: touch.pressed; }
+                Icon { x: 0px; y: (parent.height - 24px) / 2; kind: "next"; inverted: action-touch.pressed; }
             }
         }
-        touch := TouchArea { enabled: root.entry.enabled && root.entry.kind != "info"; clicked => { root.action(); } }
+        action-touch := PressArea { enabled: root.entry.enabled; clicked => { root.action(); } }
     }
-    Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
+    Rectangle { x: 0px; y: parent.height - 1px; width: parent.width; height: 1px; background: Theme.fill; }
 }
 
+component SettingsTab inherits Rectangle {
+    in property <string> text;
+    in property <bool> selected;
+    callback clicked();
+    property <bool> inverted: touch.pressed && !root.selected;
+    background: root.inverted ? Theme.ink : Theme.paper;
+    accessible-role: tab;
+    accessible-label: root.text;
+    accessible-item-selected: root.selected;
+    Text { text: root.text; font-family: Theme.ui-font; font-size: Theme.scribe ? 19px : 18px; font-weight: root.selected ? 700 : 400; color: root.inverted ? Theme.paper : root.selected ? Theme.ink : Theme.secondary; horizontal-alignment: center; vertical-alignment: center; }
+    if root.selected: Rectangle { x: 0px; y: parent.height - 4px; width: parent.width; height: 4px; background: Theme.ink; }
+    touch := PressArea { enabled: !root.selected; clicked => { root.clicked(); } }
+}
+
+// "我的": the account, four tabs of settings, and the exit actions. The page
+// title is left out because the bottom navigation already names it. Each tab
+// fits one screen, so the page never pages; switching tabs redraws only the
+// rows below the tab bar.
 export component SettingsScreen inherits Rectangle {
     background: Theme.paper;
     VerticalLayout {
+        width: root.width;
+        height: root.height;
         spacing: 0px;
-        if AuxiliaryModel.settings-subpage == "": Rectangle {
-            height: 56px;
-            Text { x: Theme.page-margin; width: parent.width - Theme.page-margin * 2; text: Strings.settings; font-family: Theme.serif-font; font-size: 28px; font-weight: 700; vertical-alignment: center; }
+        Rectangle {
+            height: Theme.scribe ? 112px : 96px;
+            HorizontalLayout {
+                padding-left: Theme.page-margin;
+                padding-right: Theme.page-margin;
+                spacing: Theme.scribe ? 20px : 16px;
+                Rectangle {
+                    width: Theme.scribe ? 64px : 52px;
+                    Rectangle {
+                        x: 0px; y: (parent.height - self.height) / 2;
+                        width: parent.width; height: parent.width;
+                        border-radius: self.width / 2;
+                        background: Theme.ink;
+                        Text { text: AuxiliaryModel.settings-account-initial; font-family: Theme.serif-font; font-size: Theme.scribe ? 26px : 22px; font-weight: 700; color: Theme.paper; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                }
+                Text { text: AuxiliaryModel.settings-account-name; font-family: Theme.serif-font; font-size: Theme.scribe ? 28px : 24px; font-weight: 700; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                Rectangle {
+                    width: 96px;
+                    ActionButton { x: 0px; y: (parent.height - 48px) / 2; width: parent.width; height: 48px; text: Strings.renew; clicked => { AuxiliaryModel.event("settings.renew", ""); } }
+                }
+            }
         }
-        if AuxiliaryModel.settings-subpage != "": PageHeader {
-            title: AuxiliaryModel.settings-title;
-            back-text: Theme.scribe ? Strings.settings : "";
-            separator: true;
-            back => { AuxiliaryModel.event("settings.back", ""); }
+        Rectangle {
+            height: Theme.scribe ? 56px : 52px;
+            Rectangle { x: Theme.page-margin; y: parent.height - 1px; width: parent.width - Theme.page-margin * 2; height: 1px; background: Theme.line; }
+            HorizontalLayout {
+                padding-left: Theme.page-margin;
+                padding-right: Theme.page-margin;
+                spacing: 0px;
+                for group in AuxiliaryModel.settings-groups: SettingsTab {
+                    horizontal-stretch: 1;
+                    text: group.title;
+                    selected: group.id == AuxiliaryModel.settings-subpage;
+                    clicked => { AuxiliaryModel.event("settings.open", group.id); }
+                }
+            }
         }
         Rectangle {
             vertical-stretch: 1;
             clip: true;
             VerticalLayout {
+                padding-top: 8px;
                 padding-left: Theme.page-margin;
                 padding-right: Theme.page-margin;
                 spacing: 0px;
-                if AuxiliaryModel.settings-subpage == "": Rectangle {
-                    height: 104px;
-                    Rectangle {
-                        height: 88px;
-                        border-width: 2px;
-                        border-color: Theme.ink;
-                        border-radius: 0px;
-                        HorizontalLayout {
-                            padding: 14px;
-                            spacing: 14px;
-                            Rectangle {
-                                width: 52px;
-                                height: 52px;
-                                border-radius: 26px;
-                                background: Theme.ink;
-                                Text { text: AuxiliaryModel.settings-account-initial; font-family: Theme.serif-font; font-size: 22px; font-weight: 700; color: Theme.paper; horizontal-alignment: center; vertical-alignment: center; }
-                            }
-                            VerticalLayout {
-                                alignment: center;
-                                spacing: 4px;
-                                Text { text: AuxiliaryModel.settings-account-name; font-family: Theme.ui-font; font-size: 19px; font-weight: 700; overflow: elide; }
-                            }
-                            Rectangle { horizontal-stretch: 1; }
-                            ActionButton { text: AuxiliaryModel.settings-account-active ? Strings.renew : Strings.login-title; clicked => { AuxiliaryModel.event(AuxiliaryModel.settings-account-active ? "settings.renew" : "settings.action", AuxiliaryModel.settings-account-active ? "" : "login"); } }
-                        }
-                    }
-                }
+                alignment: start;
                 for entry in AuxiliaryModel.settings-rows: SettingItem {
                     entry: entry;
-                    action => { AuxiliaryModel.event(entry.kind == "toggle" ? "settings.toggle" : AuxiliaryModel.settings-subpage == "" ? "settings.open" : "settings.action", entry.id); }
+                    action => { AuxiliaryModel.event(entry.kind == "toggle" ? "settings.toggle" : "settings.action", entry.id); }
                     choose(value) => { AuxiliaryModel.event("settings.choice", entry.id + ":" + value); }
                     decrease => { AuxiliaryModel.event("settings.decrease", entry.id); }
                     increase => { AuxiliaryModel.event("settings.increase", entry.id); }
                 }
-                if AuxiliaryModel.settings-subpage == "": Rectangle { height: 16px; }
-                if AuxiliaryModel.settings-subpage == "": SettingItem {
-                    entry: {id: "exit", title: Strings.exit-app, subtitle: "", value: "", kind: "action", checked: false, enabled: true, options: [], selected-value: ""};
-                    action => { AuxiliaryModel.event("settings.exit", ""); }
+                if AuxiliaryModel.settings-status != "": Text {
+                    height: 48px;
+                    text: AuxiliaryModel.settings-status;
+                    font-family: Theme.ui-font;
+                    font-size: 14px;
+                    color: Theme.secondary;
+                    vertical-alignment: center;
+                    overflow: elide;
                 }
-                if AuxiliaryModel.settings-subpage == "": SettingItem {
-                    entry: {id: "logout", title: Strings.logout, subtitle: "", value: "", kind: "action", checked: false, enabled: AuxiliaryModel.settings-account-active, options: [], selected-value: ""};
-                    action => { AuxiliaryModel.event("settings.logout", ""); }
-                }
-                Rectangle { vertical-stretch: 1; }
             }
         }
-        if AuxiliaryModel.settings-status != "": Text {
-            height: 48px;
-            text: AuxiliaryModel.settings-status;
-            font-family: Theme.ui-font;
-            font-size: 14px;
-            color: Theme.secondary;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-            wrap: word-wrap;
-        }
-        if AuxiliaryModel.settings-page-count > 1: PageBar {
-            page: AuxiliaryModel.settings-page;
-            count: AuxiliaryModel.settings-page-count;
-            turn(direction) => { AuxiliaryModel.event("settings.page", "" + direction); }
-            jump => { AuxiliaryModel.event("settings.jump", ""); }
+        Rectangle {
+            height: Theme.settings-footer-height;
+            Rectangle { x: Theme.page-margin; y: 0px; width: parent.width - Theme.page-margin * 2; height: 1px; background: Theme.line; }
+            ActionButton {
+                x: Theme.page-margin; y: (parent.height - 48px) / 2; width: 112px; height: 48px;
+                text: Strings.logout; quiet: true;
+                enabled: AuxiliaryModel.settings-account-active;
+                clicked => { AuxiliaryModel.event("settings.logout", ""); }
+            }
+            ActionButton {
+                x: parent.width - Theme.page-margin - self.width; y: (parent.height - 48px) / 2; width: 128px; height: 48px;
+                text: Strings.exit-app;
+                clicked => { AuxiliaryModel.event("settings.exit", ""); }
+            }
         }
     }
 }

@@ -430,6 +430,7 @@ pub struct App {
     last_login_poll: Instant,
     reader: ReaderState,
     article: ArticleState,
+    article_list_page: usize,
     mp_accounts: Vec<MpAccount>,
     mp_articles: BTreeMap<String, Vec<MpArticle>>,
     mp_account: Option<String>,
@@ -444,7 +445,6 @@ pub struct App {
     stats_selected: Option<usize>,
     remote_stats: Option<source::ReadStatistics>,
     settings_subpage: String,
-    settings_page: usize,
     settings_status: String,
     downloads: VecDeque<DownloadTask>,
     current_download: Option<DownloadTask>,
@@ -634,6 +634,7 @@ impl App {
                 #[cfg(test)]
                 image_cache_checks: 0,
             },
+            article_list_page: 0,
             prefs,
             fonts: options.fonts,
             model_layout: crate::reader::layout_budget::LayoutModelRegistry::default(),
@@ -692,8 +693,7 @@ impl App {
             stats_offset: 0,
             stats_selected: None,
             remote_stats: None,
-            settings_subpage: String::new(),
-            settings_page: 0,
+            settings_subpage: "sync".into(),
             settings_status: String::new(),
             downloads,
             current_download: None,
@@ -1604,7 +1604,13 @@ impl App {
         shell.set_route(self.route.name().into());
         shell.set_online(self.online);
         shell.set_demo(self.demo);
-        shell.set_selection_count(self.selected_books.len() as i32);
+        let selection_count = self.selected_books.len();
+        shell.set_selection_count(selection_count as i32);
+        if self.selecting_books {
+            shell.set_selection_label(
+                i18n::format("selected_books", &[("count", selection_count.to_string())]).into(),
+            );
+        }
         shell.set_can_download(
             self.jobs.capabilities().chapter_content && self.online && !self.demo,
         );

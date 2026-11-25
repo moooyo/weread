@@ -1211,7 +1211,11 @@ impl App {
                 index,
                 &body,
                 &preferences,
-                !(changed_book || reopening) && self.reader.notes_panel,
+                if changed_book || reopening {
+                    self.reader_prefers_side_notes()
+                } else {
+                    self.reader.notes_panel
+                },
                 target,
                 Some(&book.source),
             )?;
@@ -1374,7 +1378,7 @@ impl App {
         self.reader.preferences = preferences;
         if changed_book || reopening {
             self.reader.position_confirmed = !self.prefs.pull_on_open;
-            self.reader.notes_panel = false;
+            self.reader.notes_panel = self.reader_prefers_side_notes();
             self.reader.cloud = None;
             self.reader.selection = None;
             self.reader.draft.clear();
@@ -2141,7 +2145,9 @@ impl App {
         state.set_hardware_light(capabilities.brightness && state.get_brightness_known());
         state.set_hardware_warmth(capabilities.warmth && state.get_warmth_known());
         state.set_night_supported(capabilities.application_dark_mode);
-        state.set_pen_supported(capabilities.pen);
+        state.set_pen_highlighting(
+            self.profile.is_scribe() && capabilities.pen && self.prefs.pen_highlight,
+        );
         state.set_can_download(
             book.source == "weread"
                 && !self.demo
@@ -2159,16 +2165,6 @@ impl App {
                 && mark.char_offset >= page_start
                 && mark.char_offset < page_end.max(page_start + 1)
         }));
-        state.set_chapter_summary(
-            i18n::format(
-                "chapter_summary",
-                &[
-                    ("total", book.total_chapters.to_string()),
-                    ("cached", book.cached_chapters.to_string()),
-                ],
-            )
-            .into(),
-        );
         state.set_thought_draft(self.reader.draft.query.clone().into());
         if let Some((start, end)) = self.reader.selection {
             state.set_selection_text(self.reader_selection_preview(start, end).into());
@@ -2550,7 +2546,7 @@ impl App {
         let height = self.platform.logical_viewport_size().1 as f32;
         let available = if opened {
             if side {
-                height - 76.0 - 160.0 - 56.0
+                height - 76.0 - 160.0 - 48.0
             } else {
                 height * self.prefs.popup_height as f32 / 100.0 - 160.0 - 48.0 - 4.0
             }
@@ -2810,9 +2806,7 @@ impl App {
                 self.invalidate_reader_press();
                 self.set_reader_flag("toc", false);
                 self.open_detail(&id)?;
-                if value == "toc" {
-                    self.detail_action("tab", "toc")?;
-                }
+                self.detail_action("tab", if value == "toc" { "toc" } else { "intro" })?;
             }
             "press" => {
                 if let Some((x, y)) = pointer(value) {
@@ -2922,21 +2916,6 @@ impl App {
                     }
                 }
             }
-            "panel" => {
-                self.apply_reader_layout_preferences(
-                    self.reader.preferences.clone(),
-                    self.profile.is_scribe() && value != "false",
-                )?;
-                self.reader.thought_id.clear();
-                self.reader.thought_context = None;
-                self.reader.note_edit_context = None;
-                self.reader.thought_edit_blocked = false;
-                self.reader.thought_page = 0;
-                self.reader.selection = None;
-                self.reader.draft.clear();
-                self.set_reader_flag("thought", false);
-                self.set_reader_flag("menu", false);
-            }
             "toc" => {
                 let tab = if matches!(value, "toc" | "marks" | "notes") {
                     value
@@ -2979,6 +2958,14 @@ impl App {
                     value.parse().unwrap_or(0),
                     page_count(length, size),
                 );
+            }
+            "toc-jump" => {
+                if self.ui.upgrade().is_some_and(|ui| {
+                    let reader = ui.global::<ReaderModel>();
+                    reader.get_toc_open() && reader.get_chapter_pages() > 1
+                }) {
+                    self.open_jump("reader-toc", self.reader.toc_page + 1);
+                }
             }
             "toc-locate" => {
                 let page = self.reader_current_toc_page()?;
@@ -3056,6 +3043,15 @@ impl App {
                     count.max(1) as usize,
                 );
             }
+            "thought-jump" => {
+                if self.ui.upgrade().is_some_and(|ui| {
+                    let reader = ui.global::<ReaderModel>();
+                    (reader.get_thought_open() || reader.get_notes_panel())
+                        && reader.get_thought_pages() > 1
+                }) {
+                    self.open_jump("reader-thought", self.reader.thought_page + 1);
+                }
+            }
             "thought-entry" => {}
             "popular" => {
                 self.prefs.popular = !self.prefs.popular;
@@ -3072,17 +3068,33 @@ impl App {
                 self.save_preferences()?;
             }
             "thought-position" if matches!(value, "side" | "center" | "bottom") => {
-                self.apply_reader_layout_preferences(
-                    self.reader.preferences.clone(),
-                    self.profile.is_scribe() && value == "side",
-                )?;
-                self.prefs.popup_position = if value == "side" && !self.profile.is_scribe() {
+                let position = if value == "side" && !self.profile.is_scribe() {
                     "center"
                 } else {
                     value
+                };
+                let show_panel = position == "side";
+                if self.prefs.popup_position != position || self.reader.notes_panel != show_panel {
+                    self.apply_reader_layout_preferences(
+                        self.reader.preferences.clone(),
+                        show_panel,
+                    )?;
+                    self.reader.thought_id.clear();
+                    self.reader.thought_context = None;
+                    self.reader.note_edit_context = None;
+                    self.reader.thought_edit_blocked = false;
+                    self.reader.thought_page = 0;
+                    self.reader.remote_thoughts.clear();
+                    self.reader.selection = None;
+                    self.reader.draft.clear();
+                    self.set_reader_flag("thought", false);
+                    self.set_reader_flag("selection", false);
+                    if let Some(ui) = self.ui.upgrade() {
+                        ui.global::<ReaderModel>().set_writing_thought(false);
+                    }
+                    self.prefs.popup_position = position.into();
+                    self.save_preferences()?;
                 }
-                .into();
-                self.save_preferences()?;
             }
             "font" => {
                 if self
@@ -3211,7 +3223,6 @@ impl App {
                 }
             }
             "night" => self.toggle_dark_mode()?,
-            "pen" => self.show_toast("hardware_unavailable"),
             "sync" => {
                 if self.online && !self.force_offline && self.jobs.capabilities().remote_progress {
                     let request = self.request();
@@ -4204,12 +4215,13 @@ impl App {
         Ok(ordinal / self.profile.reader_chapter_page_size())
     }
 
+    fn reader_prefers_side_notes(&self) -> bool {
+        self.profile.is_scribe() && self.prefs.popup_position == "side"
+    }
+
     fn reader_entry_page_size(&self) -> usize {
-        let reserved = if self.profile.is_scribe() {
-            96 + 52 + 64
-        } else {
-            96 + 52 + 56
-        };
+        // Status bar, return header, book and pager row, then tab strip.
+        let reserved = 28 + 52 + 68 + 52;
         let row_height = if self.reader.toc_tab == "notes" {
             if self.profile.is_scribe() { 136 } else { 128 }
         } else {

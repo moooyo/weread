@@ -89,6 +89,7 @@ pub struct AppPreferences {
     pub report_reader_only: bool,
     pub popular: bool,
     pub mine: bool,
+    pub pen_highlight: bool,
     pub edge_guard: bool,
     pub edge_region: u32,
     pub popup_height: u32,
@@ -120,6 +121,7 @@ impl Default for AppPreferences {
             report_reader_only: true,
             popular: true,
             mine: true,
+            pen_highlight: false,
             edge_guard: true,
             edge_region: 20,
             popup_height: 62,
@@ -198,7 +200,6 @@ impl AppPreferences {
         if scribe {
             preferences.reader.font_size = 24;
             preferences.article.font_size = 22;
-            preferences.popup_position = "side".into();
         }
         preferences
     }
@@ -215,6 +216,7 @@ impl AppPreferences {
             "report_reader_only" if self.report_time => &mut self.report_reader_only,
             "popular" => &mut self.popular,
             "mine" => &mut self.mine,
+            "pen_highlight" => &mut self.pen_highlight,
             "edge_guard" => &mut self.edge_guard,
             "popup_turn" => &mut self.popup_turn,
             "download_images" => &mut self.download_images,
@@ -413,6 +415,7 @@ impl AppPreferences {
             "report_reader_only" => self.report_reader_only.to_string(),
             "popular" => self.popular.to_string(),
             "mine" => self.mine.to_string(),
+            "pen_highlight" => self.pen_highlight.to_string(),
             "edge_guard" => self.edge_guard.to_string(),
             "edge_region" => self.edge_region.to_string(),
             "popup_height" => self.popup_height.to_string(),
@@ -702,6 +705,21 @@ mod tests {
     }
 
     #[test]
+    fn pen_highlighting_defaults_off_and_survives_storage() {
+        for scribe in [false, true] {
+            assert!(!AppPreferences::for_device(scribe).pen_highlight);
+        }
+        let mut preferences = AppPreferences::for_device(true);
+        for enabled in [true, false] {
+            assert!(preferences.apply_toggle("pen_highlight"));
+            let stored = serde_json::to_string(&preferences).unwrap();
+            preferences = serde_json::from_str(&stored).unwrap();
+            assert_eq!(preferences.pen_highlight, enabled);
+            assert_eq!(preferences.value("pen_highlight"), enabled.to_string());
+        }
+    }
+
+    #[test]
     fn download_concurrency_defaults_and_survives_storage() {
         let mut preferences = AppPreferences::default();
         assert_eq!(
@@ -719,15 +737,11 @@ mod tests {
     #[test]
     fn incomplete_preference_snapshots_are_rejected() {
         assert!(serde_json::from_str::<AppPreferences>("{}").is_err());
-        let mut snapshot = serde_json::to_value(AppPreferences::default()).unwrap();
-        snapshot
-            .as_object_mut()
-            .unwrap()
-            .remove("download_concurrency");
-        assert!(serde_json::from_value::<AppPreferences>(snapshot).is_err());
-        let mut snapshot = serde_json::to_value(AppPreferences::default()).unwrap();
-        snapshot.as_object_mut().unwrap().remove("image_dithering");
-        assert!(serde_json::from_value::<AppPreferences>(snapshot).is_err());
+        for field in ["download_concurrency", "image_dithering", "pen_highlight"] {
+            let mut snapshot = serde_json::to_value(AppPreferences::default()).unwrap();
+            snapshot.as_object_mut().unwrap().remove(field);
+            assert!(serde_json::from_value::<AppPreferences>(snapshot).is_err());
+        }
     }
 
     #[test]
@@ -773,7 +787,7 @@ mod tests {
         assert_eq!(preferences.reader.font_size, 30);
         assert_eq!(preferences.article.font_size, 19);
         assert_eq!(AppPreferences::for_device(true).reader.font_size, 24);
-        assert_eq!(AppPreferences::for_device(true).popup_position, "side");
+        assert_eq!(AppPreferences::for_device(true).popup_position, "center");
         preferences.article.font_size = 16;
         preferences.adjust_for_device("article.font_size", 1, true);
         assert_eq!(preferences.article.font_size, 18);

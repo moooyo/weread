@@ -1244,7 +1244,7 @@ fn run_keep_awake_toggle_waits_for_the_previous_worker(
     gate.wait_for_calls(1);
 
     state.dispatch("shell", "tab", "settings")?;
-    state.dispatch("auxiliary", "settings.open", "device")?;
+    state.dispatch("auxiliary", "settings.open", "storage")?;
     state.dispatch("auxiliary", "settings.toggle", "keep_awake")?;
     assert!(!state.prefs.keep_awake);
     assert!(state.join_task_wake_guard(Duration::ZERO).is_err());

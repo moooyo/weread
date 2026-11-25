@@ -1,6 +1,6 @@
 import { Theme } from "theme.slint";
 import { Strings } from "strings.slint";
-import { ActionButton, IconButton, Icon, RadioChoiceRow, ProgressTrack } from "widgets.slint";
+import { ActionButton, IconButton, Icon, RadioChoiceRow, ProgressTrack, PressArea, Toast } from "widgets.slint";
 import { LibraryScreen, LibraryModel, DetailScreen, DetailModel } from "bookstore.slint";
 import { LoginScreen, LoginModel, SearchScreen, SearchModel } from "auth.slint";
 import { ReaderScreen, ReaderModel, ArticleScreen, ArticleModel } from "reader.slint";
@@ -9,7 +9,7 @@ import { SleepScreen, SleepScreenModel } from "sleep-screen.slint";
 
 export { Theme } from "theme.slint";
 export { SegmentedOption } from "widgets.slint";
-export { LibraryModel, DetailModel, BookTile, DetailChapter, DetailReview } from "bookstore.slint";
+export { LibraryModel, DetailModel, BookTile, DetailChapter, DetailReview, IntroductionLine } from "bookstore.slint";
 export { LoginModel, SearchModel, SearchResult, RecentSearchChip } from "auth.slint";
 export { ReaderModel, ArticleModel, ReaderLine, ReaderMark, ReaderImage, ReaderChapter, ThoughtEntry, ReaderEntry, ReaderFont, ArticleBlock } from "reader.slint";
 export { AuxiliaryModel, PublicationRow, StatisticMetric, StatisticBar, RankingEntry, PreferenceEntry, SettingEntry } from "auxiliary.slint";
@@ -30,7 +30,7 @@ export global ShellModel {
     in-out property <string> dialog-body;
     in-out property <string> dialog-summary;
     in-out property <string> dialog-size;
-    in-out property <string> dialog-chapter;
+    in-out property <string> dialog-completed;
     in-out property <string> dialog-primary;
     in-out property <string> dialog-secondary;
     in-out property <bool> dialog-destructive;
@@ -38,6 +38,7 @@ export global ShellModel {
     in-out property <float> dialog-progress;
     in-out property <string> dialog-input;
     in-out property <int> selection-count;
+    in-out property <string> selection-label;
     in-out property <bool> can-download;
     callback event(string, string);
 }
@@ -64,7 +65,7 @@ component NavigationItem inherits Rectangle {
         }
         Text { text: root.text; color: root.active || touch.pressed ? Theme.paper : Theme.secondary; font-family: Theme.ui-font; font-size: 14px; font-weight: root.active ? 700 : 400; horizontal-alignment: center; }
     }
-    touch := TouchArea { clicked => { root.clicked(); } }
+    touch := PressArea { clicked => { root.clicked(); } }
 }
 
 component MoreMenuItem inherits Rectangle {
@@ -87,13 +88,7 @@ component MoreMenuItem inherits Rectangle {
         vertical-alignment: center;
         wrap: word-wrap;
     }
-    touch := TouchArea {
-        pointer-event(event) => {
-            if event.kind == PointerEventKind.down { Theme.refresh("press"); }
-            else if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel { Theme.refresh("release"); }
-        }
-        clicked => { root.clicked(); }
-    }
+    touch := PressArea { clicked => { root.clicked(); } }
 }
 
 component MoreMenu inherits Rectangle {
@@ -108,7 +103,6 @@ component MoreMenu inherits Rectangle {
         padding-left: 2px; padding-right: 2px;
         spacing: 0px;
         MoreMenuItem { text: Strings.refresh-book; clicked => { ShellModel.event("more-refresh", ""); } }
-        MoreMenuItem { text: Strings.import-book; clicked => { ShellModel.event("more-import", ""); } }
         MoreMenuItem { text: Strings.clear-book-cache; clicked => { ShellModel.event("more-clear", ""); } }
         MoreMenuItem { text: Strings.remove; clicked => { ShellModel.event("more-remove", ""); } }
     }
@@ -125,6 +119,9 @@ export component AppWindow inherits Window {
     default-font-size: 18px;
     property <bool> reading: ShellModel.route == "reader" || ShellModel.route == "article";
     property <bool> show-navigation: ShellModel.route == "library" || ShellModel.route == "mp" || ShellModel.route == "stats" || ShellModel.route == "settings";
+    property <length> toast-bottom: ShellModel.route == "settings" ? Theme.nav-height + Theme.settings-footer-height + 16px :
+        root.show-navigation ? Theme.nav-height + 16px :
+        ShellModel.route == "search" && (SearchModel.keyboard-visible || SearchModel.purpose != "books") ? Theme.keyboard-height + 16px : 24px;
     VerticalLayout {
         spacing: 0px;
         if !root.reading: Rectangle {
@@ -147,8 +144,8 @@ export component AppWindow inherits Window {
             if ShellModel.route == "library": LibraryScreen { }
             if ShellModel.route == "search": SearchScreen { }
             if ShellModel.route == "detail": DetailScreen { }
-            if ShellModel.route == "reader": ReaderScreen { }
-            if ShellModel.route == "article": ArticleScreen { }
+            if ShellModel.route == "reader": ReaderScreen { toast: ShellModel.toast; }
+            if ShellModel.route == "article": ArticleScreen { toast: ShellModel.toast; }
             if ShellModel.route == "mp": PublicationScreen { }
             if ShellModel.route == "stats": StatisticsScreen { }
             if ShellModel.route == "settings": SettingsScreen { }
@@ -168,17 +165,18 @@ export component AppWindow inherits Window {
             height: Theme.nav-height;
             Rectangle { x: 0px; y: 0px; height: 2px; background: Theme.ink; }
             HorizontalLayout {
+                y: (parent.height - 48px) / 2; height: 48px;
                 padding-left: Theme.page-margin; padding-right: Theme.page-margin; spacing: 12px;
-                Text { text: Strings.selected-book-label + ShellModel.selection-count; font-family: Theme.ui-font; font-size: 18px; vertical-alignment: center; horizontal-stretch: 1; }
+                Text { text: ShellModel.selection-label; font-family: Theme.ui-font; font-size: 18px; vertical-alignment: center; horizontal-stretch: 1; }
                 ActionButton { text: Strings.remove; enabled: ShellModel.selection-count > 0; clicked => { ShellModel.event("remove-selected", ""); } }
                 ActionButton { text: Strings.download; primary: true; enabled: ShellModel.can-download && ShellModel.selection-count > 0; clicked => { ShellModel.event("download-selected", ""); } }
             }
         }
     }
-    if ShellModel.toast != "": Rectangle {
-        x: Theme.page-margin; y: root.reading ? 20px : 32px; width: parent.width - Theme.page-margin * 2; height: 52px;
-        border-width: 2px; border-color: Theme.ink; border-radius: 0px; background: Theme.paper;
-        Text { x: 16px; width: parent.width - 32px; text: ShellModel.toast; font-family: Theme.ui-font; font-size: 16px; vertical-alignment: center; overflow: elide; }
+    if !root.reading && ShellModel.toast != "": Toast {
+        y: parent.height - root.toast-bottom - self.height;
+        width: parent.width - Theme.page-margin * 2;
+        message: ShellModel.toast;
     }
     if ShellModel.dialog-kind == "more": Rectangle {
         x: 0px; y: 0px; width: parent.width; height: parent.height;
@@ -215,8 +213,7 @@ export component AppWindow inherits Window {
                 }
                 if ShellModel.dialog-kind == "downloading": VerticalLayout {
                     spacing: 12px;
-                    Text { text: ShellModel.dialog-chapter; font-family: Theme.ui-font; font-size: 17px; wrap: word-wrap; }
-                    Text { text: ShellModel.task-label; font-family: Theme.ui-font; font-size: 17px; font-weight: 700; wrap: word-wrap; }
+                    Text { text: ShellModel.dialog-completed; font-family: Theme.ui-font; font-size: 17px; font-weight: 700; wrap: word-wrap; }
                     ProgressTrack { value: ShellModel.dialog-progress; height: 12px; }
                 }
                 if ShellModel.dialog-kind == "jump": Rectangle {

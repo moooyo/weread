@@ -62,9 +62,9 @@ fn runtime_catalog_case() -> Result<()> {
             Arc::new(ViewportControl),
         ));
         assert_eq!(state.platform.logical_viewport_size(), (930, 1480));
-        assert_eq!(state.detail_page_size("toc"), 23);
-        assert_eq!(state.detail_page_size("reviews"), 13);
-        assert_eq!(state.detail_page_size("notes"), 12);
+        assert_eq!(state.detail_page_size("toc"), 24);
+        assert_eq!(state.detail_page_size("reviews"), 14);
+        assert_eq!(state.detail_page_size("notes"), 13);
         assert_ne!(
             state.detail_page_size("toc"),
             state
@@ -123,10 +123,27 @@ fn runtime_catalog_case() -> Result<()> {
                 .map(|row| row.index as u32)
                 .collect::<BTreeSet<_>>()
         );
+        let selection = state.selected_chapters.clone();
+        state.detail_action("page", "-1")?;
+        state.render_detail()?;
+        assert_eq!(detail.get_page(), 1);
+        assert!(detail.get_selecting());
+        assert_eq!(state.selected_chapters, selection);
+
+        state.detail_action("jump", "")?;
+        let shell = fixture.ui().global::<ShellModel>();
+        assert_eq!(shell.get_dialog_kind(), "jump");
+        shell.set_dialog_input("99".into());
+        state.shell_action("dialog-primary", "")?;
+        state.render_detail()?;
+        assert_eq!(detail.get_page(), 3);
+        assert!(detail.get_selecting());
+        assert_eq!(state.selected_chapters, selection);
+
         state.detail_status.clear();
         state.detail_action("tab", "intro")?;
-        state.detail_action("tab", "toc")?;
         state.render_detail()?;
+        assert_eq!(detail.get_tab(), "toc");
         assert_eq!(state.detail_page, 1);
         assert!(state.selected_chapters.is_empty());
         assert!(!state.selecting_chapters);

@@ -99,7 +99,6 @@ class Verifier:
         self.labels = json.loads((self.repository / "assets/i18n/zh-CN.json").read_text(encoding="utf-8-sig"))
         self.binary = arguments.binary.resolve()
         require(self.binary.is_file(), f"Application binary does not exist: {self.binary}")
-        self.binary_sha256 = hashlib.sha256(self.binary.read_bytes()).hexdigest()
         binary_stat = self.binary.stat()
         self.binary_identity = (binary_stat.st_ino, binary_stat.st_size, binary_stat.st_mtime_ns)
         stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -256,7 +255,6 @@ class Verifier:
             "geometry": list(expected),
             "ink_ratio": round(ink_ratio, 6),
             "paper_ratio": round(paper_ratio, 6),
-            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
         }
 
     def assertion(self, name: str, check: Callable[[], dict[str, Any] | None], *captures: Capture) -> None:
@@ -296,7 +294,11 @@ class Verifier:
         self.assertion(f"{key}/list-persisted", list_saved, cover, listing)
         second = self.run_case(f"{key}/page-two", data_key=key, actions=[action(300, "library", "page", "1")])
         self.assertion(f"{key}/page-rendered", lambda: changed(listing, second, 0.01), listing, second)
+        next_button = self.run_case(f"{key}/header-next", data_key=key, actions=[action(300, "pointer", "tap", "600,104")])
+        self.assertion(f"{key}/header-next-turns-one-page", lambda: same_region(second, next_button, (0, 80, 632, 840)), second, next_button)
         downloaded = self.run_case(f"{key}/downloaded", data_key=key, actions=[action(300, "library", "view"), action(500, "library", "sort", "downloaded")])
+        no_jump = self.run_case(f"{key}/single-page-label", data_key=key, actions=[action(300, "library", "sort", "downloaded"), action(500, "pointer", "tap", "548,104")])
+        self.assertion(f"{key}/single-page-label-is-inert", lambda: same_region(downloaded, no_jump, (0, 28, 632, 840)), downloaded, no_jump)
         self.assertion(f"{key}/filter-rendered", lambda: changed(cover, downloaded, 0.02), cover, downloaded)
         selected = self.run_case(f"{key}/selected", data_key=key, actions=[action(300, "library", "select"), action(500, "library", "book", "demo-1")])
         self.assertion(f"{key}/selection-rendered", lambda: changed(cover, selected, 0.0015), cover, selected)
@@ -314,13 +316,21 @@ class Verifier:
         self.assertion(f"{key}/removal-persisted", removed_saved, removed)
 
     def detail_flow(self) -> None:
-        key = "flows/detail"
-        catalog = self.run_case(f"{key}/catalog", screen="detail", data_key=key)
-        intro = self.run_case(f"{key}/intro", screen="detail", data_key=key, actions=[action(300, "detail", "tab", "intro")])
-        self.assertion(f"{key}/tab-rendered", lambda: changed(catalog, intro, 0.01), catalog, intro)
-        selection = self.run_case(f"{key}/selection", screen="detail", data_key=key, actions=[action(300, "detail", "select"), action(500, "detail", "select-page"), action(700, "pointer", "tap", "300,420")])
-        self.assertion(f"{key}/selection-rendered", lambda: changed(catalog, selection, 0.0015), catalog, selection)
-        self.assertion(f"{key}/cached-chapters-remain-complete", lambda: cached_chapters_intact(selection.database), selection)
+        for profile in ("pw6", "scribe"):
+            key = f"flows/detail/{profile}"
+            catalog = self.run_case(f"{key}/catalog", profile=profile, screen="detail", data_key=key)
+            tab = "intro" if profile == "pw6" else "reviews"
+            other = self.run_case(f"{key}/{tab}", profile=profile, screen="detail", data_key=key, actions=[action(300, "detail", "tab", tab)])
+            self.assertion(f"{key}/tab-rendered", lambda a=catalog, b=other: changed(a, b, 0.01), catalog, other)
+            select_point = "52,370" if profile == "pw6" else "370,176"
+            selection = self.run_case(f"{key}/selection", profile=profile, screen="detail", data_key=key,
+                actions=[action(300, "pointer", "tap", select_point), action(500, "detail", "select-page")])
+            self.assertion(f"{key}/selection-rendered", lambda a=catalog, b=selection: changed(a, b, 0.0015), catalog, selection)
+            restored = self.run_case(f"{key}/done", profile=profile, screen="detail", data_key=key, actions=[
+                action(300, "pointer", "tap", select_point), action(500, "pointer", "tap", "38,54"),
+            ])
+            self.assertion(f"{key}/cached-chapters-remain-complete", lambda c=restored: cached_chapters_intact(c.database), restored)
+            self.assertion(f"{key}/top-done-restores-detail", lambda a=catalog, b=restored, p=profile: same_region(a, b, (0, 28, *PROFILES[p])), catalog, restored)
 
     def search_flow(self) -> None:
         key = "flows/search"
@@ -459,9 +469,10 @@ class Verifier:
     def publication_flow(self) -> None:
         key = "flows/publications"
         accounts = self.run_case(f"{key}/accounts", screen="mp", data_key=key)
-        articles = self.run_case(f"{key}/articles", screen="mp", data_key=key, actions=[action(300, "pointer", "tap", "260,214")])
+        first_row = "260,165"
+        articles = self.run_case(f"{key}/articles", screen="mp", data_key=key, actions=[action(300, "pointer", "tap", first_row)])
         self.assertion(f"{key}/account-rendered", lambda: changed(accounts, articles, 0.005), accounts, articles)
-        opened = self.run_case(f"{key}/article", screen="mp", data_key=key, actions=[action(300, "auxiliary", "mp.account", "demo-publication"), action(600, "pointer", "tap", "260,214")], expected_route="article")
+        opened = self.run_case(f"{key}/article", screen="mp", data_key=key, actions=[action(300, "auxiliary", "mp.account", "demo-publication"), action(600, "pointer", "tap", first_row)], expected_route="article")
         self.assertion(f"{key}/read-marker", lambda: {"article_marked_read": require_setting(opened.database, "article.read:demo-article-0", True)}, opened)
         returned = self.run_case(f"{key}/returned", screen="mp", data_key=key, actions=[action(300, "auxiliary", "mp.account", "demo-publication"), action(500, "auxiliary", "mp.article", "demo-article-0"), action(800, "article", "article.back")], expected_route="mp")
         self.assertion(f"{key}/return-context", lambda: changed(accounts, returned, 0.005), accounts, returned)
@@ -499,15 +510,19 @@ class Verifier:
                 action(700, "auxiliary", "settings.open", "notes"), action(900, "auxiliary", "settings.toggle", "popular"), action(1_100, "auxiliary", "settings.increase", "edge_region"), action(1_300, "auxiliary", "settings.increase", "popup_height"),
                 action(1_500, "auxiliary", "settings.open", "storage"), action(1_700, "auxiliary", "settings.toggle", "download_article_images"),
                 action(1_900, "auxiliary", "settings.increase", "download_concurrency"), action(2_100, "auxiliary", "settings.increase", "download_concurrency"), action(2_300, "auxiliary", "settings.decrease", "download_concurrency"),
-                action(2_500, "auxiliary", "settings.page", "1"), action(2_700, "auxiliary", "settings.page", "-1"), action(2_900, "auxiliary", "settings.open", "storage"),
+                action(2_500, "auxiliary", "settings.open", "storage"),
             ],
         )
         self.assertion(f"{key}/controls-persisted", lambda: settings_persistence(saved.database), saved)
         restarted = self.run_case(f"{key}/after-restart", screen="settings", data_key=key, actions=[action(300, "auxiliary", "settings.open", "notes")])
         self.assertion(f"{key}/retained-after-restart", lambda: settings_persistence(restarted.database), restarted)
         for profile in ("pw6", "scribe"):
-            for subpage in ("sync", "notes", "storage", "display", "device", "about"):
+            for subpage in ("sync", "notes", "storage", "display"):
                 self.run_case(f"{key}/{profile}-{subpage}", profile=profile, screen="settings", data_key=f"{key}/{profile}-subpages", actions=[action(300, "auxiliary", "settings.open", subpage)])
+            toast = self.run_case(f"{key}/{profile}-offline-renew-toast", profile=profile, screen="settings",
+                actions=[action(300, "auxiliary", "settings.renew")])
+            self.assertion(f"{key}/{profile}-toast-clears-account-footer",
+                lambda c=toast, p=profile: bottom_toast(c, 164 if p == "scribe" else 144), toast)
 
     def statistics_flow(self) -> None:
         key = "flows/statistics"
@@ -578,7 +593,7 @@ class Verifier:
         report = {
             "environment": "remote Linux desktop with Xvfb; no Kindle device execution",
             "binary": str(self.binary),
-            "binary_sha256": self.binary_sha256,
+            "binary_bytes": self.binary_identity[1],
             "data_directory": str(self.data_root),
             "duration_seconds": round(time.monotonic() - started, 3),
             "passed": sum(result.passed for result in results),
@@ -587,7 +602,7 @@ class Verifier:
             "coverage_limits": [
                 "Desktop captures do not verify Kindle hardware or physical panel behavior.",
                 "Offline fixtures do not verify authenticated upstream operations.",
-                "Current settings groups fit one page; page intents cover boundary clamping, not a multi-page fixture.",
+                "Each settings tab fits one screen; Settings has no page intents.",
             ],
             "cases": [dataclasses.asdict(result) for result in results],
         }
@@ -820,6 +835,23 @@ def changed(first: Capture, second: Capture, minimum: float) -> dict[str, Any]:
     difference = pixel_difference(first.path, second.path)
     require(difference > minimum, f"The expected interface state did not render a material change ({difference:.4%})")
     return {"difference_ratio": difference, "required_minimum": minimum}
+
+
+def same_region(first: Capture, second: Capture, crop: tuple[int, int, int, int]) -> dict[str, Any]:
+    difference = pixel_difference(first.path, second.path, crop=crop)
+    require(difference <= 0.001, f"The expected UI region did not return to its baseline ({difference:.4%})")
+    return {"crop": list(crop), "difference_ratio": difference}
+
+
+def bottom_toast(capture: Capture, offset: int) -> dict[str, Any]:
+    with Image.open(capture.path) as source:
+        image = source.convert("L")
+    margin = 32 if capture.metadata["profile"].startswith("scribe") else 20
+    top, bottom = image.height - offset - 52, image.height - offset
+    for y in (top, top + 1, bottom - 2, bottom - 1):
+        band = image.crop((margin + 8, y, image.width - margin - 8, y + 1))
+        require(sum(band.histogram()[:65]) / band.width > 0.99, f"The toast border was not found at y={y}")
+    return {"toast_bounds": [margin, top, image.width - margin, bottom], "offset_above_bottom": offset}
 
 
 def main() -> int:
