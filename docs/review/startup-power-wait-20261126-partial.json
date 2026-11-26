@@ -1,6 +1,7 @@
 {
   "date": "2026-11-26",
-  "status": "paused_one_complete_pair_no_daily_change",
+  "status": "historical_and_partial_checkpoints_successor_complete_separately",
+  "completed_successor_record": "startup-power-wait-20261126-same-update-pairs.json",
   "source_commit": "767fd2c4e2aff3418608b137b919b4b20939a79e",
   "device": "Kindle Scribe 2022",
   "firmware": "5.19.5",
@@ -65,7 +66,8 @@
     "pair": 1,
     "order": "AB",
     "a_minus_b_wait_ns": [2106191001, 2108203231],
-    "a_minus_b_wait_midpoint_ns": 2107197116
+    "a_minus_b_wait_midpoint_ns": 2107197116,
+    "use_in_revised_batch": false
   },
   "replacement_batch": [
     {
@@ -74,14 +76,117 @@
       "role": "excluded_wait_unconfirmed",
       "send_witness_qualified": true,
       "wait_analyzer_error": "Wrong first update/clock",
-      "failed_predicate_identified": false,
+      "failed_predicate_identified": true,
+      "send_to_witness_ns": 18933846,
+      "legacy_strict_upper_bound_ns": 10000000,
+      "other_predicates_passed": ["rotation", "timestamp_order", "release_interval_arithmetic"],
       "controller_verified_release": true,
-      "additional_worker_readback_completed": false
+      "additional_worker_readback_completed": true,
+      "native_restore_file_guards_and_stage_absence_verified": true,
+      "old_attempt_token_absent": true
     },
     {
       "slot": 1,
       "arm": "A",
-      "role": "not_dispatched"
+      "role": "not_dispatched",
+      "attempt_absent_at_readback": true
     }
-  ]
+  ],
+  "revised_batch": {
+    "contract": "epdc-first-library-update-v2",
+    "status": "stopped_after_first_warmup_refusal",
+    "schedule": ["00-A", "01-B", "02-A", "03-B", "04-B", "05-A"],
+    "warmup_slots": ["00-A", "01-B"],
+    "pair_orders": ["AB", "BA"],
+    "offline_preflights_passed": 6,
+    "unattempted_after_stop": 5,
+    "qualified_physical_samples": 0,
+    "first_warmup": {
+      "slot": "00-A",
+      "result": "not_timed",
+      "refused": "admit:ssh_transport_exit",
+      "ssh_returncode": 255,
+      "staging_navigation_or_tap_attempted": false,
+      "exact_lease_released_at": "2026-11-26T22:42:40.976+08:00",
+      "recovery_required": false
+    },
+    "separate_read_only_diagnostic": {
+      "ssh_authenticated": true,
+      "frozen_admission_refusal": "daily_install_guard",
+      "document_and_launcher_byte_audit_run": false,
+      "measurement_slot_used": false,
+      "device_mutations": false,
+      "exact_lease_released_at": "2026-11-26T22:49:57.662+08:00",
+      "shared_lease_absent_at_readback": true
+    },
+    "peer_public_package_reference": {
+      "version": "0.1.25",
+      "revision": "13f4434b45d8372c2b2a18e151793814a18b8d5d",
+      "closed_public_file_readback_reported_by_peer": true,
+      "executable_bytes": 74980360,
+      "launcher_bytes": 80637,
+      "jpeg_worker_bytes": 426672
+    }
+  },
+  "successor_batch": {
+    "contract": "epdc-first-library-update-v2",
+    "status": "first_measured_pair_checkpoint_not_final",
+    "peer_reference_revision": "13f4434b45d8372c2b2a18e151793814a18b8d5d",
+    "public_peer_archive_members_byte_compared_to_verified_staging": 3,
+    "schedule": ["00-A", "01-B", "02-A", "03-B", "04-B", "05-A"],
+    "unattempted_at_freeze": 6,
+    "offline_preflights_passed": 6,
+    "read_only_admission": {
+      "ssh_authenticated": true,
+      "frozen_admission_passed": true,
+      "original_document_and_launcher_match": true,
+      "device_mutations": false,
+      "exact_lease_released_at": "2026-11-26T23:08:04.927+08:00"
+    },
+    "qualified_warmups": [
+      {
+        "slot": "00-A",
+        "release_to_wait_ns": [8920320924, 8921211616],
+        "epdc_update_marker": 1,
+        "power_settle_ns": 2011584539,
+        "native_restored_and_exact_lease_released_at": "2026-11-26T23:12:19.985+08:00"
+      },
+      {
+        "slot": "01-B",
+        "release_to_wait_ns": [6385396154, 6386339769],
+        "epdc_update_marker": 1,
+        "power_settle_ns": 7217308,
+        "native_restored_and_exact_lease_released_at": "2026-11-26T23:16:39.125+08:00"
+      }
+    ],
+    "warmups_excluded_from_comparison": true,
+    "first_measured_pair_at_checkpoint": {
+      "order": "AB",
+      "a_minus_b_wait_ns": [1753200308, 1755437462],
+      "midpoint_saving_ns": 1754318885,
+      "visits": [
+        {
+          "slot": "02-A",
+          "release_to_wait_ns": [8241303001, 8242214078],
+          "epdc_update_marker": 1,
+          "power_settle_ns": 2013122461,
+          "native_restored_and_exact_lease_released_at": "2026-11-26T23:20:37.365+08:00"
+        },
+        {
+          "slot": "03-B",
+          "release_to_wait_ns": [6486776616, 6488102693],
+          "epdc_update_marker": 1,
+          "power_settle_ns": 8475231,
+          "native_restored_and_exact_lease_released_at": "2026-11-26T23:24:57.085+08:00"
+        }
+      ]
+    },
+    "arm_archives_byte_identical_to_stopped_batch": true,
+    "arm_rebuilt": false,
+    "other_device_guards_unchanged": true,
+    "worker_tests_passed": {"stock_request_and_gui": 61, "refreshed_peer_guard": 2, "same_update_analyzer": 7},
+    "device_accessed_during_preparation": false,
+    "lease_requested_during_preparation": false,
+    "live_installation_rechecked_during_preparation": false
+  }
 }

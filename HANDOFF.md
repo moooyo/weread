@@ -1,5 +1,9 @@
 # Handoff: Kindle Library startup
 
+For the current startup power-wait experiment, use the
+[November 26 handoff](docs/STARTUP_POWER_WAIT_HANDOFF_20261126.md). The record
+below is historical and does not authorize or describe the next device visit.
+
 Updated November 22, 2026 (Asia/Shanghai). **Font optimization measured,
 deployed and retested on Kindle Scribe 2022 / firmware 5.19.5.** The standard
 Kindle build now selects `kindle,bundled-font-preflight,startup-orientation-reuse`

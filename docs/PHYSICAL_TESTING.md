@@ -32,9 +32,11 @@ released their leases. The 9.132–9.133 s diagnostic is separate, and the daily
 installation and private data were not replaced.
 
 The [separate power-wait handoff](STARTUP_POWER_WAIT_HANDOFF_20261126.md)
-retains one qualified zero-wait pair and the incomplete reverse pair. It
-records the remaining timing and correctness checks; the daily power wait
-has not changed.
+records a completed AB/BA comparison on the same Scribe: removing the fixed
+wait reduced first-Library driver completion by **1.517 s** (median within-pair
+saving, two of two pairs faster). The two warmups and historical series are
+excluded. All six visits restored native state and returned their leases.
+Physical sleep and USB overlap remain unverified; the daily wait is unchanged.
 
 Measure **release of the ordinary WeRead tile in the stock Kindle Library to
 the first complete WeRead Library frame in that launch**. The frame must show

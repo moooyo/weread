@@ -1,22 +1,25 @@
 # Handoff: Kindle startup power wait
 
-**Status (2026-11-26, Asia/Shanghai): paused.** One valid physical AB pair
-showed a 2.107 s saving after removing `sleep 2`. The reverse-order pair is
-not complete. Do not treat this as final acceptance or deploy the zero-wait
-launcher. This handoff changes documentation only; there is no queued WeRead
-visit or reserved device window.
+**Status (2026-11-26, Asia/Shanghai): successor AB and BA complete.** The
+zero-wait arm was faster in both orders, with a median within-pair saving of
+**1.517 s** to same-update driver completion. Both warmups and all four
+measured visits restored native state and returned their exact leases.
+The earlier 2.107 s AB saving under a different contract is not included.
+The daily wait remains in place; physical startup sleep and USB correctness
+are still unverified.
 
-## Installed baseline
+## Last verified installation
 
-The daily build is `767fd2c4e2aff3418608b137b919b4b20939a79e`, with the
-previously qualified [frame-guard and first Library model changes](STARTUP_PERFORMANCE_20261126.md#four-pair-results).
-The November 26 deployment on Scribe 2022 / firmware 5.19.5 replaced only the
-application and frame guard. It read back all 38 public installation files,
-started the actual daily app from the native card, preserved the existing data
-directory and configuration, and returned the device at **15:40:21.143**. That
-was a launch smoke, not a new speed measurement. The installed launcher still
-has the [fixed two-second delay](../packaging/kindle/launch.sh#L2781-L2787).
-No zero-wait test replaced the daily files or used the private shelf.
+The November 26 deployment on Scribe 2022 / firmware 5.19.5 installed
+`767fd2c4e2aff3418608b137b919b4b20939a79e`, with the previously qualified
+[frame-guard and first Library model changes](STARTUP_PERFORMANCE_20261126.md#four-pair-results).
+It replaced only the application and frame guard, read back all 38 public
+installation files, started the actual daily app from the native card,
+preserved the existing data directory and configuration, and returned the
+device at **15:40:21.143**. That was a launch smoke, not a speed measurement.
+The reference launcher retains the [fixed two-second delay](../packaging/kindle/launch.sh#L2781-L2787).
+The revised preparation did not recheck the live installation. No zero-wait
+test replaced the daily files or used the private shelf.
 
 ## What the delay does
 
@@ -61,13 +64,18 @@ That is a source comparison, not a WeRead correctness test.
   checked the original Home tab and exact pointer, native state, original
   bytes and independent stage absence, then released the original owner/token
   at **18:14:38.093**. No output from that A was promoted.
-- **Incomplete replacement BA:** a new B produced the qualified in-app
-  `SEND` witness and the controller returned the exact lease after its
-  independent restore and absence checks. The next offline check rejected the
-  `WAIT` association with `ValueError: Wrong first update/clock`. This is a
-  compound check; the exact failed predicate is not known. The corresponding
-  A was never dispatched. Do not use the controller's `primary=qualified`
-  field alone to count a `WAIT` measurement. No complete BA pair exists.
+- **Incomplete replacement BA:** the B visit produced a qualified in-app
+  `SEND` witness, but the original offline analyzer rejected the `WAIT`
+  association with `ValueError: Wrong first update/clock`. A later read-only
+  replay on `test-env` found that only the time-gap check failed: the Library
+  witness timestamp came **18.933846 ms** after the first application `SEND`,
+  exceeding the strict **<10 ms** gate. The 0° rotation, timestamp ordering,
+  and exact release-interval arithmetic passed. The gap alone neither proves
+  nor disproves that the events came from the same update. Worker readback
+  confirmed native restoration and file guards, independent stage absence,
+  exact lease release, and no remaining private token for that B attempt.
+  The matching A plan had no attempt. The B remains excluded; do not use
+  `primary=qualified` as proof of `WAIT` or dispatch the unused A.
 - **Linux checks:** 17 targeted launcher cases passed in each arm. They cover
   normal launch and exit, frame guard lifetime, USB and sleep events delivered
   before takeover, and delayed subscription with a later USB delivery. The
@@ -79,58 +87,142 @@ That is a source comparison, not a WeRead correctness test.
   warrants removing the wait from the daily build by itself.
 
 The [sanitized timing and status record](review/startup-power-wait-20261126-partial.json)
-contains the retained brackets and the exclusions. The trial was paused before
-fetching the last raw timestamps: new `test-env` SSH connections had been
-accepted up to public-key selection but the configured Bitwarden agent refused
-signing. The replacement B controller emitted `released=true` and
-`recovery_required=false`; an additional host-side readback could not run.
-There was no subsequent Kindle connection, new lease request, or success
-marker for the replacement pair. Other sessions may have used the device
-since. No remaining visit is authorized by an old release receipt.
+keeps the original brackets, exclusions and the offline replay outcome. The
+initial pause followed a Bitwarden signing refusal on `test-env`; the later
+SSH replay resolved the outstanding host-side readback without opening Kindle
+SSH. A historical lease release does not establish current availability.
 
-## Resume from another computer
+## Revised same-update trial
 
-1. Pull the repository's `main` and read this handoff. Review the current SSH
-   configuration and verify `ssh test-env` works with the configured broker.
-   Keep credentials, keys, lease tokens, user data and raw device logs out of
-   the handoff. Do not fall back to local verification if the worker is unavailable.
-2. Start **read-only on the worker**, without opening Kindle SSH. The retained
-   replacement BA workspace is
-   `test-env:/root/weread-zero-settle-completion-20261126.SCq941Gr`. Read only
-   the bounded `qualified` and `startup_trace` fields from
-   `stock-library-ab/visits/00-B/attempt/operations.json` there. Check the
-   release and native-guard fields, the absence of that attempt's token, and
-   that `01-A` still has no attempt. The original bundle and closed AB receipts
-   remain in `test-env:/root/weread-zero-settle-20261126.RrJ1JNza`; the failed
-   original A's separate close receipt is under `stock-library-ab/visits/05-A/attempt`.
-   The earlier native-query breakdown remains in
-   `test-env:/root/weread-native-timings-20261126.2b9ptyi7/native-query-profile.json`.
-3. Replay the replacement B receipt with its private `trial/analyze.py`.
-   Inspect the rotation, release bracket, `first_application_frame_send`,
-   qualified SEND timestamp and `qualified_library_wait_done`. The analyzer
-   checks ordering, a SEND-to-witness gap under 10 ms, and exact interval
-   arithmetic. Diagnose the actual difference; do not simply widen the gate
-   or relabel the result. If the time gap alone is the issue, consider an
-   explicit same-update marker at the SEND/WAIT call site, with regression
-   coverage for rejecting unrelated refreshes. Do not run only the unused A
-   and pair it with the older B. Freeze and verify a new complete BA before
-   any measuring. If the endpoint or instrumented build changes, run both
-   orders under the new contract rather than combining unlike samples.
-4. Use the existing [single-visit procedure](../tools/startup-observer/STOCK-AB-CLI.md).
-   Review the installation reference again, complete the `test-env` gates,
-   coordinate all current device users, and only then acquire a fresh
-   exclusive lease for each visit. Restore native tab, pointer, light and
-   original public files, prove independent absence and close SSH, then
-   release the exact owner/token immediately. Keep any rejected slots and
-   do not reopen them. No current lease, marker or scheduled action should
-   be carried over as permission to connect.
-5. Report both wait policies at the same endpoint after the reverse pair is
-   complete. Keep warmups, refused activations and unpaired timings separate.
-   Before recommending a daily change, distinguish the normal-start benefit
-   from the remaining physical startup sleep/USB correctness question. The
-   next independent optimization candidate is a lighter portrait probe; do
-   not combine it with the wait experiment.
+The trial-only build, based on `767fd2c`, records the EPDC update marker on
+both the accepted first full application `SEND` and the successful `WAIT` for
+the confirmed full Library draw. A failed ioctl, a different update or a
+completion reused from the userspace cache cannot qualify. The analyzer
+rechecks the original populated-Library witness and synthetic release
+bracket, requires matching positive update markers and ordered timestamps on
+`CLOCK_MONOTONIC`, and keeps exact release-to-`WAIT` bounds. The endpoint is
+still driver completion, not optical settling. No extra refresh or driver
+wait was added. The original analyzer and its rejected receipt were not
+changed.
 
-The worker retains private frozen bundles, scripts and receipts so this can
-resume without the previous workstation's temporary files. Remove disposable
-artifacts after the final verification and preserve only sanitized evidence.
+The two new arms use the same instrumented ARM executable, native helpers,
+public 15-book fixture and reference files. Only B's trial launcher omits
+`sleep 2`. The new instrumentation requires fresh measurements in both
+orders; the previous AB is historical, not part of the revised comparison.
+
+On `test-env`, 165 backend tests, seven analyzer tests, 49 combined stock
+transaction and submission tests, 12 pinned-request and GUI identity tests,
+and 17 launcher lifecycle tests per arm passed. The Cortex-A8 app version,
+bind policy and observer clock/deadline probes also passed. The BusyBox
+variant was not run because the tool was unavailable. All six plans for the
+first same-update batch passed offline preflight, but that batch yielded no
+physical timing sample. Physical sleep and USB transitions during startup
+remain unverified.
+
+## Stopped window and wake diagnosis
+
+The `00-A` warmup in the 22:40 window stopped at `admit:ssh_transport_exit`
+with SSH exit 255. No staging, navigation, tap or application launch was
+attempted. The exact lease was returned at **22:42:40.976**; the worker
+confirmed the token was absent and no recovery was required. The five
+remaining slots were not dispatched. The window was yielded and the batch
+was stopped, not paused between measured visits.
+
+After the operator woke the Kindle and BiliComics returned its separate
+deployment lease, a newly approved read-only check authenticated to the
+Scribe. The unmodified trial `admit` returned `daily_install_guard`; the
+following document/launcher byte audit was not run. The diagnostic did not
+stage files, change native state or consume a measurement slot. Its exact
+lease was returned at **22:49:57.662**, and the host readback found the
+shared lock absent. All times are Asia/Shanghai.
+
+The BiliComics team reported a closed installation of 0.1.25 at
+`13f4434b45d8372c2b2a18e151793814a18b8d5d`, with successful public-file
+readback. On `test-env`, the released development archive's executable and
+launcher were 74,980,360 and 80,637 bytes, respectively; the old guard
+expects 74,940,168 and 80,185. The JPEG worker remains 426,672 bytes. This
+accounts for an expected peer-version refusal; the composite result does
+not isolate other predicates or retrospectively diagnose SSH exit 255.
+
+## Successor batch with refreshed peer references
+
+On `test-env`, the peer's closed deployment summary confirmed exact lease
+return, native restoration, stage removal and matching static-file readback.
+The three public BiliComics archive members were independently byte-compared
+with the verified staged package. Only the expected BiliComics executable
+and launcher sizes changed in the generated device scripts; the JPEG worker
+and every other guard stayed unchanged. The package comparison is not a new
+readback from the live Kindle.
+
+Both frozen A/B archives match the stopped batch byte for byte. The original
+instrumented ARM application, 15-book seed, launch policies, native helpers,
+and same-update analyzer were reused without recompiling. The 61 stock,
+request and GUI tests, two updated guard tests, and seven analyzer tests
+passed on `test-env`. All six fresh labels and corresponding scripts passed
+offline verification and preflight before any attempt. No Kindle connection
+or lease was made during preparation.
+
+## Successor physical window
+
+A separate read-only lease at the start of the 23:08–23:50 Asia/Shanghai
+window verified SSH, the refreshed installation guards, and the original
+stock document and launcher bytes against the frozen references. The device
+was not staged or activated, and that lease was returned at **23:08:04.927**.
+The successor then passed both scheduled warmups on Scribe 2022 / 5.19.5,
+including exact same-update driver completion and independent handback.
+The A and B leases were returned at **23:12:19.985** and **23:16:39.125**,
+respectively. Warmups do not count as paired observations.
+
+The four measured visits ran in `AB`, then `BA` order. Each used a fresh
+lease and the same public fixture, with B removing only the startup
+`sleep 2`. The endpoint is the first complete populated Library frame's
+matching driver `WAIT`, timed from synthetic release on the stock card.
+
+| Order | A: fixed wait (s) | B: zero wait (s) | Paired saving (s) |
+| --- | ---: | ---: | ---: |
+| AB | 8.242 | 6.487 | 1.754 |
+| BA | 7.750 | 6.470 | 1.280 |
+
+Values are release-bracket midpoints. The median within-pair saving was
+**1.517 s** (exact endpoint bounds: 1.516092346–1.5183950775 s). Those bounds
+reflect only synthetic release timestamp uncertainty, not sampling variance
+or optical settling. Both orders improved, but two pairs on one Scribe
+establish neither a hardware support matrix nor a general performance
+estimate. Neither warmup nor the historical 2.107 s saving is pooled here.
+
+All six launches rendered at 0°, had positive matching `SEND` and successful
+`WAIT` update markers, independently verified original file identities and
+bytes, restored native state, and removed their owned stage. The last lease
+was returned at **23:32:42.059 Asia/Shanghai**; the readback showed no shared
+lock and the remaining window was yielded. No daily package or private shelf
+was changed. The [sanitized paired receipts](review/startup-power-wait-20261126-same-update-pairs.json)
+retain exact bracket, render, `SEND` and `WAIT` timestamps and per-visit handback.
+
+## Next acceptance gate
+
+The normal-start comparison is closed. **Do not reopen any slot or remove
+the daily wait from this result alone.** The observer's stream-ready record
+still precedes firmware subscription, so separately verify naturally
+occurring sleep and USB transitions that overlap startup. Prepare that
+validation off-device, with a way to distinguish event generation, delivery
+and native recovery. Before any new physical work, review the live
+installation against approved references, coordinate a fresh window, obtain
+approval for Kindle SSH, and follow the
+[single-visit safety procedure](../tools/startup-observer/STOCK-AB-CLI.md#transport-timing-and-recovery-for-each-visit).
+The lighter portrait probe is an independent candidate.
+
+The completed evidence, preparation receipt and analyzer remain on `test-env`
+in `/root/weread-zero-settle-peer-refreeze-20261126.gnnz0rdb`. The frozen
+batch at `/root/weread-zero-settle-same-update-20261126.b0fnyadp` stopped at
+its first warmup; its unopened slots are not a continuation. Sync `main`
+and use approved worker SSH before any replay. Do not copy credentials,
+tokens, private data or raw device logs into Git.
+
+For historical replay only, the original and rejected replacement trials
+remain at `test-env:/root/weread-zero-settle-20261126.RrJ1JNza` and
+`test-env:/root/weread-zero-settle-completion-20261126.SCq941Gr`. The original
+refused A's close receipt is under `stock-library-ab/visits/05-A/attempt` in
+its own workspace. The separate native-query breakdown remains in
+`test-env:/root/weread-native-timings-20261126.2b9ptyi7/native-query-profile.json`.
+Retain the sealed inputs needed for resumption and clean up disposable
+artifacts after final verification.

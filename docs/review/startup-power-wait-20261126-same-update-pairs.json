@@ -1,0 +1,241 @@
+{
+    "status": "complete_two_counterbalanced_pairs",
+    "completion_contract": "epdc-first-library-update-v2",
+    "device": "Kindle Scribe 2022",
+    "firmware": "5.19.5",
+    "clock": "CLOCK_MONOTONIC",
+    "origin": "ordinary stock Library card, synthetic release on the device",
+    "endpoint": "driver completion for the same first complete Library frame, excluding the splash",
+    "fixture": "disposable public 15-book Library with cached thumbnails",
+    "source_commit": "767fd2c4e2aff3418608b137b919b4b20939a79e",
+    "peer_reference_revision": "13f4434b45d8372c2b2a18e151793814a18b8d5d",
+    "optical_completion_measured": false,
+    "physical_startup_sleep_or_usb_races_verified": false,
+    "historical_pair_used": false,
+    "warmups_excluded": 2,
+    "all_six_exact_leases_released": true,
+    "original_files_and_native_state_restored": true,
+    "workspace_stage_absent_after_each_visit": true,
+    "rows": [
+        {
+            "slot": "00-A",
+            "arm": "A",
+            "role": "excluded_warmup",
+            "epdc_update_marker": 1,
+            "rotation_degrees": 0,
+            "synthetic_release_ns": [
+                463154498494678,
+                463154499385370
+            ],
+            "render_complete_ns": 463162994660986,
+            "accepted_send_ns": 463163053686909,
+            "library_witness_ns": 463163062793755,
+            "driver_wait_complete_ns": 463163419706294,
+            "release_to_render_ns": [
+                8495275616,
+                8496166308
+            ],
+            "release_to_send_ns": [
+                8554301539,
+                8555192231
+            ],
+            "release_to_wait_ns": [
+                8920320924,
+                8921211616
+            ],
+            "power_settle_ns": 2011584539,
+            "native_restored_and_lease_released_utc": "2026-11-26T15:12:19.985549+00:00"
+        },
+        {
+            "slot": "01-B",
+            "arm": "B",
+            "role": "excluded_warmup",
+            "epdc_update_marker": 1,
+            "rotation_degrees": 0,
+            "synthetic_release_ns": [
+                463428253957002,
+                463428254900617
+            ],
+            "render_complete_ns": 463434229083387,
+            "accepted_send_ns": 463434274481002,
+            "library_witness_ns": 463434278736925,
+            "driver_wait_complete_ns": 463434640296771,
+            "release_to_render_ns": [
+                5974182770,
+                5975126385
+            ],
+            "release_to_send_ns": [
+                6019580385,
+                6020524000
+            ],
+            "release_to_wait_ns": [
+                6385396154,
+                6386339769
+            ],
+            "power_settle_ns": 7217308,
+            "native_restored_and_lease_released_utc": "2026-11-26T15:16:39.125348+00:00"
+        },
+        {
+            "slot": "02-A",
+            "arm": "A",
+            "role": "measured",
+            "epdc_update_marker": 1,
+            "rotation_degrees": 0,
+            "synthetic_release_ns": [
+                463667256416785,
+                463667257327862
+            ],
+            "render_complete_ns": 463675026362863,
+            "accepted_send_ns": 463675133155863,
+            "library_witness_ns": 463675137264016,
+            "driver_wait_complete_ns": 463675498630863,
+            "release_to_render_ns": [
+                7769035001,
+                7769946078
+            ],
+            "release_to_send_ns": [
+                7875828001,
+                7876739078
+            ],
+            "release_to_wait_ns": [
+                8241303001,
+                8242214078
+            ],
+            "power_settle_ns": 2013122461,
+            "native_restored_and_lease_released_utc": "2026-11-26T15:20:37.365552+00:00"
+        },
+        {
+            "slot": "03-B",
+            "arm": "B",
+            "role": "measured",
+            "epdc_update_marker": 1,
+            "rotation_degrees": 0,
+            "synthetic_release_ns": [
+                463926930548493,
+                463926931874570
+            ],
+            "render_complete_ns": 463933012277339,
+            "accepted_send_ns": 463933052770724,
+            "library_witness_ns": 463933058591032,
+            "driver_wait_complete_ns": 463933418651186,
+            "release_to_render_ns": [
+                6080402769,
+                6081728846
+            ],
+            "release_to_send_ns": [
+                6120896154,
+                6122222231
+            ],
+            "release_to_wait_ns": [
+                6486776616,
+                6488102693
+            ],
+            "power_settle_ns": 8475231,
+            "native_restored_and_lease_released_utc": "2026-11-26T15:24:57.085524+00:00"
+        },
+        {
+            "slot": "04-B",
+            "arm": "B",
+            "role": "measured",
+            "epdc_update_marker": 1,
+            "rotation_degrees": 0,
+            "synthetic_release_ns": [
+                464160806542122,
+                464160807469584
+            ],
+            "render_complete_ns": 464166857379430,
+            "accepted_send_ns": 464166910850123,
+            "library_witness_ns": 464166918222969,
+            "driver_wait_complete_ns": 464167276617738,
+            "release_to_render_ns": [
+                6049909846,
+                6050837308
+            ],
+            "release_to_send_ns": [
+                6103380539,
+                6104308001
+            ],
+            "release_to_wait_ns": [
+                6469148154,
+                6470075616
+            ],
+            "power_settle_ns": 12871231,
+            "native_restored_and_lease_released_utc": "2026-11-26T15:28:50.931601+00:00"
+        },
+        {
+            "slot": "05-A",
+            "arm": "A",
+            "role": "measured",
+            "epdc_update_marker": 1,
+            "rotation_degrees": 0,
+            "synthetic_release_ns": [
+                464390857939751,
+                464390859380598
+            ],
+            "render_complete_ns": 464398203099983,
+            "accepted_send_ns": 464398243380983,
+            "library_witness_ns": 464398247390060,
+            "driver_wait_complete_ns": 464398608440598,
+            "release_to_render_ns": [
+                7343719385,
+                7345160232
+            ],
+            "release_to_send_ns": [
+                7384000385,
+                7385441232
+            ],
+            "release_to_wait_ns": [
+                7749060000,
+                7750500847
+            ],
+            "power_settle_ns": 2009782231,
+            "native_restored_and_lease_released_utc": "2026-11-26T15:32:42.059656+00:00"
+        }
+    ],
+    "pairs": [
+        {
+            "order": "AB",
+            "a_wait_ns": [
+                8241303001,
+                8242214078
+            ],
+            "b_wait_ns": [
+                6486776616,
+                6488102693
+            ],
+            "a_minus_b_wait_ns": [
+                1753200308,
+                1755437462
+            ],
+            "midpoint_saving_ns": 1754318885.0
+        },
+        {
+            "order": "BA",
+            "a_wait_ns": [
+                7749060000,
+                7750500847
+            ],
+            "b_wait_ns": [
+                6469148154,
+                6470075616
+            ],
+            "a_minus_b_wait_ns": [
+                1278984384,
+                1281352693
+            ],
+            "midpoint_saving_ns": 1280168538.5
+        }
+    ],
+    "median_wait_midpoint_by_arm_ns": {
+        "A": 7995769481.5,
+        "B": 6478525769.75
+    },
+    "median_paired_saving_ns": [
+        1516092346.0,
+        1518395077.5
+    ],
+    "median_paired_saving_midpoint_ns": 1517243711.75,
+    "shared_lease_present_at_readback": false,
+    "final_release_asia_shanghai": "2026-11-26T23:32:42.059+08:00",
+    "daily_package_changed": false
+}
