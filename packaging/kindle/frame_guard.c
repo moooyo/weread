@@ -66,7 +66,7 @@ _Static_assert(sizeof(struct fb_fix_info) == 68, "ARM GETFIX ABI size");
     F(XCreateImage) F(XPutImage) F(XSetWindowBackgroundPixmap) \
     F(XClearWindow) F(XStoreName) F(XInternAtom) F(XChangeProperty) \
     F(XSetClassHint) F(XSetWMHints) F(XMapWindow) F(XSync) \
-    F(XTranslateCoordinates) F(XQueryTree) F(XFree) F(XAllocColor) F(XPending) F(XNextEvent) \
+    F(XTranslateCoordinates) F(XQueryTree) F(XFree) F(XQueryColors) F(XPending) F(XNextEvent) \
     F(XConnectionNumber) F(XMaxRequestSize) F(XSetErrorHandler) F(XSetIOErrorHandler)
 #define DECLARE_X(name) static __typeof__(name) *api_##name;
 X_FUNCTIONS(DECLARE_X)
@@ -392,32 +392,39 @@ static int prepare_colors(struct guard *guard) {
     if (!visual || guard->root_attributes.depth < 8 || guard->root_attributes.depth > 32) {
         return report("native X pixel format unsupported");
     }
-    for (unsigned value = 0; value < 256; ++value) {
-        if (visual->class == TrueColor) {
-            unsigned long depth_mask = guard->root_attributes.depth == 32 ? UINT32_MAX :
-                (1UL << (unsigned)guard->root_attributes.depth) - 1;
-            unsigned long opaque_planes = depth_mask &
-                ~(visual->red_mask | visual->green_mask | visual->blue_mask);
-            guard->gray_pixels[value] = masked_gray(value, visual->red_mask) |
-                masked_gray(value, visual->green_mask) | masked_gray(value, visual->blue_mask) |
-                opaque_planes;
-        } else if (visual->class == StaticGray) {
-            if (guard->root_attributes.depth != 8 || visual->map_entries != 256) {
-                return report("native X grayscale map is not 8-bit");
-            }
-            XColor color = {0};
-            color.red = color.green = color.blue = (unsigned short)(value * 257);
-            color.flags = DoRed | DoGreen | DoBlue;
-            if (!api_XAllocColor(guard->display, guard->root_attributes.colormap, &color)) {
-                return report("native X grayscale map unavailable");
-            }
-            /* A snapshot byte must retain its exact neutral intensity. */
-            if (color.pixel > UINT8_MAX || color.red != value * 257 ||
-                color.green != value * 257 || color.blue != value * 257) {
+    if (visual->class == StaticGray) {
+        if (guard->root_attributes.depth != 8 || visual->map_entries != 256) {
+            return report("native X grayscale map is not 8-bit");
+        }
+        /* StaticGray entries are immutable. Read the entire map in one X11
+           round trip and invert it instead of allocating each shade separately. */
+        XColor colors[256] = {0};
+        for (unsigned pixel = 0; pixel < 256; ++pixel) { colors[pixel].pixel = pixel; }
+        if (!api_XQueryColors(guard->display, guard->root_attributes.colormap, colors, 256) || x_error) {
+            return report("native X grayscale map unavailable");
+        }
+        unsigned char seen[256] = {0};
+        for (unsigned pixel = 0; pixel < 256; ++pixel) {
+            const XColor *color = &colors[pixel];
+            unsigned shade = color->red / 257;
+            /* Every snapshot byte must retain its exact neutral intensity. */
+            if (color->red != shade * 257 || color->green != color->red ||
+                color->blue != color->red || seen[shade]) {
                 return report("native X grayscale map is not exact");
             }
-            guard->gray_pixels[value] = color.pixel;
-        } else { return report("native X visual unsupported"); }
+            seen[shade] = 1;
+            guard->gray_pixels[shade] = pixel;
+        }
+        return 0;
+    }
+    if (visual->class != TrueColor) { return report("native X visual unsupported"); }
+    unsigned long depth_mask = guard->root_attributes.depth == 32 ? UINT32_MAX :
+        (1UL << (unsigned)guard->root_attributes.depth) - 1;
+    unsigned long opaque_planes = depth_mask & ~(visual->red_mask | visual->green_mask | visual->blue_mask);
+    for (unsigned value = 0; value < 256; ++value) {
+        guard->gray_pixels[value] = masked_gray(value, visual->red_mask) |
+            masked_gray(value, visual->green_mask) | masked_gray(value, visual->blue_mask) |
+            opaque_planes;
     }
     return 0;
 }
@@ -499,26 +506,38 @@ static int owned_surface_is_topmost(struct guard *guard) {
     }
     return 0;
 }
-static int make_pixmap(struct guard *guard, uint32_t rotation, Pixmap *result) {
-    uint32_t delta = (rotation + 4 - guard->source_rotation) % 4;
-    if (delta != 0 && delta != 2) { return report("portrait scanout delta unsupported"); }
+static XImage *create_frame_image(struct guard *guard, uint32_t *band_rows) {
     XImage *image = api_XCreateImage(guard->display, guard->root_attributes.visual,
         (unsigned)guard->root_attributes.depth, ZPixmap, 0, NULL, guard->width, IMAGE_ROWS, 32, 0);
     if (!image || image->bits_per_pixel < 8 || image->bits_per_pixel > 32 ||
         image->bits_per_pixel % 8 || image->bytes_per_line < (int)guard->width ||
         (uint64_t)image->bytes_per_line * IMAGE_ROWS > MAX_IMAGE_BYTES) {
         if (image) { XDestroyImage(image); }
-        return report("native X image layout unsupported");
+        report("native X image layout unsupported");
+        return NULL;
     }
-    size_t image_bytes = (size_t)image->bytes_per_line * IMAGE_ROWS;
     long request_words = api_XMaxRequestSize(guard->display);
     if (request_words < 64 || request_words > 65535) {
         XDestroyImage(image);
-        return report("native X request limit unsupported");
+        report("native X request limit unsupported");
+        return NULL;
     }
-    uint32_t band_rows = (uint32_t)((request_words * 4 - 64) / image->bytes_per_line);
-    if (!band_rows) { XDestroyImage(image); return report("native X scanline exceeds request limit"); }
-    if (band_rows > IMAGE_ROWS) { band_rows = IMAGE_ROWS; }
+    *band_rows = (uint32_t)((request_words * 4 - 64) / image->bytes_per_line);
+    if (!*band_rows) {
+        XDestroyImage(image);
+        report("native X scanline exceeds request limit");
+        return NULL;
+    }
+    if (*band_rows > IMAGE_ROWS) { *band_rows = IMAGE_ROWS; }
+    return image;
+}
+static int make_pixmap(struct guard *guard, uint32_t rotation, Pixmap *result) {
+    uint32_t delta = (rotation + 4 - guard->source_rotation) % 4;
+    if (delta != 0 && delta != 2) { return report("portrait scanout delta unsupported"); }
+    uint32_t band_rows;
+    XImage *image = create_frame_image(guard, &band_rows);
+    if (!image) { return -1; }
+    size_t image_bytes = (size_t)image->bytes_per_line * IMAGE_ROWS;
     image->data = calloc(1, image_bytes);
     if (!image->data) { XDestroyImage(image); return report("image allocation failed"); }
     Pixmap pixmap = api_XCreatePixmap(guard->display, guard->root, guard->width,
@@ -577,14 +596,20 @@ static int create_window(struct guard *guard) {
         return report("native X viewport does not match the approved portrait framebuffer");
     }
     guard->gc = api_XCreateGC(guard->display, guard->root, 0, NULL);
-    if (!guard->gc || make_pixmap(guard, guard->source_rotation, &guard->pixmap)) { return -1; }
+    if (!guard->gc) { return -1; }
+    /* Still admit the image layout used for later retained frames. The first
+       surface is uniform paper, so let X paint it without a pixmap upload. */
+    uint32_t band_rows;
+    XImage *image = create_frame_image(guard, &band_rows);
+    if (!image) { return -1; }
+    XDestroyImage(image);
     XSetWindowAttributes attributes = {0};
-    attributes.background_pixmap = guard->pixmap;
+    attributes.background_pixel = guard->gray_pixels[UINT8_MAX];
     attributes.backing_store = WhenMapped;
     attributes.event_mask = ExposureMask | StructureNotifyMask | KeyPressMask | ButtonPressMask;
     guard->window = api_XCreateWindow(guard->display, guard->root, 0, 0, guard->width,
         guard->height, 0, guard->root_attributes.depth, InputOutput, guard->root_attributes.visual,
-        CWBackPixmap | CWBackingStore | CWEventMask, &attributes);
+        CWBackPixel | CWBackingStore | CWEventMask, &attributes);
     if (!guard->window) { return report("guard window creation failed"); }
     api_XStoreName(guard->display, guard->window, GUARD_TITLE);
     Atom name = api_XInternAtom(guard->display, "_NET_WM_NAME", False);

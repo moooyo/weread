@@ -21,6 +21,16 @@ The [November 22 Reader pilot](review/performance-opportunities-20261122/physica
 
 ## Library first-frame startup
 
+The [November 26 four-pair comparison](STARTUP_PERFORMANCE_20261126.md#four-pair-results)
+used the ordinary stock card on Scribe 2022 / firmware 5.19.5 and a disposable
+15-book shelf with cached thumbnails. From synthetic release to matching driver
+`WAIT`, the arm medians were **8.620 s → 8.182 s** and the median within-pair
+saving was **531 ms**. Both the native frame-guard and first Library-model
+intervals were faster in all four pairs; one full launch was 104 ms slower.
+All ten visits, including the two excluded warmups, restored native state and
+released their leases. The 9.132–9.133 s diagnostic is separate, and the daily
+installation and private data were not replaced.
+
 Measure **release of the ordinary WeRead tile in the stock Kindle Library to
 the first complete WeRead Library frame in that launch**. The frame must show
 the normal shelf layout and navigation, plus recognizable entries or the

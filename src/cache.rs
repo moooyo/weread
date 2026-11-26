@@ -1671,9 +1671,40 @@ impl FileCache {
         Ok(path)
     }
 
+    const TOUCH_ENTRY: &str = "UPDATE cache_entries
+        SET last_access=(SELECT COALESCE(MAX(last_access),0)+1 FROM cache_entries) WHERE key=?1";
+
     fn touch(&self, key: &str) -> Result<()> {
-        self.connection.execute("UPDATE cache_entries SET last_access=(SELECT COALESCE(MAX(last_access),0)+1 FROM cache_entries) WHERE key=?1", [key])?;
+        self.connection.execute(Self::TOUCH_ENTRY, [key])?;
         Ok(())
+    }
+
+    /// Check a page of objects with the same admission and integrity checks as
+    /// `get`, then commit the hits' LRU updates together in display order.
+    pub(crate) fn get_many(&self, keys: &[&str]) -> Result<BTreeMap<String, PathBuf>> {
+        if keys.is_empty() {
+            return Ok(BTreeMap::new());
+        }
+        let mut scope = VerificationScope::new(self.verification_work_limit());
+        let plan =
+            self.plan_borrowed_key_inspection(keys.iter().copied(), &mut self.inventory_budget())?;
+        let inspected = self.inspect_planned_keys(plan, &mut scope)?;
+        inspected.finish(self, false)?;
+        let hits: BTreeMap<_, _> = keys
+            .iter()
+            .filter_map(|&key| Some((key.to_owned(), inspected.path(key)?.clone())))
+            .collect();
+        if !hits.is_empty() {
+            let transaction = self.connection.unchecked_transaction()?;
+            {
+                let mut touch = transaction.prepare(Self::TOUCH_ENTRY)?;
+                for &key in keys.iter().filter(|&&key| hits.contains_key(key)) {
+                    touch.execute([key])?;
+                }
+            }
+            transaction.commit()?;
+        }
+        Ok(hits)
     }
 
     /// Validate an object for a download commit without changing its LRU position.
@@ -3549,6 +3580,45 @@ mod tests {
         assert_eq!(cache.usage()?, 9);
         drop(cache);
         fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn page_lookup_retires_corrupt_objects_and_touches_hits_in_display_order() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        let cache = FileCache::open(root.path(), 9)?;
+        let a = cache.put("a", b"111")?;
+        let z = cache.put("z", b"222")?;
+        let corrupt = cache.put("corrupt", b"333")?;
+        fs::write(&corrupt, b"444")?;
+
+        let paths = cache.get_many(&["z", "missing", "corrupt", "a"])?;
+        assert_eq!(paths, BTreeMap::from([("a".into(), a), ("z".into(), z)]));
+        assert!(cache.entry("corrupt")?.is_none());
+        assert!(!corrupt.exists());
+        cache.put("new-one", b"555")?;
+        cache.put("new-two", b"666")?;
+        assert!(cache.get_for_commit("a")?.is_some());
+        assert!(cache.get_for_commit("z")?.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn page_lookup_rolls_back_all_recency_writes_on_failure() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        let cache = FileCache::open(root.path(), 6)?;
+        cache.put("first", b"111")?;
+        cache.put("second", b"222")?;
+        cache.connection.execute_batch(
+            "CREATE TRIGGER reject_second BEFORE UPDATE OF last_access ON cache_entries
+             WHEN OLD.key='second' BEGIN SELECT RAISE(ABORT, 'fixture'); END;",
+        )?;
+        assert!(cache.get_many(&["first", "second"]).is_err());
+        cache.put("third", b"333")?;
+        // If the first write had escaped the failed transaction, the second
+        // key would be the least recent and would be evicted instead.
+        assert!(cache.get_for_commit("first")?.is_none());
+        assert!(cache.get_for_commit("second")?.is_some());
         Ok(())
     }
 

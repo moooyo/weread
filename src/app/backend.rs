@@ -1344,48 +1344,74 @@ impl App {
             } else {
                 self.store.book_metadata_by_id(&id).ok().flatten()
             };
-            let Some(book) = book.filter(|book| !book.cover_url.is_empty()) else {
-                continue;
-            };
-            if self.cover_work_pending(&id, &book.cover_url) {
-                continue;
-            }
-            let cache_key = if matches!(self.route, Route::Reader(..)) {
-                let Some(key) = sleep_screen::cover_key(&id, &book.cover_url) else {
-                    continue;
-                };
-                key
-            } else {
-                let Some(key) = sleep_screen::thumbnail_key(&id, &book.cover_url) else {
-                    continue;
-                };
-                key
-            };
-            if self
-                .store
-                .setting::<i64>(&format!("cover.failed:{id}"))
-                .ok()
-                .flatten()
-                .is_some_and(|time| Utc::now().timestamp().saturating_sub(time) < 60)
-                || ((!matches!(self.route, Route::Reader(..))
-                    || self.sleep_cover_cached_full_usable())
-                    && self.cache.get(&cache_key).ok().flatten().is_some())
+            if let Some(book) = book
+                && self.schedule_cover_candidate(&id, &book.cover_url, None)
             {
-                continue;
-            }
-            if self.jobs.cover_capacity() == 0 || !self.cover_preparation_has_capacity() {
-                // One route marker replaces a waiting queue. A later tick can
-                // refill it even if unrelated, stale metadata releases capacity.
-                self.deferred_cover_refill = Some(self.route.clone());
-                break;
-            }
-            let request = self.request();
-            self.register_cover_request(request, &id, &book.cover_url);
-            if self.settle_job_submission(self.jobs.cover(request, id, book.cover_url)) {
-                self.deferred_cover_refill = Some(self.route.clone());
                 break;
             }
         }
+    }
+
+    /// Reuse the shelf projection's metadata and cache checks only for the
+    /// just-published page. A later refill must observe current state again.
+    pub(super) fn schedule_library_covers<'a>(
+        &mut self,
+        rows: impl IntoIterator<Item = (&'a crate::domain::BookMetadata, Option<bool>)>,
+    ) {
+        self.deferred_cover_refill = None;
+        if self.route == Route::Library && self.visible_cover_page_active() {
+            for (book, cached) in rows {
+                if self.schedule_cover_candidate(&book.id, &book.cover_url, cached) {
+                    break;
+                }
+            }
+        }
+    }
+
+    /// Return true when this pass must stop and let a later tick refill it.
+    fn schedule_cover_candidate(
+        &mut self,
+        id: &str,
+        url: &str,
+        cached_thumbnail: Option<bool>,
+    ) -> bool {
+        if cached_thumbnail == Some(true)
+            || id.is_empty()
+            || url.is_empty()
+            || self.pending_covers.contains(id)
+            || self.cover_work_pending(id, url)
+        {
+            return false;
+        }
+        let reader = matches!(self.route, Route::Reader(..));
+        let key = if reader {
+            sleep_screen::cover_key(id, url)
+        } else {
+            sleep_screen::thumbnail_key(id, url)
+        };
+        let Some(key) = key else { return false };
+        if self
+            .store
+            .setting::<i64>(&format!("cover.failed:{id}"))
+            .ok()
+            .flatten()
+            .is_some_and(|time| Utc::now().timestamp().saturating_sub(time) < 60)
+            || ((!reader || self.sleep_cover_cached_full_usable())
+                && cached_thumbnail.unwrap_or_else(|| self.cache.get(&key).ok().flatten().is_some()))
+        {
+            return false;
+        }
+        if self.jobs.cover_capacity() > 0 && self.cover_preparation_has_capacity() {
+            let request = self.request();
+            self.register_cover_request(request, id, url);
+            if !self.settle_job_submission(self.jobs.cover(request, id.to_owned(), url.to_owned())) {
+                return false;
+            }
+        }
+        // One route marker replaces a waiting queue. A later tick can refill
+        // it even if unrelated, stale metadata releases capacity.
+        self.deferred_cover_refill = Some(self.route.clone());
+        true
     }
 
     /// Idle ticks perform no SQL, digest reads, or rescans without deferred work.

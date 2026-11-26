@@ -1,0 +1,50 @@
+{
+  "status": "interim_first_of_four_planned_pairs",
+  "date": "2026-11-26",
+  "baseline_source": "f23940c973e83e5b604d379a3d9bd99582a59865",
+  "candidate_changes": ["frame guard palette and solid-white background", "visible thumbnail cache batching and reuse"],
+  "device": "Kindle Scribe 2022",
+  "firmware": "5.19.5",
+  "clock": "CLOCK_MONOTONIC",
+  "origin": "synthetic release on the ordinary stock Kindle Library tile",
+  "endpoint": "driver-confirmed completion of the same first complete Library update",
+  "fixture": "disposable 15-book public shelf with cached thumbnails",
+  "rotation_degrees": 0,
+  "optical_completion_measured": false,
+  "stage_columns": ["frame_guard_begin_ns", "frame_guard_ready_ns", "attach_startup_state_ready_ns", "attach_first_model_ready_ns"],
+  "visits": [
+    {
+      "slot": 0, "lane": "A", "role": "warmup", "pair": 0,
+      "release_ns": [430335568650337, 430335569663414],
+      "render_ns": 430343619845568, "send_ns": 430343664288799, "wait_ns": 430344026211261,
+      "stage_ns": [430340053764337, 430340756186568, 430342262332337, 430342951712107],
+      "native_restored_and_lease_released_utc": "2026-11-26T06:02:33.881156+00:00"
+    },
+    {
+      "slot": 1, "lane": "B", "role": "warmup", "pair": 0,
+      "release_ns": [430603712810430, 430603713838661],
+      "render_ns": 430611048167277, "send_ns": 430611094276200, "wait_ns": 430611454411892,
+      "stage_ns": [430608215771276, 430608490379892, 430610144410200, 430610502470276],
+      "native_restored_and_lease_released_utc": "2026-11-26T06:06:54.493174+00:00"
+    },
+    {
+      "slot": 2, "lane": "A", "role": "measured", "pair": 1,
+      "release_ns": [430889364630601, 430889365560755],
+      "render_ns": 430897861637447, "send_ns": 430897909126217, "wait_ns": 430898275944294,
+      "stage_ns": [430893828402986, 430894613530370, 430896511006524, 430897117394063],
+      "native_restored_and_lease_released_utc": "2026-11-26T06:11:40.390449+00:00"
+    },
+    {
+      "slot": 3, "lane": "B", "role": "measured", "pair": 1,
+      "release_ns": [431149247328539, 431149248084616],
+      "render_ns": 431156772279924, "send_ns": 431156818931617, "wait_ns": 431157180421771,
+      "stage_ns": [431153692426386, 431154033674770, 431155770174463, 431156145293617],
+      "native_restored_and_lease_released_utc": "2026-11-26T06:15:59.962649+00:00"
+    }
+  ],
+  "first_pair_a_minus_b_ns": {
+    "frame_guard_ready": 443879000,
+    "attach_first_model": 231268385,
+    "release_to_wait_interval": [977290307, 978976538]
+  }
+}

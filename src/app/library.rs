@@ -664,13 +664,21 @@ impl App {
         .then_some(context.cache_key.as_str())
     }
 
-    pub(super) fn book_tile<B: BookTileFields>(
+    fn book_tile(&self, book: &impl BookTileFields, row: usize, column: usize) -> BookTile {
+        let book = book.tile_metadata();
+        let cover = sleep_screen::thumbnail_key(book.id, book.cover_url)
+            .and_then(|key| self.cache.get(&key).ok().flatten())
+            .and_then(|path| slint::Image::load_from_path(&path).ok());
+        self.book_tile_with_cover(book, row, column, cover)
+    }
+
+    fn book_tile_with_cover(
         &self,
-        book: &B,
+        book: BookTileMetadata<'_>,
         row: usize,
         column: usize,
+        cover: Option<slint::Image>,
     ) -> BookTile {
-        let book = book.tile_metadata();
         let digest = Sha256::digest(book.title.as_bytes());
         let tone = if book.source == "demo" {
             book.id
@@ -696,9 +704,6 @@ impl App {
             .map(char::to_string)
             .collect::<Vec<_>>()
             .join("\n");
-        let cover = sleep_screen::thumbnail_key(book.id, book.cover_url)
-            .and_then(|key| self.cache.get(&key).ok().flatten())
-            .and_then(|path| slint::Image::load_from_path(&path).ok());
         BookTile {
             id: book.id.into(),
             title: book.title.into(),
@@ -820,16 +825,36 @@ impl App {
         let size = self.library_page_size();
         let count = page_count(books.len(), size);
         self.library_page = self.library_page.min(count - 1);
-        let rows = books
+        let offset = self.library_page * size;
+        let page = &books[offset..books.len().min(offset + size)];
+        let keys: Vec<_> = page
             .iter()
-            .skip(self.library_page * size)
-            .take(size)
+            .map(|book| sleep_screen::thumbnail_key(&book.id, &book.cover_url))
+            .collect();
+        let lookup: Vec<_> = keys.iter().filter_map(Option::as_deref).collect();
+        let thumbnails = self.cache.get_many(&lookup);
+        let mut cache_hits = Vec::with_capacity(page.len());
+        let rows = page
+            .iter()
+            .zip(&keys)
             .enumerate()
-            .map(|(i, b)| {
-                self.book_tile(
-                    b,
+            .map(|(i, (book, key))| {
+                let path = key.as_deref().map_or(Ok(None), |key| match &thumbnails {
+                    Ok(paths) => Ok(paths.get(key).cloned()),
+                    // A broken index entry or a batch admission failure must
+                    // not hide other usable covers on the same shelf.
+                    Err(_) => self.cache.get(key),
+                });
+                cache_hits.push(path.as_ref().ok().map(Option::is_some));
+                let cover = path
+                    .ok()
+                    .flatten()
+                    .and_then(|path| slint::Image::load_from_path(&path).ok());
+                self.book_tile_with_cover(
+                    book.tile_metadata(),
                     i / self.profile.cover_columns(),
                     i % self.profile.cover_columns(),
+                    cover,
                 )
             })
             .collect();
@@ -869,7 +894,7 @@ impl App {
         state.set_selected_count(self.selected_books.len() as i32);
         state.set_offline(!self.online);
         state.set_busy(self.busy);
-        self.schedule_visible_covers();
+        self.schedule_library_covers(page.iter().zip(cache_hits));
         Ok(())
     }
 

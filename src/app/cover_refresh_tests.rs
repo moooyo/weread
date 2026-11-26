@@ -312,6 +312,44 @@ fn search_detail_and_readonly_models() -> Result<()> {
     Ok(())
 }
 
+fn published_library_reuses_its_cover_checks() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let state = fixture.ui.global::<LibraryModel>();
+    let mut app = fixture.application.borrow_mut();
+    let rows = state.get_books();
+    assert!(rows.row_count() >= 2);
+    for row in rows.iter().take(2) {
+        let mut book = app.store.book(row.id.as_str())?.unwrap();
+        book.cover_url = format!("https://example.invalid/{}.png", book.id);
+        app.store.upsert_book(&book)?;
+        deliver_cover(&mut app, &book.id)?;
+    }
+
+    app.force_offline = false;
+    app.online = true;
+    app.cache.reset_inventory_read_stats();
+    app.render_library()?;
+
+    let updated = state.get_books();
+    for (index, (current, previous)) in updated.iter().zip(rows.iter()).enumerate() {
+        assert_eq!(current.id, previous.id);
+        assert_eq!(current.has_cover, index < 2);
+    }
+    assert_eq!(updated.row_count(), rows.row_count());
+    assert_eq!(app.cache.inventory_read_stats().inspections, 1);
+    assert!(app.pending_covers.is_empty());
+    assert!(fixture.recorder.take().is_empty());
+    Ok(())
+}
+
+#[test]
+fn library_projection_reuses_the_visible_thumbnail_batch_for_scheduling() -> Result<()> {
+    isolated(
+        "app::cover_refresh_tests::library_projection_reuses_the_visible_thumbnail_batch_for_scheduling",
+        published_library_reuses_its_cover_checks,
+    )
+}
+
 #[test]
 fn cover_batches_preserve_library_rows_selection_and_pagination() -> Result<()> {
     isolated(

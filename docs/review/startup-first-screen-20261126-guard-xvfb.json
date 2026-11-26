@@ -1,0 +1,19 @@
+{
+  "scope": "Xvfb 1860x2480 8-bit StaticGray, helper spawn to ready record",
+  "host": "test-env Linux x86_64",
+  "clock": "time.monotonic_ns",
+  "first_white_surface_equal_in_all_samples": true,
+  "physical_device_accessed": false,
+  "warmup": {"pair": 0, "order": "AB", "A": 25807370, "B": 2743511},
+  "rows": [
+    {"pair": 1, "order": "AB", "A": 25544436, "B": 3686897},
+    {"pair": 2, "order": "BA", "A": 21255225, "B": 4672841},
+    {"pair": 3, "order": "AB", "A": 26289979, "B": 2441278},
+    {"pair": 4, "order": "BA", "A": 30506132, "B": 2418289},
+    {"pair": 5, "order": "AB", "A": 26546662, "B": 3620089},
+    {"pair": 6, "order": "BA", "A": 17671135, "B": 3564291}
+  ],
+  "baseline_median_ns": 25917207.5,
+  "candidate_median_ns": 3592190.0,
+  "paired_saving_median_ns": 22392056.0
+}
