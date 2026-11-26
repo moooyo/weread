@@ -2780,7 +2780,6 @@ exec 3<>"$LOCK_DIR/power-events"
 EVENT_FD_OPEN=1
 start_power_observer || fail 'Power observer startup failed before a proven subscription was permitted.'
 
-sleep 2
 export WEREAD_HOME
 configure_cover_sleep
 take_display

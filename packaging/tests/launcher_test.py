@@ -5210,7 +5210,7 @@ class LauncherLifecycleTests(unittest.TestCase):
                     entry.kill()
                 entry.wait(timeout=3)
 
-    def test_library_startup_skips_native_settings_tree_and_markers_but_keeps_power_and_display(self):
+    def test_library_startup_skips_fixed_wait_and_native_settings_but_keeps_power_and_display(self):
         self.native_fixture("")
         self.env.update(TEST_SLEEP="1", TEST_BLANKET_AVAILABLE="1", TEST_BLANKET_MODULES="splash screensaver")
         awesome = self.fixture_window_manager()
@@ -5223,13 +5223,12 @@ class LauncherLifecycleTests(unittest.TestCase):
                     'exec "$TEST_ORIGINAL_SLEEP" "$@"')
 
         def drive(entry, _worker):
-            self.wait_until(lambda: self.starts() == ["0"])
             directory = self.root / "lock"
-            self.assertTrue((directory / "state-open").is_file())
+            self.wait_until(lambda: self.starts() == ["0"] and (directory / "state-open").is_file())
             for kind in ("wifi", "quick"):
                 self.assertFalse((directory / f"native-{kind}-available").exists())
             self.assertIsNone(entry.poll())
-            self.assertEqual(delay.read_text().splitlines(), ["2"])
+            self.assertFalse(delay.exists(), "Ordinary Library startup must not wait two seconds.")
             self.assertEqual((self.root / "blanket-queries").read_text().splitlines(), ["load"])
             self.assertEqual(self.process_state(awesome.pid), "T")
             self.assertIn("stop:statusbar", self.trace())
@@ -6893,19 +6892,19 @@ class LauncherLifecycleTests(unittest.TestCase):
         gate = self.root / "power-startup-gate"
         os.mkfifo(gate)
         self.addCleanup(os.close, os.open(gate, os.O_RDWR))
-        settling = self.root / "power-settling"
-        self.env.update(TEST_POWER_STARTUP_GATE=str(gate), TEST_POWER_SETTLING=str(settling))
+        observer_ready = self.root / "power-observer-accepted"
+        self.env.update(TEST_POWER_STARTUP_GATE=str(gate), TEST_POWER_OBSERVER_ACCEPTED=str(observer_ready))
         block = 'IFS= read -r fixture_release <"$TEST_POWER_STARTUP_GATE" || exit 1\n'
         subscriber = '            exec lipc-wait-event '
-        settle = '\nsleep 2\n'
+        takeover = '\nexport WEREAD_HOME\nconfigure_cover_sleep\ntake_display\nstart_application 0\n'
         source = self.launcher.read_text()
         self.assertEqual(source.count(subscriber), 1)
-        self.assertEqual(source.count(settle), 1)
+        self.assertEqual(source.count(takeover), 1)
         source = source.replace(subscriber, block + subscriber, 1)
-        self.launcher.write_text(source.replace(settle, '\n: >"$TEST_POWER_SETTLING"\n' + block + settle, 1))
+        self.launcher.write_text(source.replace(takeover, '\n: >"$TEST_POWER_OBSERVER_ACCEPTED"\n' + block + takeover, 1))
 
         def drive(supervisor):
-            self.wait_until(settling.is_file, require_launcher_running=True)
+            self.wait_until(observer_ready.is_file, require_launcher_running=True)
             directory = self.root / "lock"
             record = self.read_power_observer_record()
             self.remember_power_observer_record(record)
@@ -7508,7 +7507,6 @@ class LauncherLifecycleTests(unittest.TestCase):
         self.assertEqual(self.trace(), ["refused-power-observer-identity"] * 2)
 
     def test_repeated_fast_exit_does_not_strand_event_children(self):
-        self.launcher.write_text(self.launcher.read_text().replace("\nsleep 2\n", "\n"))
         for attempt in range(24):
             with self.subTest(attempt=attempt):
                 status, _, error = self.run_launcher()
@@ -7516,7 +7514,6 @@ class LauncherLifecycleTests(unittest.TestCase):
                 self.assertFalse((self.root / "lock").exists())
 
     def test_event_observer_ignoring_term_is_reaped_on_app_exit(self):
-        self.launcher.write_text(self.launcher.read_text().replace("\nsleep 2\n", "\n"))
         self.env["TEST_EVENT_READY"] = str(self.root / "event-ready")
         self.script(
             self.bin / "lipc-wait-event",
