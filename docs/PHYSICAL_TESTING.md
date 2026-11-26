@@ -31,6 +31,11 @@ All ten visits, including the two excluded warmups, restored native state and
 released their leases. The 9.132–9.133 s diagnostic is separate, and the daily
 installation and private data were not replaced.
 
+The [separate power-wait handoff](STARTUP_POWER_WAIT_HANDOFF_20261126.md)
+retains one qualified zero-wait pair and the incomplete reverse pair. It
+records the remaining timing and correctness checks; the daily power wait
+has not changed.
+
 Measure **release of the ordinary WeRead tile in the stock Kindle Library to
 the first complete WeRead Library frame in that launch**. The frame must show
 the normal shelf layout and navigation, plus recognizable entries or the

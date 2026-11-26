@@ -204,3 +204,7 @@ include unrounded stage timestamps, synthetic release brackets, all render,
 [first-pair receipt](review/startup-first-screen-20261126-first-pair.json)
 remains an interim snapshot of the same series. No cold-boot, authenticated,
 optical, or other physical hardware claim follows from these samples.
+
+The [power-wait handoff](STARTUP_POWER_WAIT_HANDOFF_20261126.md) records the
+later native-query breakdown and the separate, incomplete zero-wait A/B.
+The installed launcher still retains the fixed wait.

@@ -1,0 +1,87 @@
+{
+  "date": "2026-11-26",
+  "status": "paused_one_complete_pair_no_daily_change",
+  "source_commit": "767fd2c4e2aff3418608b137b919b4b20939a79e",
+  "device": "Kindle Scribe 2022",
+  "firmware": "5.19.5",
+  "clock": "CLOCK_MONOTONIC",
+  "origin": "synthetic release on the ordinary stock Kindle Library card",
+  "endpoint": "driver WAIT for the same first complete populated Library frame",
+  "fixture": "isolated 15-book public shelf with cached thumbnails",
+  "optical_completion_measured": false,
+  "physical_startup_power_and_usb_races_verified": false,
+  "arms": {"A": "retain startup sleep 2", "B": "remove only startup sleep 2"},
+  "original_batch": [
+    {
+      "slot": 0,
+      "arm": "A",
+      "role": "excluded_warmup",
+      "release_to_wait_ns": [8987161077, 8988710154],
+      "power_settle_ns": 2013459769,
+      "native_restored_and_lease_released_utc": "2026-11-26T09:34:38.128892+00:00"
+    },
+    {
+      "slot": 1,
+      "arm": "B",
+      "role": "excluded_warmup",
+      "release_to_wait_ns": [6771917616, 6772948385],
+      "power_settle_ns": 4466538,
+      "native_restored_and_lease_released_utc": "2026-11-26T09:38:42.168719+00:00"
+    },
+    {
+      "slot": 2,
+      "arm": "A",
+      "role": "measured_pair_1",
+      "release_to_wait_ns": [7975762693, 7976756616],
+      "power_settle_ns": 2018755231,
+      "native_restored_and_lease_released_utc": "2026-11-26T09:42:59.809928+00:00"
+    },
+    {
+      "slot": 3,
+      "arm": "B",
+      "role": "measured_pair_1",
+      "release_to_wait_ns": [5868553385, 5869571692],
+      "power_settle_ns": 4379077,
+      "native_restored_and_lease_released_utc": "2026-11-26T09:47:36.256885+00:00"
+    },
+    {
+      "slot": 4,
+      "arm": "B",
+      "role": "excluded_unpaired",
+      "release_to_wait_ns": [6402210231, 6403234154],
+      "power_settle_ns": 4607154,
+      "native_restored_and_lease_released_utc": "2026-11-26T10:06:29.314200+00:00"
+    },
+    {
+      "slot": 5,
+      "arm": "A",
+      "role": "excluded_not_timed",
+      "refused": "tap:uncertain_or_refused_tap",
+      "automatic_close_refused": "restore:native_restore",
+      "native_restored_and_lease_released_by_close_only_recovery_utc": "2026-11-26T10:14:38.092610+00:00"
+    }
+  ],
+  "complete_pair": {
+    "pair": 1,
+    "order": "AB",
+    "a_minus_b_wait_ns": [2106191001, 2108203231],
+    "a_minus_b_wait_midpoint_ns": 2107197116
+  },
+  "replacement_batch": [
+    {
+      "slot": 0,
+      "arm": "B",
+      "role": "excluded_wait_unconfirmed",
+      "send_witness_qualified": true,
+      "wait_analyzer_error": "Wrong first update/clock",
+      "failed_predicate_identified": false,
+      "controller_verified_release": true,
+      "additional_worker_readback_completed": false
+    },
+    {
+      "slot": 1,
+      "arm": "A",
+      "role": "not_dispatched"
+    }
+  ]
+}
