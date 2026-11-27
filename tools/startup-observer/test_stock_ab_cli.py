@@ -1,6 +1,6 @@
 """Offline CLI integration with a local transport and a private, simulated exclusive lease."""
 
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 import io
 import json
 from pathlib import Path
@@ -41,7 +41,7 @@ class LocalLeases:
             raise RuntimeError('fixture ownership or handback missing')
         self.lock.rmdir(); self.held=False
         return dict(owner_and_token_checked=True,only_owned_owner_json_removed_then_rmdir=True,
-                    native_restored_and_connections_closed=True,released_at_utc=now())
+                    native_restored_and_connections_closed=True,lease_directory_absent_after_release=True,released_at_utc=now())
 
 
 def encoded(record):
@@ -82,6 +82,18 @@ printf '{{"state":"%s"}}\\n' "$state"
         self.stack.enter_context(patch('run_stock_ab_visit.WORKER_RUNNER',self.lease_tool))
         shared={'ssh_command':lambda *unused:['sh','-c'],'load_lease':lambda unused:self.lease,'LEASE':self.lease.lock}
         self.stack.enter_context(patch('run_stock_ab_visit.runpy.run_path',return_value=shared))
+        self.lock_held = False
+
+        @contextmanager
+        def operation():
+            self.assertFalse(self.lock_held)
+            self.lock_held = True
+            try:
+                yield
+            finally:
+                self.lock_held = False
+
+        self.stack.enter_context(patch('run_stock_ab_visit.physical_operation', new=operation))
         self.stack.enter_context(patch('sys.stdout',new_callable=io.StringIO)); self.stack.enter_context(patch('signal.signal'))
 
     def run_cli(self):
@@ -107,6 +119,7 @@ printf '{{"state":"%s"}}\\n' "$state"
 
     def test_exact_close_only_recovery_never_needs_upload_and_never_produces_a_sample(self):
         self.gate.touch(); self.assertEqual(self.run_cli(),2); self.assertTrue(self.lease.held)
+        self.assertFalse(self.lock_held)
         original=(self.attempt/'operations.json').read_bytes(); failed=json.loads(original); self.assertTrue(failed['recovery_required'])
         self.assertFalse(failed['released']); self.assertNotIn('qualified',failed)
         self.args.recover=self.attempt; self.args.owner='wrong'

@@ -108,25 +108,32 @@ receive_archive() {
     (set -C; : >"$stage/input.tgz") || return 1
     single "$stage/input.tgz" && exec 7<>"$stage/input.tgz" && [ /proc/$$/fd/7 -ef "$stage/input.tgz" ] || return 1
     receive_id=$(stat -Lc '%d:%i' "/proc/$$/fd/7") || return 1
-    if (exec 7<&- 8<&-; exec timeout -k 1 150 sh -c '
-        exec 6<>"$1" && [ "$(stat -Lc "%d:%i" /proc/self/fd/6)" = "$2" ] && flock -nx 6 || exit 76
-        exec head -c "$3" >&6
+    if (exec 7<&- 8<&-; exec timeout -s KILL 150 sh -c '
+        exec 6<"$1" || exit 76
+        flock -nx 6 && [ "$1" -ef /proc/$$/fd/6 ] &&
+            [ "$(stat -Lc "%d:%i" /proc/self/fd/6)" = "$2" ] || exit 76
+        exec head -c "$3" >/proc/self/fd/6
     ' weread-load-read "$stage/input.tgz" "$receive_id" $((@ARCHIVE_BYTES@+1))); then
         receive_status=0
     else
         receive_status=$?
     fi
-    # A supervisor exit or signal status is not a join on its child. Take
-    # the writer's file lock before processing or confirming retirement.
-    if ! single "$stage/input.tgz" || ! { exec 6<"$stage/input.tgz" && [ /proc/$$/fd/6 -ef /proc/$$/fd/7 ] && flock -nx 6; }; then
+    # An exit code is not a join on the reader. Pin its lock again before
+    # touching the file. On refusal revoke the pathname while locked, so
+    # even a delayed child that already opened the inode cannot write later.
+    if ! single "$stage/input.tgz" || ! { exec 6<"$stage/input.tgz" && [ /proc/$$/fd/6 -ef /proc/$$/fd/7 ] && flock -nx 6 && [ "$stage/input.tgz" -ef /proc/$$/fd/6 ]; }; then
         load_child_unconfirmed=1
         return 1
     fi
     exec 7<&- || { load_child_unconfirmed=1; return 1; }
     case "$receive_status" in
         0) return 0;;
-        1) return 1;;
-        124|143) return 124;;
+        1|76|124|137)
+            if ! rm "$stage/input.tgz" || ! absent "$stage/input.tgz"; then
+                load_child_unconfirmed=1
+                return 1
+            fi
+            case "$receive_status" in 124|137) return 124;; *) return 1;; esac;;
         *) load_child_unconfirmed=1; return 1;;
     esac
 }
@@ -136,11 +143,11 @@ install() {
         absent "$stage/$leaf" || return 1
     done
     install_reason=install_receive_unavailable
-    command -v timeout >/dev/null && (exec 8<&-; exec timeout -k 1 1 head -c 1) </dev/null >/dev/null || return 1
-    if (exec 8<&-; exec timeout -k 1 1 sleep 3) </dev/null >/dev/null; then
+    command -v timeout >/dev/null && (exec 8<&-; exec timeout -s KILL 1 head -c 1) </dev/null >/dev/null || return 1
+    if (exec 8<&-; exec timeout -s KILL 1 sleep 3) </dev/null >/dev/null; then
         return 1
     else
-        case "$?" in 124|143) ;; *) return 1;; esac
+        case "$?" in 124|137) ;; *) return 1;; esac
     fi
     install_reason=install_receive_failed
     if receive_archive; then :; else

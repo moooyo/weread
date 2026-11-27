@@ -1,7 +1,8 @@
 """Exercise the single-visit lifecycle, bounded SSH channel, and original-token-only recovery offline."""
 
 import copy
-from io import BytesIO
+from contextlib import contextmanager
+from io import BytesIO, StringIO
 import json
 import os
 from pathlib import Path
@@ -15,7 +16,7 @@ from unittest.mock import patch
 
 from qualified_submit import ISOLATED_SEQUENCE
 from run_daily_render import Refused
-from run_stock_ab_visit import HEADER_RECEIVED, RequestChannel, Transport, audit_reference, execute, invocation, original_attempt, references, staged_wire, transport_failure
+from run_stock_ab_visit import HEADER_RECEIVED, RequestChannel, Transport, audit_reference, execute, invocation, original_attempt, physical_operation, references, staged_wire, transport_failure
 from stock_ab_transaction import GUARDS, LOAD_CLOSE_RECEIPTS, STATES, WireRefusal, checkpoint, checked, drive, fresh_journal, initial, valid_journal
 from test_qualified_submit import LABEL, SENT, START, receipt
 
@@ -351,6 +352,112 @@ if IFS= read -r line; then exit 1; fi; printf '{"result":1}\\n' '''
             with self.assertRaises(Refused): original_attempt(plan,CONFIG,args)
             args.owner='orig'; report['released']=True; checkpoint(attempt/'operations.json',report)
             with self.assertRaises(Refused): original_attempt(plan,CONFIG,args)
+
+    def test_shared_lock_busy_before_the_owner_record_or_device_access(self):
+        events, config, args = self.host_visit_fixture()
+
+        @contextmanager
+        def busy():
+            events.append('busy')
+            raise Refused('physical_operation_busy')
+            yield
+
+        with patch('run_stock_ab_visit.physical_operation', new=busy):
+            self.assertEqual(execute(args), 3)
+        self.assertEqual(events, ['wire_prepared', 'busy'])
+        attempt = args.plan / 'attempt'
+        self.assertFalse((attempt / 'private-token').exists())
+        result = json.loads((attempt / 'operations.json').read_bytes())
+        self.assertEqual(result['acquisition'], 'busy')
+        self.assertFalse(result['device_accessed'])
+        self.assertEqual(result['label'], config['label'])
+
+    def test_shared_lock_spans_transport_and_handback_but_not_qualification(self):
+        events, _, args = self.host_visit_fixture()
+
+        @contextmanager
+        def operation():
+            events.append('locked')
+            try:
+                yield
+            finally:
+                events.append('unlocked')
+
+        def drive(transport, release, report, journal, save, persist, *, recovering):
+            self.assertFalse(recovering)
+            transport.owned()
+            events.append('device_cleanup')
+            release()
+            self.assertEqual(events[-1], 'unlocked')
+            events.append('qualification')
+            report['released'] = True
+            return 0
+
+        with patch('run_stock_ab_visit.physical_operation', new=operation), patch('run_stock_ab_visit.drive', new=drive):
+            self.assertEqual(execute(args), 0)
+        self.assertEqual(events, ['wire_prepared', 'locked', 'owner_acquired', 'owner_checked',
+                                  'device_cleanup', 'owner_released', 'unlocked', 'qualification'])
+
+    def test_canonical_lock_entry_does_not_translate_errors_in_its_body(self):
+        class Busy(RuntimeError):
+            pass
+
+        @contextmanager
+        def busy():
+            raise Busy('fixture collision')
+            yield
+
+        with patch('run_stock_ab_visit.runpy.run_path', return_value={'operation_lock': busy, 'DeviceBusy': Busy}):
+            with self.assertRaisesRegex(Refused, 'physical_operation_busy'), physical_operation():
+                self.fail('Canonical lock collision did not block the body')
+
+        @contextmanager
+        def acquired():
+            yield
+
+        with patch('run_stock_ab_visit.runpy.run_path', return_value={'operation_lock': acquired, 'DeviceBusy': Busy}):
+            with self.assertRaisesRegex(Busy, 'fixture body'), physical_operation():
+                raise Busy('fixture body')
+
+    def host_visit_fixture(self):
+        work = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        plan = work / 'plan'
+        plan.mkdir()
+        program = plan / 'device.sh'
+        program.write_text('true\n')
+        args = SimpleNamespace(work=work, plan=plan, preflight=False, recover=None, owner='owner', lease_tool=program)
+        events = []
+
+        def acquire(request):
+            events.append('owner_acquired')
+            return {'acquired_at_utc': '2026-11-28T00:00:00+00:00'}
+
+        def owned(request):
+            events.append('owner_checked')
+            return {'ownership_verified': True}
+
+        def release(request, *, native_restored_and_connections_closed):
+            self.assertTrue(native_restored_and_connections_closed)
+            events.append('owner_released')
+            return dict(owner_and_token_checked=True, native_restored_and_connections_closed=True,
+                        only_owned_owner_json_removed_then_rmdir=True, lease_directory_absent_after_release=True,
+                        released_at_utc='2026-11-28T00:01:00+00:00')
+
+        def wire(*args):
+            events.append('wire_prepared')
+            return None
+
+        lease = SimpleNamespace(LeaseRequest=lambda path, token, *other: SimpleNamespace(token_file=token),
+                                acquire=acquire, status=owned, release=release)
+        shared = dict(ssh_command=lambda *a: ['fixture-only'], load_lease=lambda p: lease, LEASE=work / 'fixture-lease')
+        self.enterContext(patch.dict(sys.modules, stock_ab_freeze=SimpleNamespace(verify_visit=lambda *a, **k: CONFIG)))
+        for name, value in (('WORKER_RUNNER', program), ('references', lambda _: b'doc\nlaunch\n'),
+                            ('password_input', lambda: 'fixture-only'), ('staged_wire', wire)):
+            self.enterContext(patch(f'run_stock_ab_visit.{name}', new=value))
+        self.enterContext(patch('run_stock_ab_visit.runpy.run_path', return_value=shared))
+        self.enterContext(patch('run_stock_ab_visit.signal.signal'))
+        self.enterContext(patch.object(sys, 'stdout', StringIO()))
+        return events, CONFIG, args
 
     def test_preflight_does_not_read_password_resolve_ssh_or_create_attempt(self):
         with tempfile.TemporaryDirectory() as root:

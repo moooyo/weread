@@ -301,8 +301,8 @@ class DeviceTests(StockDeviceFixture):
                 self.assertFalse((self.stage/'installed').exists())
                 self.handback(previous)
         body = self.program.read_text('ascii')
-        self.assertEqual(body.count('exec timeout -k 1 150 sh -c'),1)
-        self.program.write_text(body.replace('exec timeout -k 1 150 sh -c','exec timeout -k 1 2 sh -c'),encoding='ascii')
+        self.assertEqual(body.count('exec timeout -s KILL 150 sh -c'),1)
+        self.program.write_text(body.replace('exec timeout -s KILL 150 sh -c','exec timeout -s KILL 2 sh -c'),encoding='ascii')
         self.call('stage','staged')
         terminal=LOAD_CLOSE_RECEIPTS['install']+daily.LABEL.encode('ascii')+b'\n'
         with subprocess.Popen([*self.device_shell,self.program,'install',daily.LABEL],stdin=subprocess.PIPE,
@@ -320,6 +320,7 @@ class DeviceTests(StockDeviceFixture):
                     child.kill(); child.wait(timeout=4)
         for leaf in ('outer-manifest','seed-manifest','unpack','installed','bind-intent','tile-dispatch-intent'):
             self.assertFalse((self.stage/leaf).exists(),leaf)
+        self.assertFalse((self.stage/'input.tgz').exists(), 'Timed-out input pathname was not revoked')
         self.handback(previous)
 
     def test_supervisor_exit_is_not_retirement_while_the_reader_owns_its_lock(self):
@@ -333,10 +334,10 @@ while [ ! -f {shlex.quote(str(self.root/'fake-supervisor-return'))} ]; do
     [ "$limit" -gt 0 ] || exit 77
     limit=$((limit-1)); sleep 0.05
 done
-exit 137
+exit 124
 ''',encoding='ascii')
         supervisor.chmod(0o700)
-        anchor='exec timeout -k 1 150 sh -c'
+        anchor='exec timeout -s KILL 150 sh -c'
         self.assertEqual(body.count(anchor),1)
         self.program.write_text(body.replace(anchor,'exec '+shlex.quote(str(supervisor))+' sh -c'),encoding='ascii')
         with subprocess.Popen([*self.device_shell,self.program,'install',daily.LABEL],stdin=subprocess.DEVNULL,
@@ -353,6 +354,47 @@ exit 137
                 self.assertEqual((child.returncode,out,err),(1,b'',b'refused install_receiver_unconfirmed\n'))
                 self.assertFalse((self.stage/'unpack').exists())
                 self.assertFalse((self.stage/'installed').exists())
+        self.handback(previous)
+
+    def test_delayed_reader_cannot_recreate_or_write_revoked_archive(self):
+        previous = self.call('absent','absent')
+        self.call('stage','staged')
+        body = self.program.read_text('ascii')
+        runner = self.root/'fixture-abandoned-reader'
+        runner.write_text(f'''#!/bin/sh
+"$@" </dev/null >/dev/null 2>/dev/null &
+for attempt in $(seq 1 60); do
+    [ ! -f {shlex.quote(str(self.root/'reader-ready'))} ] || exit 124
+    sleep 0.05
+done
+exit 77
+''',encoding='ascii')
+        runner.chmod(0o700)
+        fifo = self.root/'release-reader'
+        os.mkfifo(fifo)
+        # An RDWR handle makes release in cleanup bounded even on failure.
+        with os.fdopen(os.open(fifo,os.O_RDWR | os.O_NONBLOCK),'wb',buffering=0) as control:
+            anchor = 'exec timeout -s KILL 150 sh -c'
+            open_reader = '        exec 6<"$1" || exit 76\n'
+            self.assertEqual(body.count(anchor),1)
+            self.assertEqual(body.count(open_reader),1)
+            fixture = body.replace(anchor,'exec '+shlex.quote(str(runner))+' sh -c').replace(open_reader, open_reader +
+                f'        printf ready >"{self.root}/reader-ready"\n'
+                f'        read -r go <"{fifo}" || exit 79\n'
+                f'        trap "stat -Lc %s /proc/self/fd/6 >{self.root}/reader-size" EXIT\n')
+            self.program.write_text(fixture,encoding='ascii')
+            archive=self.stage/'input.tgz'
+            try:
+                self.call('install',refused='install_receive_timeout')
+                self.assertFalse(archive.exists())
+            finally:
+                control.write(b'go\n')
+            deadline=time.monotonic()+5
+            measured=self.root/'reader-size'
+            while (not measured.exists() or not measured.stat().st_size) and time.monotonic()<deadline:
+                time.sleep(0.02)
+            self.assertEqual(measured.read_bytes(),b'0\n')
+            self.assertFalse(archive.exists())
         self.handback(previous)
 
     def test_audit_rejects_truncation_trailing_bytes_mutation_and_foreign_request(self):

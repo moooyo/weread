@@ -1,6 +1,6 @@
 # Single stock-card visit on the verification worker
 
-`run_stock_ab_visit.py` operates one **already frozen** Scribe 2022 / 5.19.5 visit. It cannot freeze inputs, build an application, deploy a permanent replacement, queue for the device or continue to the next slot. Before any live use, finish the combined device-shell/fixture checks, verify the frozen schedule, and coordinate exclusive access. A successful host fixture or `--preflight` is not device acceptance.
+`run_stock_ab_visit.py` operates one **already frozen** Scribe 2022 / 5.19.5 visit. It cannot freeze inputs, build an application, deploy a permanent replacement, queue for the device or continue to the next slot. Before any live use, finish the combined device-shell/fixture checks, verify the frozen schedule, and coordinate exclusive access through the [shared worker operation lock](../kindle-physical/README.md). Live and recovery paths require the installed worker module; offline preflight does not. Do not use a frozen runner that predates the shared lock. A successful host fixture or `--preflight` is not device acceptance.
 
 The first slots are warmups `00-A`, `01-B`; the remaining frozen slots represent six AB/BA pairs. Run only the next approved slot. On Windows, the wrapper uses `ssh test-env` via the configured agent. Supply a `SecureString` already held by the calling session. It is not an argument to SSH or Python, not written to disk, and must never be included in a transcript. Each invocation exits independently.
 

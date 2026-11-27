@@ -1,7 +1,7 @@
 """Run exactly one frozen A/B stock-card visit, or only verify or recover that visit."""
 
 import argparse
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from datetime import datetime
 import fcntl
 import json
@@ -26,7 +26,19 @@ TIMES = dict(install=240, prepare=120, tap=100, claim=40, stop=100, restore=125,
 REFS = ('document-reference', 'launch-reference')
 TRUST = Path('/root/.config/kindle-physical')
 WORKER_RUNNER = Path('/opt/kindle-toolchain/ubuntu-run')
+OPERATION_LOCK_MODULE = Path('/usr/local/lib/kindle-physical/device_lock.py')
 HEADER_RECEIVED = b'WEREAD_STOCK_INSTALL_HEADER_COMPLETE'
+
+
+@contextmanager
+def physical_operation():
+    lock = runpy.run_path(str(OPERATION_LOCK_MODULE))
+    with ExitStack() as stack:
+        try:
+            stack.enter_context(lock['operation_lock']())
+        except lock['DeviceBusy']:
+            raise Refused('physical_operation_busy') from None
+        yield
 
 
 def invocation(body, mode, label):
@@ -348,12 +360,15 @@ def execute(args):
             result = lease.release(request, native_restored_and_connections_closed=True)
             if (result.get('owner_and_token_checked') is not True or result.get('only_owned_owner_json_removed_then_rmdir') is not True
                     or result.get('native_restored_and_connections_closed') is not True or
+                    result.get('lease_directory_absent_after_release') is not True or
                     not isinstance(result.get('released_at_utc'), str) or datetime.fromisoformat(result['released_at_utc']).tzinfo is None):
                 raise Refused('release_unconfirmed')
+            operation.close()
             return result['released_at_utc']
         def interrupt(*_):
             raise KeyboardInterrupt
-        with tempfile.TemporaryDirectory(dir=attempt) as private:
+        with ExitStack() as stack, ExitStack() as operation:
+            private = stack.enter_context(tempfile.TemporaryDirectory(dir=attempt))
             askpass = Path(private)/'askpass'
             askpass.write_text('#!/bin/sh\nprintf "%s\\n" "$WEREAD_TRANSIENT_PASSWORD"\n', encoding='ascii')
             askpass.chmod(0o700)
@@ -366,6 +381,7 @@ def execute(args):
                 original = read_json(attempt/'operations.json')
                 report.update(recovery_only=True, acquired_at_utc=original.get('acquired_at_utc'), recovery_required=True)
                 save()
+                operation.enter_context(physical_operation())
                 try:
                     if lease.status(request).get('ownership_verified') is not True:
                         raise Refused('lease_not_owned')
@@ -377,25 +393,27 @@ def execute(args):
                 persist()
                 save()
                 try:
+                    operation.enter_context(physical_operation())
                     acquired = lease.acquire(request)
                 except (Exception, KeyboardInterrupt) as error:
                     details = getattr(error,'details',{})
                     partial = os.path.lexists(request.token_file) or any(details.get(key) for key in
                               ('lease_directory_created','private_token_created','owner_record_created'))
-                    busy = getattr(error,'code','') in ('lease_exists','operation_busy') and not partial
+                    busy = (getattr(error,'code','') in ('lease_exists','operation_busy') or
+                            isinstance(error,Refused) and str(error) == 'physical_operation_busy') and not partial
                     report.update(acquisition='busy' if busy else 'unconfirmed', recovery_required=bool(partial))
                     save()
                     return 2 if partial else 3 if busy else 1
                 report.update(acquisition='acquired', acquired_at_utc=acquired['acquired_at_utc'], recovery_required=True)
                 save()
             status = drive(transport, release, report, journal, save, persist, recovering=bool(args.recover))
-            if report['released']:
-                request.token_file.unlink(missing_ok=True)
-            print(json.dumps(dict(label=label, lane=config['lane'], slot=config['slot'], primary=report['primary'],
-                                  released=report['released'], recovery_required=report['recovery_required'],
-                                  reason=report.get('close_reason') or report.get('refused') or report.get('qualification_reason'),
-                                  receipt=str(receipt))))
-            return status
+        if report['released']:
+            request.token_file.unlink(missing_ok=True)
+        print(json.dumps(dict(label=label, lane=config['lane'], slot=config['slot'], primary=report['primary'],
+                              released=report['released'], recovery_required=report['recovery_required'],
+                              reason=report.get('close_reason') or report.get('refused') or report.get('qualification_reason'),
+                              receipt=str(receipt))))
+        return status
 
 
 def main():
@@ -412,7 +430,7 @@ def main():
         return execute(args)
     except Refused as error:
         print('Refused:', error, file=sys.stderr)
-        return 3 if str(error) == 'visit_busy' else 2 if args.recover else 1
+        return 3 if str(error) in ('visit_busy', 'physical_operation_busy') else 2 if args.recover else 1
     except (OSError, ValueError, KeyError, TypeError, RuntimeError, subprocess.SubprocessError, tarfile.TarError, KeyboardInterrupt) as error:
         print('Visit not confirmed:', type(error).__name__, file=sys.stderr)
         return 2 if args.recover or not args.preflight else 1
