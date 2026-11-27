@@ -19,7 +19,7 @@ import tempfile
 import time
 
 from run_daily_render import LABEL, SHARED, Refused, now, public_reason
-from stock_ab_transaction import METADATA, WireRefusal, bind_syscall_refusal, checkpoint, drive, fresh_journal, initial, valid_journal
+from stock_ab_transaction import LOAD_CLOSE_RECEIPTS, METADATA, WireRefusal, bind_syscall_refusal, checkpoint, drive, fresh_journal, initial, valid_journal
 
 
 TIMES = dict(install=240, prepare=120, tap=100, claim=40, stop=100, restore=125, close=60)
@@ -60,18 +60,27 @@ def staged_wire(archive, header, destination):
     return destination
 
 
-def transport_failure(mode, code, stderr):
+def transport_failure(mode, code, stderr, *, load_retired=False):
     raw = stderr if isinstance(stderr,bytes) else b''
     seen = HEADER_RECEIVED in raw.splitlines() if mode == 'install' else None
     reason = public_reason(raw)
     if reason == 'unconfirmed':
         refusals = [line[8:].decode('ascii', 'replace') for line in raw.splitlines() if line.startswith(b'refused ')]
         if len(refusals) == 1 and bind_syscall_refusal(refusals[0]):
-            return WireRefusal(refusals[0],code,seen)
+            return WireRefusal(refusals[0],code,seen,load_retired)
         reason = ('transport_timeout' if code is None else 'ssh_transport_exit' if code == 255 else
                   'transport_signaled' if code < 0 else 'unconfirmed_after_header' if seen else
                   'install_header_unconfirmed' if mode == 'install' else 'unconfirmed')
-    return WireRefusal(reason,code,seen)
+    return WireRefusal(reason,code,seen,load_retired)
+
+
+def load_retirement_observed(mode, label, result):
+    if mode not in LOAD_CLOSE_RECEIPTS or result.returncode not in (0, 1):
+        return False
+    marker = LOAD_CLOSE_RECEIPTS[mode] + label.encode('ascii')
+    lines = result.stderr.splitlines(keepends=True)
+    marks = [line for line in lines if line.startswith(tuple(LOAD_CLOSE_RECEIPTS.values()))]
+    return marks == [marker + b'\n'] and lines[-1:] == marks
 
 
 def references(package):
@@ -211,10 +220,14 @@ class Transport:
                                         timeout=TIMES.get(mode, 45))
         except subprocess.TimeoutExpired as error:
             raise transport_failure(mode,None,error.stderr) from None
+        retired = load_retirement_observed(mode, self.label, result)
         if result.returncode:
-            raise transport_failure(mode,result.returncode,result.stderr)
+            raise transport_failure(mode,result.returncode,result.stderr,load_retired=retired)
+        if mode in LOAD_CLOSE_RECEIPTS and not retired:
+            raise WireRefusal('missing_load_retirement_receipt',result.returncode,
+                              HEADER_RECEIVED in result.stderr.splitlines() if mode == 'install' else None)
         if mode == 'install' and result.stderr.splitlines().count(HEADER_RECEIVED) != 1:
-            raise WireRefusal('missing_install_header_receipt',result.returncode,False)
+            raise WireRefusal('missing_install_header_receipt',result.returncode,False,load_retired=retired)
         return result.stdout
 
 

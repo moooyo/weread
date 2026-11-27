@@ -58,7 +58,8 @@ class HostCLITests(unittest.TestCase):
         shell=f'''set -eu
 printf '%s\\n' "$1" >>'{self.traffic}'
 case "$1" in
-admit) state=admitted;; stage) state=staged;; install) cat >/dev/null; state=installed;; prepare) state=prepared;;
+admit) state=admitted;; stage) printf 'WEREAD_STOCK_STAGE_RETIRED %s\\n' "$2" >&2; state=staged;;
+install) cat >/dev/null; printf 'WEREAD_STOCK_INSTALL_RETIRED %s\\n' "$2" >&2; state=installed;; prepare) state=prepared;;
 activate) state=activated;; arm) state=armed;; claim) state=claimed;; witness) state=witnessed;; stop) state=stopped;;
 restore) [ ! -e '{self.gate}' ] || {{ echo 'refused native_restore' >&2; exit 1; }}; state=restored;; close) state=closed;;
 original|absent) printf '{{"state":"%s",{encoded(FIXED)[1:]}\\n' "$1"; exit;;

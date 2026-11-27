@@ -4,6 +4,7 @@ authority=/var/tmp/weread-stock-selector-bind
 install_reason=install
 activate_reason=selector_activation
 bind_reason=
+load_child_unconfirmed=0
 
 selector_text() {
     cat <<'WEREAD_ONE_SHOT'
@@ -100,14 +101,66 @@ helpers_match() {
         single "$trial/app/$leaf" && single "$home/app/$leaf" && cmp -s "$trial/app/$leaf" "$home/app/$leaf" || return 1
     done
 }
+receive_archive() {
+    # A lingering BusyBox timer must not inherit the stage lock or an
+    # archive descriptor. Pin the empty file first; the supervised reader
+    # opens and locks that inode itself, without truncating it.
+    (set -C; : >"$stage/input.tgz") || return 1
+    single "$stage/input.tgz" && exec 7<>"$stage/input.tgz" && [ /proc/$$/fd/7 -ef "$stage/input.tgz" ] || return 1
+    receive_id=$(stat -Lc '%d:%i' "/proc/$$/fd/7") || return 1
+    if (exec 7<&- 8<&-; exec timeout -k 1 150 sh -c '
+        exec 6<>"$1" && [ "$(stat -Lc "%d:%i" /proc/self/fd/6)" = "$2" ] && flock -nx 6 || exit 76
+        exec head -c "$3" >&6
+    ' weread-load-read "$stage/input.tgz" "$receive_id" $((@ARCHIVE_BYTES@+1))); then
+        receive_status=0
+    else
+        receive_status=$?
+    fi
+    # A supervisor exit or signal status is not a join on its child. Take
+    # the writer's file lock before processing or confirming retirement.
+    if ! single "$stage/input.tgz" || ! { exec 6<"$stage/input.tgz" && [ /proc/$$/fd/6 -ef /proc/$$/fd/7 ] && flock -nx 6; }; then
+        load_child_unconfirmed=1
+        return 1
+    fi
+    exec 7<&- || { load_child_unconfirmed=1; return 1; }
+    case "$receive_status" in
+        0) return 0;;
+        1) return 1;;
+        124|143) return 124;;
+        *) load_child_unconfirmed=1; return 1;;
+    esac
+}
 install() {
     tag staged && same && stock_clear && absent "$authority" && stock_request_absent && fresh_production && matches "$stage/launch-stat" "$(stamp "$production")" || return 1
     for leaf in installed bind-intent armed input.tgz names types outer-manifest seed-manifest unpack arm tile render-observer selector-bind launch-reference document-reference arm-seed.tar.gz selector-original-slot selector-stat bind-stat bind-directory bind-owner arm-name; do
         absent "$stage/$leaf" || return 1
     done
-    (set -C; head -c $((@ARCHIVE_BYTES@+1)) >"$stage/input.tgz" && outer_manifest >"$stage/outer-manifest" && seed_manifest >"$stage/seed-manifest") &&
-        [ "$(stat -c %s "$stage/input.tgz")" = @ARCHIVE_BYTES@ ] && mkdir "$stage/unpack" &&
-        check_archive "$stage/input.tgz" "$stage/outer-manifest" "$stage/unpack" || return 1
+    install_reason=install_receive_unavailable
+    command -v timeout >/dev/null && (exec 8<&-; exec timeout -k 1 1 head -c 1) </dev/null >/dev/null || return 1
+    if (exec 8<&-; exec timeout -k 1 1 sleep 3) </dev/null >/dev/null; then
+        return 1
+    else
+        case "$?" in 124|143) ;; *) return 1;; esac
+    fi
+    install_reason=install_receive_failed
+    if receive_archive; then :; else
+        case "$?" in 124) install_reason=install_receive_timeout;; esac
+        if [ "$load_child_unconfirmed" = 1 ]; then install_reason=install_receiver_unconfirmed; fi
+        return 1
+    fi
+    install_reason=install_archive_stat
+    received=$(stat -c %s "$stage/input.tgz") || return 1
+    if [ "$received" != @ARCHIVE_BYTES@ ]; then
+        install_reason=install_archive_size
+        if number "$received" || [ "$received" = 0 ]; then
+            if [ "$received" -lt @ARCHIVE_BYTES@ ]; then install_reason=install_archive_short
+            else install_reason=install_archive_long; fi
+        fi
+        return 1
+    fi
+    install_reason=install_outer_archive
+    (set -C; outer_manifest >"$stage/outer-manifest" && seed_manifest >"$stage/seed-manifest") &&
+        mkdir "$stage/unpack" && check_archive "$stage/input.tgz" "$stage/outer-manifest" "$stage/unpack" || return 1
     for leaf in arm tile render-observer selector-bind launch-reference document-reference arm-seed.tar.gz; do mv "$stage/unpack/$leaf" "$stage/$leaf" || return 1; done
     rmdir "$stage/unpack" && rm "$stage/input.tgz" || return 1
     install_reason=production_reference
@@ -278,12 +331,32 @@ close_stage() {
     unknown=$(find "$stage" ! -type d ! -type f -print) && [ -z "$unknown" ] && owned && stock_clear && rm -rf "$stage" && stock_empty
 }
 
+# A normally returned foreground load has no further stage writes to do.
+# Emit the visit-bound terminal record only after the load function returns;
+# never produce it from a signal trap or an interrupted child wait.
+load_terminal() {
+    case "$mode" in
+        stage) printf 'WEREAD_STOCK_STAGE_RETIRED %s\n' "$label" >&2;;
+        install) printf 'WEREAD_STOCK_INSTALL_RETIRED %s\n' "$label" >&2;;
+    esac
+}
+load_refused() {
+    printf 'refused %s\n' "$1" >&2
+    if [ "$load_child_unconfirmed" = 0 ]; then load_terminal; fi
+    exit 1
+}
+
 case "$mode" in
     admit) admit 2>/dev/null || fail "$admit_reason"; reply admitted;;
     audit) bounded_audit 2>/dev/null || fail production_byte_audit; reply audited;;
     absent) stock_empty 2>/dev/null || fail absent; original_report absent || fail absent;;
-    stage) new_stage 2>/dev/null || fail "$admit_reason"; reply staged;;
-    install|original|prepare|activate|arm|request|tap|claim|witness|stop|restore|close)
+    stage) new_stage 2>/dev/null || load_refused "$admit_reason"; reply staged; load_terminal;;
+    install)
+        absent "$stage" && load_refused absent_stage
+        stage_lock 2>/dev/null && entry_guard 2>/dev/null || load_refused "${bind_reason:-stage_owner_or_busy}"
+        install 2>/dev/null || load_refused "${bind_reason:-$install_reason}"
+        reply installed; load_terminal;;
+    original|prepare|activate|arm|request|tap|claim|witness|stop|restore|close)
         if absent "$stage"; then
             case "$mode" in stop|restore|close) stock_empty 2>/dev/null || fail unsafe_absence;; *) fail absent_stage;; esac
             reply already_absent; exit 0
@@ -291,7 +364,6 @@ case "$mode" in
         stage_lock 2>/dev/null && entry_guard 2>/dev/null || fail "${bind_reason:-stage_owner_or_busy}"
         case "$mode" in request|claim|stop|witness) if system_shell 2>/dev/null; then shell_trusted=1; else fail untrusted_shell; fi;; esac
         case "$mode" in
-            install) install 2>/dev/null || fail "${bind_reason:-$install_reason}"; reply installed;;
             original) tag installed && pair_original && same >/dev/null 2>&1 || fail original; original_report original || fail original;;
             prepare) pair_original && stock_request_absent && prepare 2>/dev/null || fail "$prepare_reason"; reply prepared;;
             activate) activate 2>/dev/null || fail "${bind_reason:-$activate_reason}"; reply activated;;

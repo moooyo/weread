@@ -16,7 +16,7 @@ from unittest.mock import patch
 from qualified_submit import ISOLATED_SEQUENCE
 from run_daily_render import Refused
 from run_stock_ab_visit import HEADER_RECEIVED, RequestChannel, Transport, audit_reference, execute, invocation, original_attempt, references, staged_wire, transport_failure
-from stock_ab_transaction import GUARDS, STATES, WireRefusal, checkpoint, checked, drive, fresh_journal, initial, valid_journal
+from stock_ab_transaction import GUARDS, LOAD_CLOSE_RECEIPTS, STATES, WireRefusal, checkpoint, checked, drive, fresh_journal, initial, valid_journal
 from test_qualified_submit import LABEL, SENT, START, receipt
 
 
@@ -41,7 +41,7 @@ class Fixture:
     def call(self, mode):
         self.calls.append(mode)
         if mode == self.fail:
-            raise Refused('guard_refused')
+            raise WireRefusal('guard_refused', 1, load_retired=True) if mode in LOAD_CLOSE_RECEIPTS else Refused('guard_refused')
         values = dict(original={'state':'original',**FIXED}, absent={'state':'absent',**FIXED}, tap=START,
                       audit_before={'state':'audited'}, audit_after={'state':'audited'})
         values.update({key:{'state':value} for key,value in STATES.items()})
@@ -83,6 +83,7 @@ class VisitStateTests(unittest.TestCase):
         fixture=Fixture(); self.assertEqual(fixture.run(),0)
         result=fixture.report; self.assertTrue(result['native_guard_verified'])
         self.assertEqual([step['mode'] for step in result['operations']],list(ISOLATED_SEQUENCE))
+        self.assertEqual([step['mode'] for step in result['operations'] if step.get('load_retired') is True],['stage','install'])
         self.assertEqual([step['mode'] for step in result['guard_checks']],list(GUARDS))
         self.assertEqual(result['qualified']['elapsed_interval_ns'],[SENT-START['up_after_ns'],SENT-START['up_before_ns']])
         self.assertNotIn('observation',result)
@@ -108,6 +109,62 @@ class VisitStateTests(unittest.TestCase):
                 self.assertNotIn('qualified',fixture.report); self.assertLessEqual(fixture.calls.count('tap'),1)
                 self.assertIn('absent',fixture.calls)
         fixture=Fixture(fail='admit'); self.assertEqual(fixture.run(),1); self.assertEqual(fixture.calls,['admit','lease_release'])
+
+    def test_unanswered_load_stays_pending_and_recovery_cannot_use_absence(self):
+        for mode in LOAD_CLOSE_RECEIPTS:
+            with self.subTest(mode=mode):
+                fixture=Fixture()
+                original=fixture.call
+
+                def disconnect(call):
+                    if call == mode:
+                        self.assertEqual(fixture.journals[-1]['load_pending'],mode)
+                        raise WireRefusal('ssh_transport_exit',255)
+                    return original(call)
+
+                fixture.call=disconnect
+                self.assertEqual(fixture.run(),2)
+                self.assertEqual(fixture.calls,['admit'] if mode=='stage' else ['admit','stage'])
+                self.assertEqual(fixture.journal['load_pending'],mode)
+                self.assertTrue(valid_journal(fixture.journal,LABEL))
+                self.assertEqual(fixture.report['close_reason'],'remote_load_retirement_unconfirmed')
+                self.assertTrue(fixture.report['recovery_required'])
+                fixture.calls.clear()
+                self.assertEqual(fixture.run(True),2)
+                self.assertEqual(fixture.calls,[])
+
+    def test_confirmed_early_refusal_still_needs_retained_original_byte_audit(self):
+        fixture=Fixture(fail='install')
+        original=fixture.call
+
+        def changed_originals(mode):
+            if mode=='audit_after':
+                fixture.calls.append(mode)
+                raise Refused('production_byte_audit')
+            return original(mode)
+
+        fixture.call=changed_originals
+        self.assertEqual(fixture.run(),2)
+        self.assertEqual(fixture.report['refused'],'install:guard_refused')
+        self.assertEqual(fixture.report['close_reason'],'audit_after:production_byte_audit')
+        self.assertIn('absent',fixture.calls)
+        self.assertNotIn('lease_release',fixture.calls)
+
+    def test_failed_pending_checkpoint_cannot_dispatch_or_release(self):
+        for after_return in (False,True):
+            with self.subTest(after_return=after_return):
+                fixture=Fixture()
+
+                def persist():
+                    if fixture.journal['phase']=='stage_requested' and (fixture.journal['load_pending'] is None)==after_return:
+                        raise OSError('synthetic checkpoint failure')
+                    fixture.journals.append(copy.deepcopy(fixture.journal))
+
+                rc=drive(fixture,fixture.release,fixture.report,fixture.journal,lambda:None,persist)
+                self.assertEqual(rc,2)
+                self.assertEqual(fixture.calls,['admit','stage'] if after_return else ['admit'])
+                self.assertEqual(fixture.journal['load_pending'],'stage')
+                self.assertTrue(fixture.report['recovery_required'])
 
     def test_dead_or_foreign_reader_never_taps(self):
         for fixture in (Fixture(fail='dead_before_tap'),Fixture(change={'request_armed':{**ARM,'label':'f'*16}}),
@@ -153,7 +210,9 @@ class VisitStateTests(unittest.TestCase):
         for restored,navigated,expected in ((False,True,2),(True,True,0),(False,False,0)):
             with self.subTest(restored=restored,navigated=navigated):
                 fixture=Fixture(change=absent); fixture.journal.update(stage_possible=True,navigation_possible=navigated,
-                     restored=restored,original={'state':'original',**FIXED},audit_before=True)
+                     phase='restored' if restored else 'tap_requested' if navigated else 'original_observed',
+                     restored=restored,original={'state':'original',**FIXED},audit_before=navigated)
+                self.assertTrue(valid_journal(fixture.journal,LABEL))
                 self.assertEqual(fixture.run(True),expected); self.assertNotIn('tap',fixture.calls)
                 self.assertNotIn('open_request',fixture.calls); self.assertNotIn('qualified',fixture.report)
                 self.assertEqual('lease_release' in fixture.calls,expected==0)
@@ -191,7 +250,8 @@ if IFS= read -r line; then exit 1; fi; printf '{"result":1}\\n' '''
     def test_install_and_audit_transport_carry_exact_binary_after_header(self):
         with tempfile.TemporaryDirectory() as work:
             file=Path(work)/'inputs.tgz'; data=b'\x1f\x8b\n\x00\xff'; file.write_bytes(data)
-            program=b'[ "$2" = '+LABEL.encode()+b' ] || exit 64; cat'
+            program=(b'[ "$2" = '+LABEL.encode()+b' ] || exit 64; cat; '
+                     b'if [ "$1" = install ]; then printf "WEREAD_STOCK_INSTALL_RETIRED %s\\n" "$2" >&2; fi')
             wire=staged_wire(file,invocation(program,'install',LABEL)[1],Path(work)/'install.stream')
             sent=[]; transport=Transport(['sh','-c'],program,LABEL,file,b'DOC\nLAUNCH\n',os.environ,lambda:sent.append('check'),wire=wire)
             self.assertEqual(transport.call('install'),data)
@@ -227,11 +287,13 @@ if IFS= read -r line; then exit 1; fi; printf '{"result":1}\\n' '''
                 if mode=='install': raise transport_failure(mode,code,raw)
                 return previous(mode)
             fixture.call=call
-            self.assertEqual(fixture.run(),1)
+            self.assertEqual(fixture.run(),2)
             failed=next(row for row in fixture.report['operations'] if row['mode']=='install')
             self.assertEqual(failed.get('ssh_returncode'),code); self.assertIs(failed['install_header_observed'],observed)
-            self.assertEqual(failed['reason'],reason); self.assertNotIn('private',str(fixture.report)); self.assertTrue(fixture.report['released'])
+            self.assertEqual(failed['reason'],reason); self.assertNotIn('private',str(fixture.report)); self.assertFalse(fixture.report['released'])
             self.assertEqual(fixture.report['refused'], 'install:'+reason)
+            self.assertEqual(fixture.journal['load_pending'],'install')
+            self.assertEqual(fixture.report['close_reason'],'remote_load_retirement_unconfirmed')
 
     def test_no_install_wire_or_missing_header_sentinel_cannot_activate(self):
         with tempfile.TemporaryDirectory() as work:
@@ -239,10 +301,35 @@ if IFS= read -r line; then exit 1; fi; printf '{"result":1}\\n' '''
             program=b'cat >/dev/null; echo installed'; remote=Transport(['sh','-c'],program,LABEL,archive,b'',os.environ,lambda:None)
             with self.assertRaisesRegex(Refused,'install_wire_not_prepared'): remote.call('install')
             remote.wire=staged_wire(archive,invocation(program,'install',LABEL)[1],root/'wire')
-            simulated=subprocess.CompletedProcess([],0,b'{"state":"installed"}\n',b'private stderr\n')
+            marker=LOAD_CLOSE_RECEIPTS['install']+LABEL.encode('ascii')+b'\n'
+            simulated=subprocess.CompletedProcess([],0,b'{"state":"installed"}\n',marker)
             with patch('run_stock_ab_visit.subprocess.run',return_value=simulated), self.assertRaises(WireRefusal) as refused:
                 remote.call('install')
             self.assertEqual((str(refused.exception),refused.exception.returncode,refused.exception.header_observed),('missing_install_header_receipt',0,False))
+
+    def test_retirement_requires_one_final_visit_bound_marker_and_normal_ssh_exit(self):
+        remote=Transport(['unused'],b':',LABEL,None,b'',os.environ,lambda:None)
+        remote.wire=Path(__file__)
+        for mode,state in (('stage','staged'),('install','installed')):
+            prefix=HEADER_RECEIVED+b'\n' if mode=='install' else b''
+            good=LOAD_CLOSE_RECEIPTS[mode]+LABEL.encode('ascii')+b'\n'
+            other=LOAD_CLOSE_RECEIPTS[('install' if mode=='stage' else 'stage')]+LABEL.encode('ascii')+b'\n'
+            for code,tail,expected in ((0,good,True),(1,good,True),(255,good,False),(-9,good,False),
+                                       (0,b'',False),(0,good[:-1],False),(0,good+good,False),(0,other,False),
+                                       (0,good[:-17]+b'f'*16+b'\n',False),(0,good+b'extra\n',False)):
+                with self.subTest(mode=mode,code=code,tail=tail):
+                    result=subprocess.CompletedProcess([],code,line({'state':state}),prefix+tail)
+                    with patch('run_stock_ab_visit.subprocess.run',return_value=result):
+                        if code==0 and expected:
+                            self.assertEqual(remote.call(mode),result.stdout)
+                        else:
+                            with self.assertRaises(WireRefusal) as failure:
+                                remote.call(mode)
+                            self.assertIs(failure.exception.load_retired,expected)
+            with patch('run_stock_ab_visit.subprocess.run',side_effect=subprocess.TimeoutExpired([],1,stderr=prefix+good)):
+                with self.assertRaises(WireRefusal) as failure:
+                    remote.call(mode)
+                self.assertIs(failure.exception.load_retired,False)
 
     def test_pinned_original_reference_order_does_not_depend_on_tar_order(self):
         with tempfile.TemporaryDirectory() as work:

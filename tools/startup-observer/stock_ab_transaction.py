@@ -10,6 +10,7 @@ from run_daily_render import CLOCK, Refused, json_line, now, release_bounds
 
 STATES = dict(admit='admitted', stage='staged', install='installed', prepare='prepared', activate='activated',
               arm='armed', claim='claimed', witness='witnessed', stop='stopped', restore='restored', close='closed')
+LOAD_CLOSE_RECEIPTS = {'stage': b'WEREAD_STOCK_STAGE_RETIRED ', 'install': b'WEREAD_STOCK_INSTALL_RETIRED '}
 STAT_FIELDS = ('launch', 'document', 'application')
 IDENTITY_PREFIX = r'[0-9]{1,20}:[0-9]{1,20}:[0-9]{1,20}:[0-7]{1,5}:[0-9]{1,10}:[0-9]{1,10}:'
 STAT = re.compile(IDENTITY_PREFIX + r'[0-9]{1,20}:[0-9]{1,8}')
@@ -20,10 +21,11 @@ METADATA = ('label', 'purpose', 'lane', 'slot', 'role', 'pair', 'claim_protocol'
 
 
 class WireRefusal(Refused):
-    def __init__(self, reason, returncode=None, header_observed=None):
+    def __init__(self, reason, returncode=None, header_observed=None, load_retired=False):
         super().__init__(reason)
         self.returncode = returncode
         self.header_observed = header_observed
+        self.load_retired = load_retired
 
 
 def valid_stat(key, value):
@@ -100,8 +102,8 @@ def public_error(error):
 
 
 def fresh_journal(label):
-    return dict(label=label, phase='not_started', stage_possible=False, navigation_possible=False, restored=False,
-                original=None, audit_before=False, guard_complete=False)
+    return dict(label=label, phase='not_started', stage_possible=False, load_pending=None, navigation_possible=False,
+                restored=False, original=None, audit_before=False, guard_complete=False)
 
 
 def valid_journal(journal, label):
@@ -118,6 +120,9 @@ def valid_journal(journal, label):
     if journal['audit_before'] != journal['navigation_possible'] or journal['navigation_possible'] and journal['original'] is None:
         return False
     phase = journal['phase']
+    pending = journal['load_pending']
+    if pending is not None and (type(pending) is not str or pending not in LOAD_CLOSE_RECEIPTS or phase != 'stage_requested'):
+        return False
     if phase == 'not_started':
         return not any(journal[key] for key in keys) and journal['original'] is None
     if not journal['stage_possible']:
@@ -151,10 +156,16 @@ def drive(transport, release, report, journal, save, persist, *, recovering=Fals
                     failed['ssh_returncode'] = error.returncode
                 if mode == 'install' and type(error.header_observed) is bool:
                     failed['install_header_observed'] = error.header_observed
+                if mode in LOAD_CLOSE_RECEIPTS and type(error.load_retired) is bool:
+                    failed['load_retired'] = error.load_retired
             collection.append(failed)
             save()
             raise Refused(mode + ':' + reason) from None
-        collection.append(dict(mode=mode, status=0, reason='', receipt=receipt, at=now()))
+        success = dict(mode=mode, status=0, reason='', receipt=receipt, at=now())
+        if mode in LOAD_CLOSE_RECEIPTS:
+            # Transport success already requires the matching terminal marker.
+            success['load_retired'] = True
+        collection.append(success)
         save()
         return receipt
 
@@ -165,12 +176,33 @@ def drive(transport, release, report, journal, save, persist, *, recovering=Fals
         journal.update(phase=phase, **fields)
         persist()
 
+    def retire_load(mode):
+        try:
+            mark('stage_requested', load_pending=None)
+        except BaseException:
+            # Keep the conservative in-memory barrier if its durable update
+            # could not be confirmed, even when SSH itself returned normally.
+            journal['load_pending'] = mode
+            raise
+
+    def load(mode):
+        # Persist intent before sending the command. Neither a missing stage
+        # nor a closed local SSH client can clear an unanswered remote write.
+        mark('stage_requested', stage_possible=True, load_pending=mode)
+        try:
+            call(mode)
+        except Refused:
+            failure = report['operations'][-1]
+            if failure['mode'] == mode and failure.get('load_retired') is True:
+                retire_load(mode)
+            raise
+        retire_load(mode)
+
     try:
         if not recovering:
             call('admit')
-            mark('stage_requested', stage_possible=True)
-            call('stage')
-            call('install')
+            load('stage')
+            load('install')
             original = call('original')
             mark('original_observed', original=original)
             call('audit_before')
@@ -202,6 +234,8 @@ def drive(transport, release, report, journal, save, persist, *, recovering=Fals
         try:
             if channel is not None:
                 channel.close()
+            if journal['load_pending'] is not None:
+                raise Refused('remote_load_retirement_unconfirmed')
             if journal['stage_possible']:
                 for mode in ('stop','restore','close'):
                     if mode == 'close' and journal['phase'] != 'absent':
@@ -215,11 +249,10 @@ def drive(transport, release, report, journal, save, persist, *, recovering=Fals
                 if journal['original'] is not None:
                     if any(returned[key] != journal['original'][key] for key in STAT_FIELDS):
                         raise Refused('original_identity_changed')
-                if journal['audit_before']:
-                    call('audit_after')
-                    report['native_guard_verified'] = True
-                if journal['navigation_possible'] and not report['native_guard_verified']:
-                    raise Refused('missing_original_guard')
+                # Early load failures still need the retained byte readback.
+                # They do not have the full before-and-after timing guard.
+                call('audit_after')
+                report['native_guard_verified'] = journal['audit_before']
                 mark('absent', guard_complete=report['native_guard_verified'])
             released_at = release()
             report.update(released_at_utc=released_at, released=True, owner_and_token_checked=True, recovery_required=False)

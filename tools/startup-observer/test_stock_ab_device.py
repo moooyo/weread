@@ -1,5 +1,6 @@
 """Exercise the per-visit device program on an isolated Linux filesystem, never a Kindle."""
 
+import fcntl
 import io
 import json
 import os
@@ -14,6 +15,7 @@ import unittest
 
 import test_daily_render_device as daily
 from stock_ab_device import render_device
+from stock_ab_transaction import LOAD_CLOSE_RECEIPTS
 
 
 MOCK_SQL = r'''
@@ -133,9 +135,10 @@ class StockDeviceFixture(unittest.TestCase):
 
     def call(self, mode, state=None, *, data=b'', refused=None):
         result = self.run_mode(mode,data)
+        terminal = LOAD_CLOSE_RECEIPTS[mode]+daily.LABEL.encode('ascii')+b'\n' if mode in LOAD_CLOSE_RECEIPTS else b''
         if refused:
-            self.assertEqual((result.returncode,result.stdout,result.stderr),(1,b'',f'refused {refused}\n'.encode()),mode); return
-        self.assertEqual((result.returncode,result.stderr),(0,b''),(mode,result.stdout,result.stderr))
+            self.assertEqual((result.returncode,result.stdout,result.stderr),(1,b'',f'refused {refused}\n'.encode()+terminal),mode); return
+        self.assertEqual((result.returncode,result.stderr),(0,terminal),(mode,result.stdout,result.stderr))
         receipt = json.loads(result.stdout)
         if state: self.assertEqual(receipt.get('state'),state,mode)
         return receipt
@@ -286,7 +289,71 @@ class DeviceTests(StockDeviceFixture):
         self.rebuild(seed_entries=rows); self.call('stage','staged'); self.call('install',data=self.payload,refused='public_seed')
         self.assertFalse((self.stage/'tile-original').exists()); self.handback()
         self.rebuild(entries=[('tile/card-input','/etc/passwd',0o755)])
-        self.call('stage','staged'); self.call('install',data=self.payload,refused='install'); self.handback()
+        self.call('stage','staged'); self.call('install',data=self.payload,refused='install_outer_archive'); self.handback()
+
+    def test_receive_requires_exact_eof_and_a_working_remote_deadline(self):
+        previous = self.call('absent','absent')
+        for extra, reason in ((b'', 'install_archive_short'), (b'\x00', 'install_archive_long')):
+            with self.subTest(reason=reason):
+                self.call('stage','staged')
+                self.call('install',data=self.payload+extra if extra else self.payload[:-1],refused=reason)
+                self.assertFalse((self.stage/'unpack').exists())
+                self.assertFalse((self.stage/'installed').exists())
+                self.handback(previous)
+        body = self.program.read_text('ascii')
+        self.assertEqual(body.count('exec timeout -k 1 150 sh -c'),1)
+        self.program.write_text(body.replace('exec timeout -k 1 150 sh -c','exec timeout -k 1 2 sh -c'),encoding='ascii')
+        self.call('stage','staged')
+        terminal=LOAD_CLOSE_RECEIPTS['install']+daily.LABEL.encode('ascii')+b'\n'
+        with subprocess.Popen([*self.device_shell,self.program,'install',daily.LABEL],stdin=subprocess.PIPE,
+                              stdout=subprocess.PIPE,stderr=subprocess.PIPE,bufsize=0) as child:
+            try:
+                child.stdin.write(self.payload)
+                child.stdin.flush()
+                # The sender stays open through the real receive watchdog exit.
+                self.assertEqual(child.wait(timeout=10),1)
+                self.assertFalse(child.stdin.closed)
+                self.assertEqual(child.stdout.read(),b'')
+                self.assertEqual(child.stderr.read(),b'refused install_receive_timeout\n'+terminal)
+            finally:
+                if child.poll() is None:
+                    child.kill(); child.wait(timeout=4)
+        for leaf in ('outer-manifest','seed-manifest','unpack','installed','bind-intent','tile-dispatch-intent'):
+            self.assertFalse((self.stage/leaf).exists(),leaf)
+        self.handback(previous)
+
+    def test_supervisor_exit_is_not_retirement_while_the_reader_owns_its_lock(self):
+        previous = self.call('absent','absent')
+        self.call('stage','staged')
+        body = self.program.read_text('ascii')
+        supervisor = self.root/'fixture-supervisor'
+        supervisor.write_text(f'''#!/bin/sh
+limit=60
+while [ ! -f {shlex.quote(str(self.root/'fake-supervisor-return'))} ]; do
+    [ "$limit" -gt 0 ] || exit 77
+    limit=$((limit-1)); sleep 0.05
+done
+exit 137
+''',encoding='ascii')
+        supervisor.chmod(0o700)
+        anchor='exec timeout -k 1 150 sh -c'
+        self.assertEqual(body.count(anchor),1)
+        self.program.write_text(body.replace(anchor,'exec '+shlex.quote(str(supervisor))+' sh -c'),encoding='ascii')
+        with subprocess.Popen([*self.device_shell,self.program,'install',daily.LABEL],stdin=subprocess.DEVNULL,
+                              stdout=subprocess.PIPE,stderr=subprocess.PIPE) as child:
+            archive=self.stage/'input.tgz'
+            end=time.monotonic()+6
+            while not archive.is_file() and time.monotonic()<end and child.poll() is None:
+                time.sleep(0.02)
+            self.assertTrue(archive.is_file())
+            with archive.open('rb') as simulated_reader:
+                fcntl.flock(simulated_reader,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                (self.root/'fake-supervisor-return').touch()
+                out,err=child.communicate(timeout=6)
+                self.assertEqual((child.returncode,out,err),(1,b'',b'refused install_receiver_unconfirmed\n'))
+                self.assertFalse((self.stage/'unpack').exists())
+                self.assertFalse((self.stage/'installed').exists())
+        self.handback(previous)
 
     def test_audit_rejects_truncation_trailing_bytes_mutation_and_foreign_request(self):
         for wrong in (self.reference[:-1],self.reference+b'\x00',self.reference.replace(b'public wrapper',b'public swapped')):
