@@ -86,6 +86,21 @@ and checklist, not a reservation or authorization to contact a device.
    the coordinator only after a verified return. Another project's later
    lease is not evidence that the earlier visit did or did not return.
 
+### Known limits in the prepared tool
+
+A successful SSH exit with a valid retirement marker but a malformed
+`stage` or `install` stdout receipt still leaves the load pending. This is
+conservative: it blocks ordinary cleanup and release, even though the
+terminal marker was observed. Treat that case as unresolved and preserve
+both inputs for reconciliation. A future change can retain authenticated
+retirement evidence separately from rejecting the operation result.
+
+The injected busy-reader test uses supervisor exit 137, which is already
+ambiguous without the archive-lock check. Add a held-lock control with
+exit 124 or 143 to isolate the lock check when extending that coverage.
+If the tool changes again, do not treat these prepared slots or their
+verification as evidence for the changed tool.
+
 ## Formal comparison and delivery are still gated
 
 Only after both new load-only checks pass, freeze a new formal roster with
