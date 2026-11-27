@@ -297,9 +297,9 @@ fn for_each_image_row(
 
 /// Owns the panel only until the normal Slint event loop starts.
 ///
-/// The first frame is synchronous and independent of font decompression. Updates
-/// are limited to 0.8 Hz and touch only the stage label and activity dots.
-/// Call `pause` and join the worker before changing process environment variables.
+/// The first frame is synchronous and independent of runtime fonts. Updates are
+/// limited to 0.8 Hz and touch only the stage label and activity dots. Call
+/// `finish` before the normal backend takes ownership of the framebuffer.
 pub struct StartupSplash {
     renderer: Option<Renderer>,
     stage: Arc<AtomicUsize>,
@@ -341,7 +341,6 @@ impl StartupSplash {
     }
 
     /// Stop and join the display worker, keeping the last frame on the panel.
-    /// This must complete before calling the backend installer that changes env.
     pub fn pause(&mut self) -> io::Result<()> {
         if let Some(stop) = self.stop.take() {
             let _ = stop.send(());
@@ -356,7 +355,7 @@ impl StartupSplash {
         Ok(())
     }
 
-    /// Continue activity feedback after backend installation is complete.
+    /// Start or resume activity feedback while the splash owns the framebuffer.
     pub fn resume(&mut self) -> io::Result<()> {
         if self.worker.is_some() {
             return Ok(());

@@ -29,6 +29,12 @@ pub trait Platform {
     /// Instantiate a window for a component.
     fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, PlatformError>;
 
+    /// Override `SLINT_DEFAULT_FONT` with static font data for the runtime Fontique context.
+    #[doc(hidden)]
+    fn default_font_data(&self) -> Option<&'static [u8]> {
+        None
+    }
+
     /// Spins an event loop and renders the visible windows.
     fn run_event_loop(&self) -> Result<(), PlatformError> {
         Err(PlatformError::NoEventLoopProvider)

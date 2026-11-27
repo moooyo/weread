@@ -2262,7 +2262,6 @@ class LauncherLifecycleTests(unittest.TestCase):
         anchor = (
             '            # The list owns the obligation before the pending slot is cleared.\n'
             if overlap else
-            '        if [ "$(process_birth "$wm_pid" 2>/dev/null || :)" = "$wm_birth" ] &&\n'
             '            kill -STOP "$wm_pid" 2>/dev/null; then\n'
         )
         self.assertEqual(source.count(anchor), 1)
@@ -2921,7 +2920,7 @@ class LauncherLifecycleTests(unittest.TestCase):
         )
         app.write_text(source.replace(anchor, tail, 1))
         source = self.launcher.read_text()
-        anchor = "        ordinary_exit_checks=$(managed_wait_budget 1)\n"
+        anchor = "        ordinary_exit_checks=$MANAGED_WAIT_BUDGET\n"
         self.assertEqual(source.count(anchor), 1)
         witness = (
             '        printf "%s:%s:%s:%s\\n" "$APP_GENERATION" "$LAUNCH_TOKEN" "$APP_RUNNER_PID" "$APP_RUNNER_BIRTH" >"$TEST_ORDINARY_EXIT_WAIT.pending" &&\n'
@@ -4229,27 +4228,20 @@ class LauncherLifecycleTests(unittest.TestCase):
             TEST_WM_WRONG_BIRTH=str(int(self.observed_identity(awesome.pid)["birth"]) + 1),
         )
         source = self.launcher.read_text()
-        self.assertIn("process_birth() {", source)
-        source = source.replace("process_birth() {", "fixture_original_process_birth() {", 1)
+        sampling = "read_process_identity() {\n"
+        self.assertEqual(source.count(sampling), 1)
+        # Substitute the birth only for the WM's second identity sample, after
+        # recording the original running identity and before sending STOP.
         shim = textwrap.dedent(r'''
-            process_birth() {
-                if [ "$1" = "$TEST_AWESOME_PID" ] && [ -e "$TEST_WM_IDENTITY_CHANGED" ]; then
-                    printf '%s\n' "$TEST_WM_WRONG_BIRTH"
-                else
-                    fixture_original_process_birth "$@"
+            read_process_identity() {
+                fixture_original_read_process_identity "$@" || return 1
+                if [ "$1" = "$TEST_AWESOME_PID" ] && [ -n "$WM_STOP_PENDING_IDENTITY" ]; then
+                    PROCESS_BIRTH=$TEST_WM_WRONG_BIRTH
+                    : >"$TEST_WM_IDENTITY_CHANGED"
                 fi
             }
         ''').lstrip()
-        original = "fixture_original_process_birth() {\n"
-        self.assertEqual(source.count(original), 1)
-        # Power startup now checks birth before taking the display. Install the
-        # delegating shim before any consumer, then change only the WM identity
-        # after its original running identity has actually been registered.
-        source = source.replace(original, shim + "\n" + original, 1)
-        pending = '        WM_STOP_PENDING_IDENTITY="$wm_pid:$wm_birth"\n'
-        self.assertIn(pending, source)
-        source = source.replace(pending, pending + '        : >"$TEST_WM_IDENTITY_CHANGED"\n', 1)
-        self.launcher.write_text(source)
+        self.launcher.write_text(source.replace(sampling, shim + "\nfixture_original_" + sampling, 1))
 
         status, _, error = self.run_launcher()
         self.assertEqual(status, 1, error)
@@ -4261,6 +4253,39 @@ class LauncherLifecycleTests(unittest.TestCase):
         self.assert_native_theme_helpers_finished()
         self.assert_native_theme_restored(awesome)
         self.assertEqual((self.root / "cleanup-descriptor").read_text(), "closed\n")
+
+    def test_window_manager_stopped_after_initial_sample_is_not_claimed_or_continued(self):
+        awesome = self.native_dark_fixture()
+        original = self.observed_identity(awesome.pid)
+        self.observe_display_cleanup_flags()
+        source = self.launcher.read_text()
+        pending = '        WM_STOP_PENDING_IDENTITY="$wm_pid:$wm_birth"\n'
+        self.assertEqual(source.count(pending), 1)
+        # Stop the same process externally after the first running sample.
+        # Wait for the state change, so the final read must see the same birth
+        # but cannot regard the stopped process as this launcher's to resume.
+        hook = textwrap.indent(textwrap.dedent(r'''
+            command kill -STOP "$wm_pid" || exit 75
+            fixture_wm_checks=100
+            while :; do
+                read_process_identity "$wm_pid" || exit 75
+                [ "$PROCESS_STATE" = T ] && break
+                [ "$fixture_wm_checks" -gt 0 ] || exit 75
+                sleep 0.01
+                fixture_wm_checks=$((fixture_wm_checks - 1))
+            done
+        ''').lstrip(), "        ")
+        self.launcher.write_text(source.replace(pending, pending + hook, 1))
+
+        status, _, error = self.run_launcher()
+        self.assertEqual(status, 1, error)
+        self.assertIn("window manager stop was not confirmed", error)
+        self.assertEqual(self.starts(), [])
+        self.assertNotIn("wm:CONT", self.trace())
+        self.assertEqual(self.display_cleanup_flags(), {"before": (0, 1, 1), "after": (0, 0, 0)})
+        self.assertTrue(self.original_process_exists(original))
+        self.assert_native_theme_restored(awesome, stopped=True)
+        self.assert_frame_guards_reaped(1)
 
     def test_native_theme_previously_stopped_awesome_is_not_sampled_continued_or_changed(self):
         awesome = self.native_dark_fixture(stopped=True)
@@ -4677,6 +4702,50 @@ class LauncherLifecycleTests(unittest.TestCase):
         self.assert_cleanup_resources_restored(awesome, observed, error)
         self.assertTrue(unexpected.is_dir(), "Cleanup must not recursively remove an unexpected object.")
 
+    def test_native_command_rejects_malformed_permission_before_invoking_cli(self):
+        self.observe_cleanup_descriptor()
+        self.script(self.bin / "status", 'printf "%s\\n" "status:entered" >>"$TEST_TRACE"\nprintf "%s\\n" "statusbar start/running"')
+        source = self.launcher.read_text()
+        publication = '                    ! mv -f "$LOCK_DIR/native-theme-go.pending" "$LOCK_DIR/native-theme-go"; then\n'
+        self.assertEqual(source.count(publication), 1)
+        runner = "owned_native_command() {\n"
+        self.assertEqual(source.count(runner), 1)
+        # Corrupt the record before the atomic rename, preserving the correct
+        # token, sequence and PID. No valid permission reaches the wrapper.
+        publisher = textwrap.dedent(r'''
+            fixture_publish_native_permission() {
+                if [ "${1:-}:${2:-}" != status:statusbar ]; then
+                    mv -f "$LOCK_DIR/native-theme-go.pending" "$LOCK_DIR/native-theme-go"
+                    return $?
+                fi
+                IFS= read -r fixture_permission <"$LOCK_DIR/native-theme-go.pending" || return 1
+                case "$TEST_NATIVE_BAD_PERMISSION" in
+                    unterminated) printf '%s' "$fixture_permission" ;;
+                    blank-line) printf '%s\n\n' "$fixture_permission" ;;
+                    unterminated-tail) printf '%s\n%s' "$fixture_permission" extra ;;
+                    *) return 1 ;;
+                esac >"$LOCK_DIR/native-theme-go.pending" || return 1
+                mv -f "$LOCK_DIR/native-theme-go.pending" "$LOCK_DIR/native-theme-go" || return 1
+                printf '%s:%s\n' "$NATIVE_THEME_COMMAND_PID" "$NATIVE_THEME_COMMAND_BIRTH" >"$TEST_NATIVE_BAD_PERMISSION_GROUP"
+            }
+        ''').lstrip()
+        source = source.replace(runner, publisher + "\n" + runner, 1)
+        self.launcher.write_text(source.replace(publication, '                    ! fixture_publish_native_permission "$@"; then\n', 1))
+        for mode in ("unterminated", "blank-line", "unterminated-tail"):
+            with self.subTest(permission=mode):
+                group = self.root / f"malformed-native-permission-{mode}"
+                self.env.update(TEST_NATIVE_BAD_PERMISSION=mode, TEST_NATIVE_BAD_PERMISSION_GROUP=str(group))
+                status, _, error = self.run_launcher()
+                self.assertEqual(status, 1, error)
+                self.assertIn("statusbar state is unavailable", error)
+                self.assertTrue(group.is_file(), "The fixture did not publish the malformed permission.")
+                pid, birth = group.read_text().strip().split(":")
+                self.assertFalse(self.original_process_exists({"pid": int(pid), "birth": birth}))
+                self.assertEqual(self.trace(), [])
+                self.assertEqual(self.starts(), [])
+                self.assertFalse((self.root / "lock").exists())
+                self.assertEqual((self.root / "cleanup-descriptor").read_text(), "closed\n")
+
     def test_cleanup_native_theme_stale_records_cannot_release_another_command(self):
         exit_gate = self.root / "application-exit-gate"
         awesome = self.native_dark_fixture(TEST_NATIVE_THEME_EXIT_GATE=str(exit_gate))
@@ -4898,11 +4967,10 @@ class LauncherLifecycleTests(unittest.TestCase):
         )
         published = self.root / "unproven-started"
         self.env["TEST_UNPROVEN_STARTED"] = str(published)
-        source = self.launcher.read_text().replace(
-            "    wrapper_capture_checks=$(managed_wait_budget 1)\n",
-            "    wrapper_capture_checks=2\n",
-            1,
-        )
+        source = self.launcher.read_text()
+        budget = "    wrapper_capture_checks=$MANAGED_WAIT_BUDGET\n"
+        self.assertEqual(source.count(budget), 1)
+        source = source.replace(budget, "    wrapper_capture_checks=2\n", 1)
         source = source.replace(
             "        printf '_weread_app_started ",
             '        : >"$TEST_UNPROVEN_STARTED"\n'
@@ -7257,7 +7325,7 @@ class LauncherLifecycleTests(unittest.TestCase):
         captured = "    subscriber_birth=$WRAPPER_BIRTH\n"
         self.assertEqual(source.count(captured), 1)
         source = source.replace(captured, captured + '    exec "$TEST_POWER_PREEXEC_BLOCKER"\n', 1)
-        startup = "            power_start_checks=$(managed_wait_budget 3)\n"
+        startup = "            power_start_checks=$MANAGED_WAIT_BUDGET\n"
         self.assertEqual(source.count(startup), 1)
         # The default fixture compresses 100 ms into 10 ms. Keep a finite wait
         # for this interpreter-backed child before injecting publication failure.
@@ -7380,7 +7448,7 @@ class LauncherLifecycleTests(unittest.TestCase):
         self.env.update(TEST_POWER_PERMISSION_RELEASED=str(released),
                         TEST_POWER_PERMISSION_ORIGINAL=str(original), TEST_SLEEP="1")
         source = self.launcher.read_text()
-        waiting = "    subscriber_checks=$(managed_wait_budget 5)\n"
+        waiting = "    subscriber_checks=$MANAGED_WAIT_BUDGET\n"
         self.assertEqual(source.count(waiting), 1)
         source = source.replace(waiting, textwrap.dedent(r'''
             fixture_permission_checks=200
@@ -7390,7 +7458,7 @@ class LauncherLifecycleTests(unittest.TestCase):
                 fixture_permission_checks=$((fixture_permission_checks - 1))
             done
         ''') + waiting, 1)
-        committed = "                        power_stream_checks=$(managed_wait_budget 5)\n"
+        committed = "                        power_stream_checks=$MANAGED_WAIT_BUDGET\n"
         self.assertEqual(source.count(committed), 1)
         adjustment = (
             '                        IFS= read -r fixture_permission_record <"$LOCK_DIR/observer-owned"\n'

@@ -228,7 +228,7 @@ mechanism or claim those exits restore native state.
 
 ## Startup framebuffer ownership
 
-`StartupSplash` displays application-supplied raster text and stage images before the main font initialization completes. Its worker updates loading dots at 0.8 Hz within a local region. Startup and the normal renderer never write the framebuffer concurrently: `pause()` stops and joins the worker before backend installation changes the process environment, `resume()` resumes startup feedback, and `finish()` joins it before the application event loop takes over. The splash uses the same software display mode as the application.
+`StartupSplash` displays application-supplied raster text and stage images before the main font initialization completes. Its worker updates loading dots at 0.8 Hz within a local region and remains active during backend installation. `install()` gives the patched Slint runtime static default-font bytes without a temporary file or environment mutation. Startup and the normal renderer never write the framebuffer concurrently: `finish()` joins the worker and releases the framebuffer before the application event loop takes over. The splash uses the same software display mode as the application.
 
 Startup images also compensate for the actual kernel inverse observed by their exclusive framebuffer owner. `StartupSplash::show()` receives app desired mode and never enables hardware inversion. Startup orientation lookup has a 500 ms polling budget, validates the supported orientation values, and reaps its child process on success, failure, or timeout. These changes do not alter framebuffer geometry or claim a physical-panel completion deadline.
 
@@ -335,4 +335,13 @@ After adding the clipboard extension, five additional pure standard-library test
 
 After the native touch-scale fix, the complete standalone dependency suite passed 17 tests on `test-env`, including the new four-rotation/scale-2 coordinate vectors. The pinned PW6 firmware emulator independently reproduced the old physical-coordinate mismatch and exercised corrected QEMU-injected taps through the guest input driver. These are separate controlled-test and emulator observations; neither establishes physical-device input acceptance.
 
-The current standalone dependency suite passed 31 tests on `test-env`, including software display-mode conversion, complete rewrites on mode changes, startup rendering, and bounded orientation queries. The earlier counts above retain their historical scope. Current physical and firmware-emulator observations, with their separate executable identities and outstanding gates, are recorded in [Physical testing](../../docs/PHYSICAL_TESTING.md).
+That standalone dependency suite passed 31 tests on `test-env`, including software display-mode conversion, complete rewrites on mode changes, startup rendering, and bounded orientation queries. The counts and bare Cargo command above describe historical builds. The in-memory default font now requires the same local Slint Core patch as the app. A standalone verification on the Linux worker must pass a Cargo config containing the application checkout's local patch paths, for example:
+
+```toml
+[patch.crates-io]
+i-slint-core = { path = "/work/src/vendor/i-slint-core" }
+swash = { path = "/work/src/vendor/swash" }
+zeno = { path = "/work/src/vendor/zeno" }
+```
+
+With those paths pointing to the verified source export, run `cargo test --manifest-path vendor/slint-backend-kindle/Cargo.toml --config /work/backend-patches.toml --features startup-orientation-reuse,startup-orientation-reconcile --lib` from the export. Current physical and firmware-emulator observations, with their separate executable identities and outstanding gates, are recorded in [Physical testing](../../docs/PHYSICAL_TESTING.md).

@@ -397,7 +397,7 @@ absence of every hardware frontlight transient.
 
 Implementation is still being iterated and has not completed acceptance. The accepted architecture above remains in force. Source behavior, remote checks, firmware-emulator observations, and physical-device observations are separate evidence classes; none establishes a released support matrix.
 
-The native startup path presents the project name and loading dots before bundled font decompression. Dot updates are limited to 0.8 Hz and a local display region. A temporary framebuffer worker is joined before backend initialization mutates the process environment and before the normal event loop takes framebuffer ownership.
+The native startup path presents the project name and loading dots before runtime font initialization. Dot updates are limited to 0.8 Hz and a local display region. The temporary framebuffer worker can continue through backend installation, which registers the embedded default font without staging a file or mutating the process environment. The worker is joined before the normal event loop takes framebuffer ownership. The [startup critical-path report](STARTUP_CRITICAL_PATH_20261127.md) distinguishes application progress, frame submission, and driver completion.
 
 An ordinary start opens Library when a configured session, local books, or demo data exists; otherwise first use opens Login. A new launch after explicit exit must not implicitly reopen the previous book. Only a managed recovery requests Reader restoration. The physical experience-test wrapper uses Library on a fresh start and preserves the supervisor's sleep-resume intent.
 

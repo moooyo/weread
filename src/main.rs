@@ -580,7 +580,7 @@ fn run(arguments: Arguments) -> Result<()> {
     };
     let startup_dark_mode =
         weread::preferences::startup_dark_mode_hint(&startup_data_dir).unwrap_or(false);
-    let mut startup = platform::StartupScreen::show(&platform, startup_dark_mode)
+    let startup = platform::StartupScreen::show(&platform, startup_dark_mode)
         .context("Show the native startup screen")?;
     startup_mark("startup_feedback_ready");
     startup.set_stage(platform::StartupStage::Fonts);
@@ -590,10 +590,6 @@ fn run(arguments: Arguments) -> Result<()> {
         return Ok(());
     }
 
-    // The raw startup worker owns the framebuffer during initial preparation.
-    // Join it before the installer changes process environment, then resume it.
-    startup.pause().context("Pause native startup feedback")?;
-    startup_mark("startup_feedback_paused");
     startup.set_stage(platform::StartupStage::Display);
     #[cfg(all(feature = "kindle", target_os = "linux"))]
     let _kindle_backend = if arguments.kindle {
@@ -634,8 +630,6 @@ fn run(arguments: Arguments) -> Result<()> {
         bail!("The native Kindle backend is unavailable in this build");
     }
     startup_mark("backend_ready");
-    startup.resume().context("Resume native startup feedback")?;
-    startup_mark("startup_feedback_resumed");
 
     if !arguments.kindle {
         #[cfg(feature = "desktop")]

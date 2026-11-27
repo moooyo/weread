@@ -366,12 +366,16 @@ export component LibraryScreen inherits Rectangle {
                         x: 0px; y: 0px; width: parent.width; height: root.cover-height;
                         border-width: 4px; border-color: Theme.ink; background: transparent;
                     }
-                    Rectangle {
+                    title-row := Rectangle {
                         x: 0px; y: root.cover-height + 8px; width: parent.width; height: 28px;
-                        HorizontalLayout {
-                            spacing: 5px;
-                            if book.cached && !LibraryModel.selecting: Rectangle { width: 18px; Icon { y: 5px; kind: "download"; width: 18px; height: 18px; } }
-                            Text { text: book.title; font-family: Theme.ui-font; font-size: 16px; font-weight: 500; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                        property <bool> show-download: book.cached && !LibraryModel.selecting;
+                        // Both slots are fixed; the label does not need intrinsic layout measurement.
+                        if title-row.show-download: Icon { x: 0px; y: 5px; kind: "download"; width: 18px; height: 18px; }
+                        Text {
+                            x: title-row.show-download ? 23px : 0px;
+                            y: 0px; width: parent.width - self.x; height: parent.height;
+                            text: book.title; font-family: Theme.ui-font; font-size: 16px; font-weight: 500;
+                            vertical-alignment: center; overflow: elide;
                         }
                     }
                     // Reading position as text; books that have not been started leave the row empty.

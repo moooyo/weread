@@ -46,6 +46,7 @@ const ORIENTATION_POLL: Duration = Duration::from_millis(10);
 
 pub(crate) struct KindlePlatform {
     pub(crate) window: Rc<MinimalSoftwareWindow>,
+    default_font_data: Option<&'static [u8]>,
     start: Instant,
     queue: Queue,
     wakeup: Wakeup,
@@ -77,6 +78,7 @@ impl KindlePlatform {
         let dithering_identity_supported = native_hardware_y4_eligible();
         Ok(Self {
             window,
+            default_font_data: None,
             start: Instant::now(),
             queue: Arc::new(Mutex::new(Vec::new())),
             wakeup,
@@ -95,6 +97,11 @@ impl KindlePlatform {
             refresh_pending: Arc::new(Mutex::new(PendingRefresh::default())),
             clipboard: RefCell::new(ClipboardStore::default()),
         })
+    }
+
+    pub(crate) fn with_default_font(mut self, data: &'static [u8]) -> Self {
+        self.default_font_data = Some(data);
+        self
     }
 
     pub(crate) fn refresh_handle(&self) -> RefreshHandle {
@@ -214,6 +221,10 @@ impl KindlePlatform {
 }
 
 impl Platform for KindlePlatform {
+    fn default_font_data(&self) -> Option<&'static [u8]> {
+        self.default_font_data
+    }
+
     fn set_clipboard_text(&self, text: &str, clipboard: Clipboard) {
         let kind = match clipboard {
             Clipboard::DefaultClipboard => ClipboardKind::Default,

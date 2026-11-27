@@ -234,27 +234,15 @@ impl KindleBackend<Scheduled> {
 ///
 /// You **must** pass a font. The Kindle doesn't ship any usable system fonts,
 /// so without one Slint will crash the first time it tries to draw text.
-/// We write the font to a temp file and point Slint at it through an
-/// environment variable so it gets used everywhere a font is needed.
+/// Slint registers the static bytes directly as its primary font.
 ///
 /// Call this once at startup, before creating any windows. Use the returned
 /// [`KindleBackend`] to add more fonts later.
 ///
 /// # Errors
 ///
-/// Fails if the temp file can't be written, or if Slint already has a
-/// platform set up.
-pub fn install(font_data: &[u8]) -> Result<KindleBackend, slint::PlatformError> {
-    let path = std::env::temp_dir().join("slint-kindle-default.ttf");
-    std::fs::write(&path, font_data)
-        .map_err(|e| slint::PlatformError::Other(format!("failed to stage default font: {e}")))?;
-
-    // SAFETY: install() runs once at startup while no other threads are alive,
-    // so nothing else can read this environment variable at the same time.
-    unsafe {
-        std::env::set_var("SLINT_DEFAULT_FONT", &path);
-    }
-
+/// Fails if the platform cannot be initialized or Slint already has a platform set up.
+pub fn install(font_data: &'static [u8]) -> Result<KindleBackend, slint::PlatformError> {
     let wake_schedule = Arc::new(Mutex::new(None));
     let callbacks = Rc::new(RefCell::new(UiCallbacks::default()));
     let black_and_white = Arc::new(AtomicBool::new(false));
@@ -265,7 +253,8 @@ pub fn install(font_data: &[u8]) -> Result<KindleBackend, slint::PlatformError> 
         black_and_white.clone(),
         rotation.clone(),
     )
-    .map_err(|e| slint::PlatformError::Other(format!("failed to init Kindle platform: {e}")))?;
+    .map_err(|e| slint::PlatformError::Other(format!("failed to init Kindle platform: {e}")))?
+    .with_default_font(font_data);
     let window = platform.window.clone();
     let refresh_handle = platform.refresh_handle();
     let render_handle = platform.render_handle();

@@ -280,8 +280,18 @@ impl GrayMode {
         self.grayscale(255)
     }
 
+    #[inline]
     fn pixel(self, pixel: Rgb8Pixel) -> u8 {
         self.grayscale(luminance(pixel))
+    }
+
+    fn scanline_converter(self) -> fn(&[Rgb8Pixel], &mut [u8]) {
+        match (self.dark_mode, self.black_and_white) {
+            (false, false) => convert_scanline::<false, false>,
+            (false, true) => convert_scanline::<false, true>,
+            (true, false) => convert_scanline::<true, false>,
+            (true, true) => convert_scanline::<true, true>,
+        }
     }
 
     fn image_pixel(self, pixel: Rgb8Pixel, x: usize, y: usize) -> u8 {
@@ -291,6 +301,7 @@ impl GrayMode {
         self.grayscale(software_gray(luminance(pixel), x, y))
     }
 
+    #[inline]
     pub(crate) fn grayscale(self, value: u8) -> u8 {
         let value = if self.black_and_white {
             if value < 128 { 0 } else { 255 }
@@ -301,8 +312,22 @@ impl GrayMode {
     }
 }
 
+#[inline]
 fn luminance(pixel: Rgb8Pixel) -> u8 {
     ((77 * u32::from(pixel.r) + 150 * u32::from(pixel.g) + 29 * u32::from(pixel.b)) >> 8) as u8
+}
+
+fn convert_scanline<const DARK_MODE: bool, const BLACK_AND_WHITE: bool>(
+    rgb: &[Rgb8Pixel],
+    output: &mut [u8],
+) {
+    let mode = GrayMode {
+        dark_mode: DARK_MODE,
+        black_and_white: BLACK_AND_WHITE,
+    };
+    for (destination, &pixel) in output.iter_mut().zip(rgb) {
+        *destination = mode.pixel(pixel);
+    }
 }
 
 pub(crate) struct FrameWrite {
@@ -372,27 +397,29 @@ impl GrayRenderer {
             let y = region.y as usize;
             let span = region.width as usize;
             self.line.resize(width, 0);
+            // Select the ordinary conversion once per frame, not per pixel.
+            let convert = mode.scanline_converter();
             for row in y..y + region.height as usize {
-                image_row_spans(
-                    &mut self.image_spans,
-                    &mut self.image_gaps,
-                    software_regions,
-                    row,
-                    x..x + span,
-                );
                 let start = row * width + x;
                 let source = &rgb[start..start + span];
                 let output = &mut self.line[..span];
-                for (destination, source) in output.iter_mut().zip(source) {
-                    *destination = mode.pixel(*source);
-                }
-                for image_span in &self.image_spans {
-                    for column in image_span.columns.clone() {
-                        if let Some((image_x, image_y)) =
-                            software_regions[image_span.image_index].image_local(column, row)
-                        {
-                            output[column - x] =
-                                mode.image_pixel(source[column - x], image_x, image_y);
+                convert(source, output);
+                if !software_regions.is_empty() {
+                    image_row_spans(
+                        &mut self.image_spans,
+                        &mut self.image_gaps,
+                        software_regions,
+                        row,
+                        x..x + span,
+                    );
+                    for image_span in &self.image_spans {
+                        for column in image_span.columns.clone() {
+                            if let Some((image_x, image_y)) =
+                                software_regions[image_span.image_index].image_local(column, row)
+                            {
+                                output[column - x] =
+                                    mode.image_pixel(source[column - x], image_x, image_y);
+                            }
                         }
                     }
                 }
@@ -725,6 +752,65 @@ mod tests {
         assert_eq!(panel.visible(), [255, 255, 0, 0]);
         panel.draw(&mut renderer, &rgb, None, light);
         assert_eq!(panel.visible(), [0, 0, 255, 255]);
+    }
+
+    #[test]
+    fn clipped_scanlines_keep_exact_pixels_in_every_output_mode() {
+        const WIDTH: usize = 37;
+        const HEIGHT: usize = 3;
+        let pattern = [
+            Rgb8Pixel { r: 255, g: 0, b: 0 },
+            Rgb8Pixel { r: 0, g: 255, b: 0 },
+            Rgb8Pixel { r: 0, g: 0, b: 255 },
+            Rgb8Pixel {
+                r: 128,
+                g: 128,
+                b: 127,
+            },
+            Rgb8Pixel {
+                r: 128,
+                g: 128,
+                b: 129,
+            },
+        ];
+        let rgb: Vec<_> = pattern.into_iter().cycle().take(WIDTH * HEIGHT).collect();
+        let clipped = PhysicalRect {
+            x: 2,
+            y: 1,
+            width: (WIDTH - 2) as u32,
+            height: (HEIGHT - 1) as u32,
+        };
+        let dirty = Some(PhysicalRect {
+            width: WIDTH as u32,
+            height: HEIGHT as u32,
+            ..clipped
+        });
+
+        for (dark_mode, black_and_white, expected_cycle) in [
+            (false, false, [76, 149, 28, 127, 128]),
+            (true, false, [179, 106, 227, 128, 127]),
+            (false, true, [0, 255, 0, 0, 255]),
+            (true, true, [255, 0, 255, 255, 0]),
+        ] {
+            let mode = GrayMode {
+                dark_mode,
+                black_and_white,
+            };
+            let mut renderer = GrayRenderer::new(WIDTH, mode);
+            let mut panel = Panel::new(WIDTH, HEIGHT);
+            let written = panel.draw(&mut renderer, &rgb, dirty, mode);
+            assert_eq!(written.region, Some(clipped));
+            assert!(!written.mode_changed);
+            for (index, pixel) in panel.visible().into_iter().enumerate() {
+                let expected = if index / WIDTH >= 1 && index % WIDTH >= 2 {
+                    expected_cycle[index % pattern.len()]
+                } else {
+                    0x31
+                };
+                assert_eq!(pixel, expected, "pixel {index}, mode {mode:?}");
+            }
+            panel.assert_padding_untouched();
+        }
     }
 
     #[test]

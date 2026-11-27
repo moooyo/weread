@@ -514,9 +514,9 @@ managed_wait_tick() {
 managed_wait_budget() {
     if command -v usleep >/dev/null 2>&1; then
         # Preserve the requested total wait while detecting completion sooner.
-        printf '%s\n' "$((50 * $1))"
+        MANAGED_WAIT_BUDGET=$((50 * $1))
     else
-        printf '%s\n' "$1"
+        MANAGED_WAIT_BUDGET=$1
     fi
 }
 
@@ -550,7 +550,8 @@ capture_wrapper_child_birth() {
     # procfs read failure. Never replace them with a mutable published record.
     wrapper_capture_pid=$1
     wrapper_capture_parent=${2:-$WRAPPER_PID}
-    wrapper_capture_checks=$(managed_wait_budget 1)
+    managed_wait_budget 1
+    wrapper_capture_checks=$MANAGED_WAIT_BUDGET
     while :; do
         if read_wrapper_child_birth "$wrapper_capture_pid"; then
             return 0
@@ -595,7 +596,8 @@ cleanup_wrapper_child() {
     if owned_child_is_running "$wrapper_cleanup_pid" "$wrapper_cleanup_birth" "$wrapper_cleanup_parent"; then
         signal_owned_process "$wrapper_cleanup_pid" "$wrapper_cleanup_birth" "$wrapper_cleanup_parent" TERM || :
         signal_owned_process "$wrapper_cleanup_pid" "$wrapper_cleanup_birth" "$wrapper_cleanup_parent" CONT || :
-        wrapper_cleanup_checks=$(managed_wait_budget 2)
+        managed_wait_budget 2
+        wrapper_cleanup_checks=$MANAGED_WAIT_BUDGET
         while owned_child_is_running "$wrapper_cleanup_pid" "$wrapper_cleanup_birth" "$wrapper_cleanup_parent" &&
             [ "$wrapper_cleanup_checks" -gt 0 ]; do
             managed_wait_tick || :
@@ -604,7 +606,8 @@ cleanup_wrapper_child() {
         if owned_child_is_running "$wrapper_cleanup_pid" "$wrapper_cleanup_birth" "$wrapper_cleanup_parent"; then
             signal_owned_process "$wrapper_cleanup_pid" "$wrapper_cleanup_birth" "$wrapper_cleanup_parent" KILL || :
         fi
-        wrapper_cleanup_checks=$(managed_wait_budget 1)
+        managed_wait_budget 1
+        wrapper_cleanup_checks=$MANAGED_WAIT_BUDGET
         while owned_child_is_running "$wrapper_cleanup_pid" "$wrapper_cleanup_birth" "$wrapper_cleanup_parent" &&
             [ "$wrapper_cleanup_checks" -gt 0 ]; do
             managed_wait_tick || :
@@ -700,7 +703,8 @@ register_frame_guard() {
     FRAME_GUARD_RELAY_BIRTH=$WRAPPER_CHILD_BIRTH
     { exec 7>&-; } || return 1
     FRAME_GUARD_LIFETIME_FD_OPEN=0
-    guard_start_checks=$(managed_wait_budget 5)
+    managed_wait_budget 5
+    guard_start_checks=$MANAGED_WAIT_BUDGET
     while [ "$guard_start_checks" -gt 0 ]; do
         owned_child_is_running "$FRAME_GUARD_PID" "$FRAME_GUARD_BIRTH" "$$" || return 1
         if ! frame_guard_command_matches "$FRAME_GUARD_PID"; then
@@ -752,7 +756,8 @@ request_frame_guard() {
     [ "$FRAME_GUARD_SEQUENCE" -lt 2147483647 ] || return 1
     FRAME_GUARD_SEQUENCE=$((FRAME_GUARD_SEQUENCE + 1))
     printf '%s:%s:%s:%s:%s:%s:%s\n' "$FRAME_GUARD_SEQUENCE" "$APP_GENERATION" "$LAUNCH_TOKEN" "$APP_CHILD_PID" "$APP_CHILD_BIRTH" "$APP_RUNNER_PID" "$1" >&6 || return 1
-    guard_frame_checks=$(managed_wait_budget 5)
+    managed_wait_budget 5
+    guard_frame_checks=$MANAGED_WAIT_BUDGET
     while [ "$guard_frame_checks" -gt 0 ]; do
         frame_guard_application_is_frozen || return 1
         if frame_guard_ready_matches "$FRAME_GUARD_SEQUENCE" "$APP_GENERATION"; then return 0; fi
@@ -912,9 +917,12 @@ owned_native_command() {
             kill -KILL "-$wrapper_pid" 2>/dev/null || exit 1
         ) &
         # No IPC is sent until the parent has verified this session leader.
-        # The gate is bound to this PID and call, so a later command cannot
-        # accidentally release an unproven older wrapper.
-        while [ "$(cat "$permission" 2>/dev/null || :)" != "$wrapper_pid:$sequence:$token" ]; do
+        # Require the exact PID-bound record and EOF on the same open file.
+        until [ -f "$permission" ] && [ ! -L "$permission" ] && {
+            IFS= read -r permission_record &&
+                [ "$permission_record" = "$wrapper_pid:$sequence:$token" ] &&
+                { permission_tail=""; ! IFS= read -r permission_tail && [ -z "$permission_tail" ]; }
+        } <"$permission"; do
             usleep 10000
         done
         # Bound capture while the command is running, including a writer that
@@ -931,7 +939,10 @@ owned_native_command() {
         while :; do sleep 1; done
     ' sh "$LOCK_DIR/native-theme-done" "$LOCK_DIR/native-theme-go" "$NATIVE_THEME_COMMAND_SEQUENCE" "$LAUNCH_TOKEN" "$NATIVE_COMMAND_FILE_BLOCKS" "$@" >"$LOCK_DIR/native-theme-output" 2>/dev/null </dev/null 3>&- 6>&- &
     NATIVE_THEME_COMMAND_PID=$!
-    NATIVE_THEME_COMMAND_BIRTH=$(process_birth "$NATIVE_THEME_COMMAND_PID" 2>/dev/null || :)
+    NATIVE_THEME_COMMAND_BIRTH=''
+    if read_process_identity "$NATIVE_THEME_COMMAND_PID"; then
+        NATIVE_THEME_COMMAND_BIRTH=$PROCESS_BIRTH
+    fi
     native_theme_checks=$NATIVE_THEME_TIMEOUT_TICKS
     native_theme_fast_checks=10
     native_theme_status=1
@@ -939,8 +950,8 @@ owned_native_command() {
     native_theme_released=0
     while [ "$native_theme_checks" -gt 0 ]; do
         if [ -z "$NATIVE_THEME_COMMAND_BIRTH" ] &&
-            [ "$(process_parent "$NATIVE_THEME_COMMAND_PID" 2>/dev/null || :)" = "$$" ]; then
-            NATIVE_THEME_COMMAND_BIRTH=$(process_birth "$NATIVE_THEME_COMMAND_PID" 2>/dev/null || :)
+            read_process_identity "$NATIVE_THEME_COMMAND_PID" && [ "$PROCESS_PARENT" = "$$" ]; then
+            NATIVE_THEME_COMMAND_BIRTH=$PROCESS_BIRTH
         fi
         if native_theme_group_is_owned; then
             if [ "$native_theme_released" -eq 0 ]; then
@@ -1307,6 +1318,11 @@ release_display() {
     return "$display_release_status"
 }
 
+read_stoppable_wm_identity() {
+    read_process_identity "$1" || return 1
+    case "$PROCESS_STATE" in R|S|D|I) ;; *) return 1 ;; esac
+}
+
 take_display() {
     [ -z "$WM_STOP_PENDING_IDENTITY" ] || return 1
     # winmgr is hosted by awesome, so query it only before this takeover.
@@ -1348,27 +1364,13 @@ take_display() {
         STATUSBAR_STOPPED=1
     fi
     for wm_pid in $take_wm_pids; do
-        case "$wm_pid" in
-            *[!0-9]*|'') continue ;;
-        esac
         # A previously stopped process must remain stopped after exit.
-        case "$(sed -n 's/^State:[[:space:]]*//p' "/proc/$wm_pid/status" 2>/dev/null || :)" in
-            T*|t*|'') continue ;;
-        esac
-        wm_birth=$(process_birth "$wm_pid" 2>/dev/null || :)
-        [ -n "$wm_birth" ] || continue
-        case "$(sed -n 's/^State:[[:space:]]*//p' "/proc/$wm_pid/status" 2>/dev/null || :)" in
-            R*|S*|D*|I*) ;;
-            *) continue ;;
-        esac
-        if [ "$(process_birth "$wm_pid" 2>/dev/null || :)" != "$wm_birth" ]; then
-            launcher_log '%s\n' 'weread: Display preparation failed because the window manager identity changed.'
-            return 1
-        fi
+        read_stoppable_wm_identity "$wm_pid" || continue
+        wm_birth=$PROCESS_BIRTH
         # Record the original running identity before STOP can make EXIT cleanup
         # responsible for continuing it, even before App ownership is acquired.
         WM_STOP_PENDING_IDENTITY="$wm_pid:$wm_birth"
-        if [ "$(process_birth "$wm_pid" 2>/dev/null || :)" = "$wm_birth" ] &&
+        if read_stoppable_wm_identity "$wm_pid" && [ "$PROCESS_BIRTH" = "$wm_birth" ] &&
             kill -STOP "$wm_pid" 2>/dev/null; then
             case " $PAUSED_WM_IDENTITIES " in
                 *" $WM_STOP_PENDING_IDENTITY "*) ;;
@@ -1561,7 +1563,8 @@ stop_application() {
             signal_original_application KILL || :
             sleep 1 || application_stop_status=1
             signal_owned_process "$APP_RUNNER_PID" "$APP_RUNNER_BIRTH" "$$" KILL || :
-            runner_cleanup_checks=$(managed_wait_budget 1)
+            managed_wait_budget 1
+            runner_cleanup_checks=$MANAGED_WAIT_BUDGET
             while ! owned_child_has_exited "$APP_RUNNER_PID" "$APP_RUNNER_BIRTH" "$$" &&
                 [ "$runner_cleanup_checks" -gt 0 ]; do
                 managed_wait_tick || :
@@ -1600,7 +1603,8 @@ power_subscriber() {
     subscriber_pid=$WRAPPER_PID
     subscriber_birth=$WRAPPER_BIRTH
     subscriber_permission="$LAUNCH_TOKEN:$subscriber_owner:$subscriber_owner_birth:$subscriber_wrapper:$subscriber_wrapper_birth:$subscriber_pid:$subscriber_birth"
-    subscriber_checks=$(managed_wait_budget 5)
+    managed_wait_budget 5
+    subscriber_checks=$MANAGED_WAIT_BUDGET
     while :; do
         # The wrapper must remain under the original supervisor until permission
         # is committed. An orphaned pre-exec helper never starts a subscription.
@@ -1722,7 +1726,8 @@ observe_power() {
         signal_owned_process "$observer_child" "$observer_child_birth" "$WRAPPER_PID" INT || :
         signal_owned_process "$observer_child" "$observer_child_birth" "$WRAPPER_PID" CONT || :
     fi
-    observer_stream_checks=$(managed_wait_budget 5)
+    managed_wait_budget 5
+    observer_stream_checks=$MANAGED_WAIT_BUDGET
     observer_stream_permission="$LAUNCH_TOKEN:$observer_owner:$observer_owner_birth:$WRAPPER_PID:$WRAPPER_BIRTH:$observer_child:$observer_child_birth"
     observer_stream_ready=0
     while [ "$observer_stream_checks" -gt 0 ] && [ "$observer_stopping" -eq 0 ]; do
@@ -1810,7 +1815,8 @@ start_power_observer() {
         observe_power "$$" "$POWER_OWNER_BIRTH" &
         EVENT_SOURCE_PID=$!
         if capture_power_observer_identity; then
-            power_start_checks=$(managed_wait_budget 3)
+            managed_wait_budget 3
+            power_start_checks=$MANAGED_WAIT_BUDGET
             while [ "$power_start_checks" -gt 0 ] && [ "$LAUNCH_STARTUP_SIGNAL" -eq 0 ]; do
                 if capture_power_observer_child; then
                     # Store the complete original identity before committing
@@ -1819,7 +1825,8 @@ start_power_observer() {
                         process_matches "$EVENT_SOURCE_CHILD_PID" "$EVENT_SOURCE_CHILD_BIRTH" "$EVENT_SOURCE_PID" &&
                         printf '%s:%s:%s:%s:%s:%s:%s\n' "$LAUNCH_TOKEN" "$$" "$POWER_OWNER_BIRTH" "$EVENT_SOURCE_PID" "$EVENT_SOURCE_BIRTH" "$EVENT_SOURCE_CHILD_PID" "$EVENT_SOURCE_CHILD_BIRTH" >"$LOCK_DIR/observer-go.pending" &&
                         mv -f "$LOCK_DIR/observer-go.pending" "$LOCK_DIR/observer-go"; then
-                        power_stream_checks=$(managed_wait_budget 5)
+                        managed_wait_budget 5
+                        power_stream_checks=$MANAGED_WAIT_BUDGET
                         power_stream_permission="$LAUNCH_TOKEN:$$:$POWER_OWNER_BIRTH:$EVENT_SOURCE_PID:$EVENT_SOURCE_BIRTH:$EVENT_SOURCE_CHILD_PID:$EVENT_SOURCE_CHILD_BIRTH"
                         while [ "$power_stream_checks" -gt 0 ] && [ "$LAUNCH_STARTUP_SIGNAL" -eq 0 ]; do
                             process_matches "$EVENT_SOURCE_PID" "$EVENT_SOURCE_BIRTH" "$$" &&
@@ -1880,7 +1887,8 @@ stop_observer() {
         signal_owned_process "$EVENT_SOURCE_PID" "$EVENT_SOURCE_BIRTH" "$$" CONT || :
         # Allow the wrapper's own bounded identity retry, TERM grace, and reap.
         # An unregistered pre-exec child cannot start liblipc without permission.
-        observer_stop_checks=$(managed_wait_budget 6)
+        managed_wait_budget 6
+        observer_stop_checks=$MANAGED_WAIT_BUDGET
         while owned_child_is_running "$EVENT_SOURCE_PID" "$EVENT_SOURCE_BIRTH" "$$" &&
             [ "$observer_stop_checks" -gt 0 ]; do
             managed_wait_tick || observer_stop_status=1
@@ -1890,7 +1898,8 @@ stop_observer() {
         # Main can signal a proven grandchild but cannot wait/reap it. Give its
         # original wrapper a bounded opportunity to reap before retiring that
         # wrapper; otherwise a killed child can be stranded under PID 1.
-        observer_reap_checks=$(managed_wait_budget 2)
+        managed_wait_budget 2
+        observer_reap_checks=$MANAGED_WAIT_BUDGET
         while owned_child_is_running "$EVENT_SOURCE_PID" "$EVENT_SOURCE_BIRTH" "$$" &&
             [ "$observer_reap_checks" -gt 0 ]; do
             managed_wait_tick || observer_stop_status=1
@@ -1899,7 +1908,8 @@ stop_observer() {
         if owned_child_is_running "$EVENT_SOURCE_PID" "$EVENT_SOURCE_BIRTH" "$$"; then
             signal_owned_process "$EVENT_SOURCE_PID" "$EVENT_SOURCE_BIRTH" "$$" KILL || observer_stop_status=1
         fi
-        observer_stop_checks=$(managed_wait_budget 1)
+        managed_wait_budget 1
+        observer_stop_checks=$MANAGED_WAIT_BUDGET
         while ! power_observer_has_exited && [ "$observer_stop_checks" -gt 0 ]; do
             managed_wait_tick || observer_stop_status=1
             observer_stop_checks=$((observer_stop_checks - 1))
@@ -2126,7 +2136,8 @@ stop_wake_probe() {
         # Allow the original birth attempt, an EXIT retry, TERM grace, and
         # post-KILL reap, plus one second of margin. A cancelled wrapper can
         # still lack a published record, so it must finish that owned cleanup.
-        wake_probe_checks=$(managed_wait_budget 6)
+        managed_wait_budget 6
+        wake_probe_checks=$MANAGED_WAIT_BUDGET
         while owned_child_is_running "$WAKE_PROBE_PID" "$WAKE_PROBE_BIRTH" "$$" &&
             [ "$wake_probe_checks" -gt 0 ]; do
             capture_wake_probe_child || :
@@ -2137,7 +2148,8 @@ stop_wake_probe() {
         if owned_child_is_running "$WAKE_PROBE_PID" "$WAKE_PROBE_BIRTH" "$$"; then
             signal_owned_process "$WAKE_PROBE_PID" "$WAKE_PROBE_BIRTH" "$$" KILL || wake_probe_stop_status=1
         fi
-        wake_probe_checks=$(managed_wait_budget 1)
+        managed_wait_budget 1
+        wake_probe_checks=$MANAGED_WAIT_BUDGET
         while ! wake_probe_has_exited &&
             [ "$wake_probe_checks" -gt 0 ]; do
             managed_wait_tick || wake_probe_stop_status=1
@@ -2212,7 +2224,8 @@ attempt_managed_sleep() {
     fi
     write_managed_request managed-sleep-request || return 1
     signal_managed_application USR1 || return 1
-    managed_sleep_checks=$(managed_wait_budget 8)
+    managed_wait_budget 8
+    managed_sleep_checks=$MANAGED_WAIT_BUDGET
     while [ "$managed_sleep_checks" -gt 0 ]; do
         marker_matches_application ordinary-exit && return 1
         managed_application_is_current || return 1
@@ -2222,7 +2235,8 @@ attempt_managed_sleep() {
             marker_matches_application resume-ready || return 1
             signal_managed_application STOP || return 1
             MANAGED_FROZEN=1
-            managed_stop_checks=$(managed_wait_budget 1)
+            managed_wait_budget 1
+            managed_stop_checks=$MANAGED_WAIT_BUDGET
             while [ "$managed_stop_checks" -gt 0 ]; do
                 managed_application_is_current || return 1
                 case "$(sed -n 's/^State:[[:space:]]*//p' "/proc/$APP_CHILD_PID/status" 2>/dev/null || :)" in
@@ -2284,7 +2298,8 @@ resume_managed_application() {
     signal_managed_application USR2 || return 1
     signal_managed_application CONT || return 1
     MANAGED_FROZEN=0
-    managed_wake_checks=$(managed_wait_budget 5)
+    managed_wait_budget 5
+    managed_wake_checks=$MANAGED_WAIT_BUDGET
     while [ "$managed_wake_checks" -gt 0 ]; do
         marker_matches_application ordinary-exit && return 1
         managed_application_is_current || return 1
@@ -2311,7 +2326,8 @@ cold_sleep_application() {
     if marker_matches_application ordinary-exit; then
         # A committed UI exit may already be unwinding. Observe the captured
         # runner briefly before the existing bounded stop path can signal it.
-        ordinary_exit_checks=$(managed_wait_budget 1)
+        managed_wait_budget 1
+        ordinary_exit_checks=$MANAGED_WAIT_BUDGET
         while owned_child_is_running "$APP_RUNNER_PID" "$APP_RUNNER_BIRTH" "$$" &&
             [ "$ordinary_exit_checks" -gt 0 ]; do
             managed_wait_tick || break

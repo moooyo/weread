@@ -2,7 +2,7 @@ use super::super::session_restore::{LauncherContext, ManagedMarker};
 use super::*;
 use crate::platform::{DeviceControl, ManagedSleepState, PlatformCapabilities, RenderSink};
 use slint::{
-    EventLoopError,
+    EventLoopError, Model,
     platform::{
         EventLoopProxy, Platform as SlintPlatform, WindowAdapter,
         software_renderer::{MinimalSoftwareWindow, RepaintBufferType},
@@ -419,6 +419,73 @@ fn run(case: &str, body: fn() -> Result<()>) -> Result<()> {
         output.status,
     );
     Ok(())
+}
+
+fn publish_initial_lighting_without_reprojecting_library() -> Result<()> {
+    slint::platform::set_platform(Box::new(TestUi(Arc::new(UiLoop::default()))))?;
+    let directory = tempfile::tempdir()?;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    let mut book = Book::new("book", "Startup lighting fixture");
+    book.source = "local".into();
+    Store::open(directory.path().join("library.sqlite"))?.upsert_book(&book)?;
+    let cover_key = sleep_screen::thumbnail_key(&book.id, &book.cover_url).unwrap();
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::new_rgb8(2, 2).write_to(&mut png, image::ImageFormat::Png)?;
+    FileCache::open(directory.path().join("covers"), 96 * 1024 * 1024)?
+        .put_png(&cover_key, png.get_ref())?;
+
+    let device = Arc::new(Device::new(true, true));
+    let (ui, application) = attach_with_kind(directory.path(), &runtime, device, None, true)?;
+    {
+        let mut app = application.borrow_mut();
+        // This is the startup projection; the window has not been shown or drawn.
+        #[cfg(target_os = "linux")]
+        app.arm_startup_library();
+        let library = ui.global::<LibraryModel>();
+        let books = library.get_books();
+        let tile = books.row_data(0).expect("The startup shelf has no book");
+        assert_eq!(tile.id, "book");
+        assert!(tile.has_cover);
+        let reader = ui.global::<ReaderModel>();
+        assert!(!reader.get_brightness_known());
+        assert!(!reader.get_warmth_known());
+        assert!(app.lighting.busy());
+
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while app.lighting.busy() {
+            app.tick()?;
+            assert!(
+                Instant::now() < deadline,
+                "The startup status did not settle"
+            );
+            if app.lighting.busy() {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+        assert_eq!(library.get_books(), books, "The Library model was rebuilt");
+        assert!(reader.get_brightness_known());
+        assert!(reader.get_hardware_light());
+        assert_eq!(reader.get_brightness(), 8);
+        assert!(reader.get_warmth_known());
+        assert!(reader.get_hardware_warmth());
+        assert_eq!(reader.get_warmth(), 10);
+        assert_eq!(ui.global::<ShellModel>().get_battery_label(), "80%");
+        app.stop_lighting_hardware()?;
+    }
+    drop(application);
+    drop(ui);
+    runtime.shutdown_timeout(Duration::from_secs(1));
+    Ok(())
+}
+
+#[test]
+fn initial_lighting_poll_updates_controls_without_reprojecting_library() -> Result<()> {
+    run(
+        "app::lighting::tests::initial_lighting_poll_updates_controls_without_reprojecting_library",
+        publish_initial_lighting_without_reprojecting_library,
+    )
 }
 
 fn confirmed_hardware() -> Result<()> {

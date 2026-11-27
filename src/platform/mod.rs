@@ -803,10 +803,10 @@ pub fn configure_window(
     Ok(())
 }
 
-/// Install before creating Tokio runtimes, with any startup display worker joined.
+/// Install before creating Slint windows; display ownership changes at the event loop.
 #[cfg(all(feature = "kindle", target_os = "linux"))]
 pub fn install_kindle_backend(
-    font_bytes: &[u8],
+    font_bytes: &'static [u8],
 ) -> Result<slint_backend_kindle::KindleBackend, slint::PlatformError> {
     slint_backend_kindle::install(font_bytes)
 }

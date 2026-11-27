@@ -1,9 +1,9 @@
 # Native text-edit admission
 
 This directory retains the published `i-slint-core` 1.17.1 source. The original
-crate checksum, reviewed upstream revision, and three modified-file identities
-are recorded in `SOURCE_PROVENANCE.json` and `UPSTREAM_REVISION`. Original
-licensing declarations and notices remain unchanged; no project-license choice
+crate checksum, reviewed upstream revision, and the historical text-admission
+file identities are recorded in `SOURCE_PROVENANCE.json` and `UPSTREAM_REVISION`.
+Original licensing declarations and notices remain unchanged; no project-license choice
 or dependency upgrade is made.
 
 The patch adds a window-owned admission callback for the actual borrowed native
@@ -32,3 +32,12 @@ The original fixed deltas passed limited source review. This source-integration
 record is not an application/native execution receipt. Complete verification
 and final artifact identity are recorded separately for the matching canonical
 source candidate.
+
+## In-memory runtime default font
+
+`Platform::default_font_data` lets the Kindle backend supply an embedded static
+font during context construction. The runtime keeps a shared Fontique collection
+with system fonts enabled and sets the same generic-family chain from the primary
+font followed by `SLINT_FONT_PATH` entries. The other backends still call the
+upstream `create_collection`. `SOURCE_PROVENANCE.json` continues to describe the
+historical source snapshot; it is not an identity record for this addition.

@@ -105,11 +105,73 @@ pub(crate) struct SlintContextInner {
 #[derive(Clone)]
 pub struct SlintContext(pub(crate) core::pin::Pin<Rc<SlintContextInner>>);
 
+#[cfg(feature = "shared-parley")]
+fn font_context_with_default(data: &'static [u8]) -> parley::FontContext {
+    use i_slint_common::sharedfontique::fontique;
+    use std::{collections::HashSet, path::PathBuf, sync::Arc};
+
+    let mut collection = fontique::Collection::new(fontique::CollectionOptions {
+        shared: true,
+        system_fonts: true,
+    });
+    let mut families = alloc::vec::Vec::new();
+    let mut add_font = |bytes| {
+        for (family, _) in collection.register_fonts(bytes, None) {
+            if !families.contains(&family) {
+                families.push(family);
+            }
+        }
+    };
+    // Register the primary before the same ordered SLINT_FONT_PATH traversal as
+    // create_collection. Setting these generics (not appending) keeps its priority.
+    add_font(fontique::Blob::new(Arc::new(data)));
+    if let Some(paths) = std::env::var_os("SLINT_FONT_PATH") {
+        let mut registered_paths = HashSet::new();
+        let mut register_path = |path: PathBuf| {
+            if registered_paths.insert(path.clone()) {
+                if let Ok(bytes) = std::fs::read(path) {
+                    add_font(bytes.into());
+                }
+            }
+        };
+        for entry in std::env::split_paths(&paths) {
+            if entry.is_file() {
+                register_path(entry);
+            } else if let Ok(dir) = std::fs::read_dir(entry) {
+                for file in dir.flatten() {
+                    register_path(file.path());
+                }
+            }
+        }
+    }
+    if !families.is_empty() {
+        for generic in [
+            fontique::GenericFamily::SansSerif,
+            fontique::GenericFamily::SystemUi,
+            fontique::GenericFamily::UiSansSerif,
+        ] {
+            collection.set_generic_families(generic, families.iter().copied());
+        }
+    }
+    parley::FontContext {
+        collection,
+        source_cache: fontique::SourceCache::new_shared(),
+    }
+}
+
 impl SlintContext {
     /// Create a new context with a given platform
     pub fn new(platform: Box<dyn Platform + 'static>) -> Self {
         #[cfg(feature = "shared-parley")]
-        let collection = i_slint_common::sharedfontique::create_collection(true);
+        let font_context = if let Some(data) = platform.default_font_data() {
+            font_context_with_default(data)
+        } else {
+            let collection = i_slint_common::sharedfontique::create_collection(true);
+            parley::FontContext {
+                collection: collection.inner,
+                source_cache: collection.source_cache,
+            }
+        };
 
         Self(Rc::pin(SlintContextInner {
             platform,
@@ -136,15 +198,9 @@ impl SlintContext {
             #[cfg(all(unix, not(target_os = "macos")))]
             xdg_app_id: Default::default(),
             #[cfg(feature = "shared-parley")]
-            font_context: {
-                let font_context = parley::FontContext {
-                    collection: collection.inner,
-                    source_cache: collection.source_cache,
-                };
-                core::cell::RefCell::new(crate::textlayout::sharedparley::FontContext::new(
-                    font_context,
-                ))
-            },
+            font_context: core::cell::RefCell::new(
+                crate::textlayout::sharedparley::FontContext::new(font_context),
+            ),
             #[cfg(feature = "shared-swash")]
             swash_scale_context: core::cell::RefCell::new(swash::scale::ScaleContext::new()),
             modifiers: Cell::new(Default::default()),

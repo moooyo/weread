@@ -238,9 +238,9 @@ impl App {
         self.pump_device_light();
     }
 
-    fn pump_device_light(&mut self) -> bool {
+    fn pump_device_light(&mut self) {
         if self.closing.get() || self.lighting.stopping || self.lighting.pending.is_some() {
-            return false;
+            return;
         }
         let mut request = None;
         for kind in [LightKind::Brightness, LightKind::Warmth] {
@@ -264,7 +264,7 @@ impl App {
             }
         }
         let Some(request) = request else {
-            return false;
+            return;
         };
         let started = (|| -> std::result::Result<(), PlatformError> {
             if self.lighting.worker.is_none() {
@@ -287,14 +287,13 @@ impl App {
         } else {
             self.lighting.status.clear();
         }
-        true
     }
 
-    pub(super) fn poll_lighting(&mut self) -> bool {
+    pub(super) fn poll_lighting(&mut self) {
         if self.closing.get() {
-            return false;
+            return;
         }
-        let mut changed = false;
+        let mut publish_light = false;
         if self.lighting.stopping {
             if self.join_lighting_workers(Duration::ZERO).is_ok() {
                 self.lighting.pending = None;
@@ -304,7 +303,7 @@ impl App {
                 self.lighting.warmth = None;
                 let capabilities = self.platform.capabilities();
                 self.lighting.refresh_requested = capabilities.brightness || capabilities.warmth;
-                changed = true;
+                publish_light = true;
             }
         } else {
             loop {
@@ -357,7 +356,7 @@ impl App {
                                 }
                             }
                         }
-                        changed = true;
+                        publish_light = true;
                     }
                     Some(Err(error)) => {
                         crate::diagnostic!("Receive device lighting result failed: {error}");
@@ -365,7 +364,7 @@ impl App {
                         self.lighting.pending = None;
                         self.lighting.pending_target = None;
                         self.lighting_failed();
-                        changed = true;
+                        publish_light = true;
                         break;
                     }
                     _ => break,
@@ -402,7 +401,11 @@ impl App {
                 }
             }
         }
-        changed | self.pump_device_light()
+        self.pump_device_light();
+        if publish_light {
+            // Light replies update controls, never the active route's content.
+            self.render_lighting();
+        }
     }
 
     pub(super) fn stop_lighting_hardware(&mut self) -> Result<()> {

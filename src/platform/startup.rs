@@ -79,22 +79,6 @@ impl StartupScreen {
         let _ = stage;
     }
 
-    pub fn pause(&mut self) -> Result<(), PlatformError> {
-        #[cfg(all(feature = "kindle", target_os = "linux"))]
-        if let Some(display) = self.display.as_mut() {
-            display.pause()?;
-        }
-        Ok(())
-    }
-
-    pub fn resume(&mut self) -> Result<(), PlatformError> {
-        #[cfg(all(feature = "kindle", target_os = "linux"))]
-        if let Some(display) = self.display.as_mut() {
-            display.resume()?;
-        }
-        Ok(())
-    }
-
     pub fn finish(self) -> Result<(), PlatformError> {
         #[cfg(all(feature = "kindle", target_os = "linux"))]
         if let Some(display) = self.display {

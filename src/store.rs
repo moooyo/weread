@@ -7358,10 +7358,12 @@ fn book_metadata_on(
     #[cfg(test)]
     book_metadata_tests::after_preflight()?;
     let mut books = Vec::with_capacity(count);
+    if scalars.is_empty() {
+        return Ok(books);
+    }
+    let mut statement = connection
+        .prepare("SELECT id,title,author,category,cover_url,source FROM books WHERE rowid=?1")?;
     for scalar in scalars {
-        let mut statement = connection.prepare(
-            "SELECT id,title,author,category,cover_url,source FROM books WHERE rowid=?1",
-        )?;
         let mut rows = statement.query([scalar.rowid])?;
         let row = rows.next()?.ok_or(BookMetadataUnavailable)?;
         let id = book_metadata_text(row, 0, limits.identifier_bytes)?;

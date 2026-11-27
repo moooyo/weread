@@ -1,0 +1,933 @@
+{
+  "base": "16af2c9cb31a0b0d9b974a39e486efae31d36341",
+  "scope": "weread-matched-startup-critical-path-v2",
+  "clock": "CLOCK_MONOTONIC",
+  "optical_measured": false,
+  "workload": "ordinary stock entry; scratch public 15-book shelf with cached thumbnails",
+  "hardware": "Kindle Scribe (2022), firmware 5.19.5",
+  "pairs": [
+    {
+      "pair": 1,
+      "order": "AB",
+      "intervals": {
+        "release_to_render_ns": {
+          "A": [
+            6353135462,
+            6354541000
+          ],
+          "B": [
+            4847141231,
+            4848237769
+          ],
+          "saving": [
+            1504897693,
+            1507399769
+          ]
+        },
+        "release_to_send_ns": {
+          "A": [
+            6397263693,
+            6398669231
+          ],
+          "B": [
+            4892799847,
+            4893896385
+          ],
+          "saving": [
+            1503367308,
+            1505869384
+          ]
+        },
+        "release_to_wait_ns": {
+          "A": [
+            6762638847,
+            6764044385
+          ],
+          "B": [
+            5257702308,
+            5258798846
+          ],
+          "saving": [
+            1503840001,
+            1506342077
+          ]
+        }
+      },
+      "stage_savings_ns": {
+        "selector_to_power": 49833846,
+        "power_to_cover": -7810769,
+        "native_queries": -401846,
+        "frame_guard": 64130615,
+        "display_takeover": 184169154,
+        "display_to_attach": 347536231,
+        "store_open": 32849308,
+        "launch_application": 60960923,
+        "main_to_backend": 311209461,
+        "backend_to_attach": -24634153,
+        "app_attach": 785925847,
+        "attach_to_draw": 67721691,
+        "touch_to_portrait": 30557230,
+        "portrait_to_draw": 16858538,
+        "draw": 100565462,
+        "framebuffer_write": -5872231,
+        "write_to_send": 4341846,
+        "send_to_wait_return": 472693
+      }
+    },
+    {
+      "pair": 2,
+      "order": "BA",
+      "intervals": {
+        "release_to_render_ns": {
+          "A": [
+            5647662000,
+            5649260538
+          ],
+          "B": [
+            5448343385,
+            5449370001
+          ],
+          "saving": [
+            198291999,
+            200917153
+          ]
+        },
+        "release_to_send_ns": {
+          "A": [
+            5690674308,
+            5692272846
+          ],
+          "B": [
+            5486139385,
+            5487166001
+          ],
+          "saving": [
+            203508307,
+            206133461
+          ]
+        },
+        "release_to_wait_ns": {
+          "A": [
+            6058701693,
+            6060300231
+          ],
+          "B": [
+            5851617846,
+            5852644462
+          ],
+          "saving": [
+            206057231,
+            208682385
+          ]
+        }
+      },
+      "stage_savings_ns": {
+        "selector_to_power": -56171231,
+        "power_to_cover": -56589923,
+        "native_queries": -122704692,
+        "frame_guard": -87821693,
+        "display_takeover": 86263923,
+        "display_to_attach": 436463231,
+        "store_open": 3236231,
+        "launch_application": -40313692,
+        "main_to_backend": 541101692,
+        "backend_to_attach": -64324769,
+        "app_attach": 52592308,
+        "attach_to_draw": 7178307,
+        "touch_to_portrait": 17013923,
+        "portrait_to_draw": 1247230,
+        "draw": -62403539,
+        "framebuffer_write": 5170770,
+        "write_to_send": 45538,
+        "send_to_wait_return": 2548924
+      }
+    },
+    {
+      "pair": 3,
+      "order": "AB",
+      "intervals": {
+        "release_to_render_ns": {
+          "A": [
+            6319601924,
+            6321810462
+          ],
+          "B": [
+            4505106231,
+            4506129385
+          ],
+          "saving": [
+            1813472539,
+            1816704231
+          ]
+        },
+        "release_to_send_ns": {
+          "A": [
+            6367797308,
+            6370005846
+          ],
+          "B": [
+            4612297616,
+            4613320770
+          ],
+          "saving": [
+            1754476538,
+            1757708230
+          ]
+        },
+        "release_to_wait_ns": {
+          "A": [
+            6733611231,
+            6735819769
+          ],
+          "B": [
+            4977496847,
+            4978520001
+          ],
+          "saving": [
+            1755091230,
+            1758322922
+          ]
+        }
+      },
+      "stage_savings_ns": {
+        "selector_to_power": 169758616,
+        "power_to_cover": -2948539,
+        "native_queries": 448453231,
+        "frame_guard": 219457769,
+        "display_takeover": 200748615,
+        "display_to_attach": 622308616,
+        "store_open": -10194077,
+        "launch_application": -55099385,
+        "main_to_backend": 666675232,
+        "backend_to_attach": 10732769,
+        "app_attach": 399382923,
+        "attach_to_draw": 61005384,
+        "touch_to_portrait": 35206922,
+        "portrait_to_draw": 29765846,
+        "draw": -85374999,
+        "framebuffer_write": -65777847,
+        "write_to_send": 6781846,
+        "send_to_wait_return": 614692
+      }
+    },
+    {
+      "pair": 4,
+      "order": "BA",
+      "intervals": {
+        "release_to_render_ns": {
+          "A": [
+            6198583308,
+            6200086462
+          ],
+          "B": [
+            5032296385,
+            5033677154
+          ],
+          "saving": [
+            1164906154,
+            1167790077
+          ]
+        },
+        "release_to_send_ns": {
+          "A": [
+            6246999462,
+            6248502616
+          ],
+          "B": [
+            5081687924,
+            5083068693
+          ],
+          "saving": [
+            1163930769,
+            1166814692
+          ]
+        },
+        "release_to_wait_ns": {
+          "A": [
+            6612468231,
+            6613971385
+          ],
+          "B": [
+            5446765616,
+            5448146385
+          ],
+          "saving": [
+            1164321846,
+            1167205769
+          ]
+        }
+      },
+      "stage_savings_ns": {
+        "selector_to_power": -19554769,
+        "power_to_cover": 3884154,
+        "native_queries": 186967385,
+        "frame_guard": -48829462,
+        "display_takeover": 101959923,
+        "display_to_attach": 759482308,
+        "store_open": 9222846,
+        "launch_application": -36105769,
+        "main_to_backend": 812370077,
+        "backend_to_attach": -16782000,
+        "app_attach": 412853846,
+        "attach_to_draw": -52470923,
+        "touch_to_portrait": -27289999,
+        "portrait_to_draw": -8536539,
+        "draw": -183405077,
+        "framebuffer_write": -7951308,
+        "write_to_send": 6975923,
+        "send_to_wait_return": 391077
+      }
+    }
+  ],
+  "paired_endpoints": {
+    "release_to_render_ns": {
+      "A": {
+        "median_ns": 6260020539.0,
+        "mean_ns": 6130585144.5,
+        "median_observation_bounds_ns": [
+          6259092616.0,
+          6260948462.0
+        ]
+      },
+      "B": {
+        "median_ns": 4940338134.75,
+        "mean_ns": 4958787692.625,
+        "median_observation_bounds_ns": [
+          4939718808.0,
+          4940957461.5
+        ]
+      },
+      "saving": {
+        "median_ns": 1336248423.25,
+        "mean_ns": 1171797451.875,
+        "median_observation_bounds_ns": [
+          1334901923.5,
+          1337594923.0
+        ]
+      },
+      "B_faster_pairs": 4
+    },
+    "release_to_send_ns": {
+      "A": {
+        "median_ns": 6308326308.0,
+        "mean_ns": 6176523163.75,
+        "median_observation_bounds_ns": [
+          6307398385.0,
+          6309254231.0
+        ]
+      },
+      "B": {
+        "median_ns": 4987863212.25,
+        "mean_ns": 5018797077.625,
+        "median_observation_bounds_ns": [
+          4987243885.5,
+          4988482539.0
+        ]
+      },
+      "saving": {
+        "median_ns": 1334995538.25,
+        "mean_ns": 1157726086.125,
+        "median_observation_bounds_ns": [
+          1333649038.5,
+          1336342038.0
+        ]
+      },
+      "B_faster_pairs": 4
+    },
+    "release_to_wait_ns": {
+      "A": {
+        "median_ns": 6673967654.0,
+        "mean_ns": 6542694471.5,
+        "median_observation_bounds_ns": [
+          6673039731.0,
+          6674895577.0
+        ]
+      },
+      "B": {
+        "median_ns": 5352853288.75,
+        "mean_ns": 5383961538.875,
+        "median_observation_bounds_ns": [
+          5352233962.0,
+          5353472615.5
+        ]
+      },
+      "saving": {
+        "median_ns": 1335427423.25,
+        "mean_ns": 1158732932.625,
+        "median_observation_bounds_ns": [
+          1334080923.5,
+          1336773923.0
+        ]
+      },
+      "B_faster_pairs": 4
+    }
+  },
+  "paired_stage_medians_ns": {
+    "selector_to_power": {
+      "A": 762756461.0,
+      "B": 747616922.5,
+      "saving": 15139538.5
+    },
+    "power_to_cover": {
+      "A": 113810538.5,
+      "B": 118788808.0,
+      "saving": -5379654.0
+    },
+    "native_queries": {
+      "A": 959321731.0,
+      "B": 827148000.0,
+      "saving": 93282769.5
+    },
+    "frame_guard": {
+      "A": 354506999.5,
+      "B": 302551961.5,
+      "saving": 7650576.5
+    },
+    "display_takeover": {
+      "A": 273965500.5,
+      "B": 152260193.0,
+      "saving": 143064538.5
+    },
+    "display_to_attach": {
+      "A": 1201192423.0,
+      "B": 704924230.5,
+      "saving": 529385923.5
+    },
+    "store_open": {
+      "A": 30631615.5,
+      "B": 19062385.0,
+      "saving": 6229538.5
+    },
+    "launch_application": {
+      "A": 76809692.0,
+      "B": 105368269.0,
+      "saving": -38209730.5
+    },
+    "main_to_backend": {
+      "A": 822473308.0,
+      "B": 234443692.5,
+      "saving": 603888462.0
+    },
+    "backend_to_attach": {
+      "A": 260553462.0,
+      "B": 293030077.0,
+      "saving": -20708076.5
+    },
+    "app_attach": {
+      "A": 1039170692.0,
+      "B": 585670269.0,
+      "saving": 406118384.5
+    },
+    "attach_to_draw": {
+      "A": 123444845.5,
+      "B": 94696385.0,
+      "saving": 34091845.5
+    },
+    "touch_to_portrait": {
+      "A": 64057230.5,
+      "B": 44814423.5,
+      "saving": 23785576.5
+    },
+    "portrait_to_draw": {
+      "A": 15827461.5,
+      "B": 10608808.0,
+      "saving": 9052884.0
+    },
+    "draw": {
+      "A": 702030307.5,
+      "B": 809496961.0,
+      "saving": -73889269.0
+    },
+    "framebuffer_write": {
+      "A": 41096192.0,
+      "B": 47020346.5,
+      "saving": -6911769.5
+    },
+    "write_to_send": {
+      "A": 5899884.5,
+      "B": 336615.5,
+      "saving": 5561846.0
+    },
+    "send_to_wait_return": {
+      "A": 365641346.0,
+      "B": 365138461.5,
+      "saving": 543692.5
+    }
+  },
+  "complete": true,
+  "visible_splash_duration_measured": false,
+  "marker_times_normalized_to": "latest possible synthetic release on each visit",
+  "rows": [
+    {
+      "slot": 0,
+      "role": "warmup",
+      "pair": 0,
+      "lane": "A",
+      "rotation_degrees": 0,
+      "matching_positive_update_marker": true,
+      "release_to_render_ns": [
+        6243355539,
+        6244354308
+      ],
+      "release_to_send_ns": [
+        6284547539,
+        6285546308
+      ],
+      "release_to_wait_ns": [
+        6650237154,
+        6651235923
+      ],
+      "release_bracket_width_ns": 998769,
+      "stages_after_release_upper_bound_ns": {
+        "selector_enter": 518062461,
+        "power_ready": 1278312692,
+        "cover_ready": 1428922000,
+        "before_frame_guard": 2345265769,
+        "frame_guard_ready": 2609783923,
+        "display_ready": 2893486231,
+        "main_enter": 3002882154,
+        "backend_ready": 3833898462,
+        "application_attach_begin": 4153162846,
+        "store_open_begin": 4166372385,
+        "store_open_end": 4235702308,
+        "application_attach_end": 5447907308,
+        "startup_feedback_finished": 5455061385,
+        "software_ready": 5503255231,
+        "backend_event_loop_enter": 5503259615,
+        "touch_opened": 5506412154,
+        "portrait_opened": 5554958692,
+        "library_draw_begin": 5581301769,
+        "library_draw_end": 6243355539,
+        "framebuffer_write_end": 6284379923,
+        "library_send_accepted": 6284547539,
+        "library_wait_complete": 6650237154
+      },
+      "application_receipt_after_release_upper_bound_ns": 6284550692,
+      "original_installation_and_native_return_verified": true
+    },
+    {
+      "slot": 1,
+      "role": "warmup",
+      "pair": 0,
+      "lane": "B",
+      "rotation_degrees": 0,
+      "matching_positive_update_marker": true,
+      "release_to_render_ns": [
+        5498277462,
+        5500107769
+      ],
+      "release_to_send_ns": [
+        5531654539,
+        5533484846
+      ],
+      "release_to_wait_ns": [
+        5897142539,
+        5898972846
+      ],
+      "release_bracket_width_ns": 1830307,
+      "stages_after_release_upper_bound_ns": {
+        "selector_enter": 434666385,
+        "power_ready": 1203832693,
+        "cover_ready": 1342816462,
+        "before_frame_guard": 2363746462,
+        "frame_guard_ready": 2738724770,
+        "display_ready": 2892899847,
+        "main_enter": 3012276539,
+        "backend_ready": 3334663770,
+        "application_attach_begin": 3604409231,
+        "store_open_begin": 3606211231,
+        "store_open_end": 3628504462,
+        "application_attach_end": 4660313924,
+        "startup_feedback_finished": 4660995308,
+        "software_ready": 4672830770,
+        "backend_event_loop_enter": 4672836231,
+        "touch_opened": 4707774693,
+        "portrait_opened": 4734935078,
+        "library_draw_begin": 4740117231,
+        "library_draw_end": 5498277462,
+        "framebuffer_write_end": 5531401078,
+        "library_send_accepted": 5531654539,
+        "library_wait_complete": 5897142539
+      },
+      "application_receipt_after_release_upper_bound_ns": 5531667616,
+      "original_installation_and_native_return_verified": true
+    },
+    {
+      "slot": 2,
+      "role": "measured",
+      "pair": 1,
+      "lane": "A",
+      "rotation_degrees": 0,
+      "matching_positive_update_marker": true,
+      "release_to_render_ns": [
+        6353135462,
+        6354541000
+      ],
+      "release_to_send_ns": [
+        6397263693,
+        6398669231
+      ],
+      "release_to_wait_ns": [
+        6762638847,
+        6764044385
+      ],
+      "release_bracket_width_ns": 1405538,
+      "stages_after_release_upper_bound_ns": {
+        "selector_enter": 445515770,
+        "power_ready": 1227154231,
+        "cover_ready": 1331528231,
+        "before_frame_guard": 2180433462,
+        "frame_guard_ready": 2534075154,
+        "display_ready": 2815054616,
+        "main_enter": 2906748539,
+        "backend_ready": 3675943231,
+        "application_attach_begin": 3896775539,
+        "store_open_begin": 3899167539,
+        "store_open_end": 3949431078,
+        "application_attach_end": 5212287232,
+        "startup_feedback_finished": 5214159693,
+        "software_ready": 5241259078,
+        "backend_event_loop_enter": 5241266693,
+        "touch_opened": 5261802001,
+        "portrait_opened": 5339945462,
+        "library_draw_begin": 5364672385,
+        "library_draw_end": 6353135462,
+        "framebuffer_write_end": 6392409770,
+        "library_send_accepted": 6397263693,
+        "library_wait_complete": 6762638847
+      },
+      "application_receipt_after_release_upper_bound_ns": 6399047616,
+      "original_installation_and_native_return_verified": true
+    },
+    {
+      "slot": 3,
+      "role": "measured",
+      "pair": 1,
+      "lane": "B",
+      "rotation_degrees": 0,
+      "matching_positive_update_marker": true,
+      "release_to_render_ns": [
+        4847141231,
+        4848237769
+      ],
+      "release_to_send_ns": [
+        4892799847,
+        4893896385
+      ],
+      "release_to_wait_ns": [
+        5257702308,
+        5258798846
+      ],
+      "release_bracket_width_ns": 1096538,
+      "stages_after_release_upper_bound_ns": {
+        "selector_enter": 531191770,
+        "power_ready": 1262996385,
+        "cover_ready": 1375181154,
+        "before_frame_guard": 2224488231,
+        "frame_guard_ready": 2513999308,
+        "display_ready": 2610809616,
+        "main_enter": 2641542616,
+        "backend_ready": 3099527847,
+        "application_attach_begin": 3344994308,
+        "store_open_begin": 3347340077,
+        "store_open_end": 3364754308,
+        "application_attach_end": 3874580154,
+        "startup_feedback_finished": 3875248847,
+        "software_ready": 3901565000,
+        "backend_event_loop_enter": 3901569308,
+        "touch_opened": 3903789000,
+        "portrait_opened": 3951375231,
+        "library_draw_begin": 3959243616,
+        "library_draw_end": 4847141231,
+        "framebuffer_write_end": 4892287770,
+        "library_send_accepted": 4892799847,
+        "library_wait_complete": 5257702308
+      },
+      "application_receipt_after_release_upper_bound_ns": 4892805539,
+      "original_installation_and_native_return_verified": true
+    },
+    {
+      "slot": 4,
+      "role": "measured",
+      "pair": 2,
+      "lane": "B",
+      "rotation_degrees": 0,
+      "matching_positive_update_marker": true,
+      "release_to_render_ns": [
+        5448343385,
+        5449370001
+      ],
+      "release_to_send_ns": [
+        5486139385,
+        5487166001
+      ],
+      "release_to_wait_ns": [
+        5851617846,
+        5852644462
+      ],
+      "release_bracket_width_ns": 1026616,
+      "stages_after_release_upper_bound_ns": {
+        "selector_enter": 442912461,
+        "power_ready": 1233110000,
+        "cover_ready": 1399858615,
+        "before_frame_guard": 2449250461,
+        "frame_guard_ready": 2892444461,
+        "display_ready": 3072856308,
+        "main_enter": 3166568000,
+        "backend_ready": 3377098385,
+        "application_attach_begin": 3646101923,
+        "store_open_begin": 3647474308,
+        "store_open_end": 3665590385,
+        "application_attach_end": 4644062846,
+        "startup_feedback_finished": 4644693308,
+        "software_ready": 4669165231,
+        "backend_event_loop_enter": 4669169923,
+        "touch_opened": 4695542538,
+        "portrait_opened": 4729393538,
+        "library_draw_begin": 4731389077,
+        "library_draw_end": 5448343385,
+        "framebuffer_write_end": 5485963539,
+        "library_send_accepted": 5486139385,
+        "library_wait_complete": 5851617846
+      },
+      "application_receipt_after_release_upper_bound_ns": 5486142923,
+      "original_installation_and_native_return_verified": true
+    },
+    {
+      "slot": 5,
+      "role": "measured",
+      "pair": 2,
+      "lane": "A",
+      "rotation_degrees": 0,
+      "matching_positive_update_marker": true,
+      "release_to_render_ns": [
+        5647662000,
+        5649260538
+      ],
+      "release_to_send_ns": [
+        5690674308,
+        5692272846
+      ],
+      "release_to_wait_ns": [
+        6058701693,
+        6060300231
+      ],
+      "release_bracket_width_ns": 1598538,
+      "stages_after_release_upper_bound_ns": {
+        "selector_enter": 445424385,
+        "power_ready": 1179450693,
+        "cover_ready": 1289609385,
+        "before_frame_guard": 2216296539,
+        "frame_guard_ready": 2571668846,
+        "display_ready": 2838344616,
+        "main_enter": 2891742616,
+        "backend_ready": 3643374693,
+        "application_attach_begin": 3848053462,
+        "store_open_begin": 3850783231,
+        "store_open_end": 3872135539,
+        "application_attach_end": 4898606693,
+        "startup_feedback_finished": 4906812000,
+        "software_ready": 4924589462,
+        "backend_event_loop_enter": 4924598616,
+        "touch_opened": 4939003539,
+        "portrait_opened": 4989868462,
+        "library_draw_begin": 4993111231,
+        "library_draw_end": 5647662000,
+        "framebuffer_write_end": 5690452924,
+        "library_send_accepted": 5690674308,
+        "library_wait_complete": 6058701693
+      },
+      "application_receipt_after_release_upper_bound_ns": 5690678693,
+      "original_installation_and_native_return_verified": true
+    },
+    {
+      "slot": 6,
+      "role": "measured",
+      "pair": 3,
+      "lane": "A",
+      "rotation_degrees": 0,
+      "matching_positive_update_marker": true,
+      "release_to_render_ns": [
+        6319601924,
+        6321810462
+      ],
+      "release_to_send_ns": [
+        6367797308,
+        6370005846
+      ],
+      "release_to_wait_ns": [
+        6733611231,
+        6735819769
+      ],
+      "release_bracket_width_ns": 2208538,
+      "stages_after_release_upper_bound_ns": {
+        "selector_enter": 439074385,
+        "power_ready": 1269578616,
+        "cover_ready": 1390629462,
+        "before_frame_guard": 2499231847,
+        "frame_guard_ready": 2894078231,
+        "display_ready": 3234355616,
+        "main_enter": 3296281077,
+        "backend_ready": 4172033001,
+        "application_attach_begin": 4555019539,
+        "store_open_begin": 4563502616,
+        "store_open_end": 4595534308,
+        "application_attach_end": 5510808693,
+        "startup_feedback_finished": 5512805462,
+        "software_ready": 5545114539,
+        "backend_event_loop_enter": 5545119539,
+        "touch_opened": 5553516001,
+        "portrait_opened": 5630765539,
+        "library_draw_begin": 5673880616,
+        "library_draw_end": 6319601924,
+        "framebuffer_write_end": 6360851462,
+        "library_send_accepted": 6367797308,
+        "library_wait_complete": 6733611231
+      },
+      "application_receipt_after_release_upper_bound_ns": 6369254924,
+      "original_installation_and_native_return_verified": true
+    },
+    {
+      "slot": 7,
+      "role": "measured",
+      "pair": 3,
+      "lane": "B",
+      "rotation_degrees": 0,
+      "matching_positive_update_marker": true,
+      "release_to_render_ns": [
+        4505106231,
+        4506129385
+      ],
+      "release_to_send_ns": [
+        4612297616,
+        4613320770
+      ],
+      "release_to_wait_ns": [
+        4977496847,
+        4978520001
+      ],
+      "release_bracket_width_ns": 1023154,
+      "stages_after_release_upper_bound_ns": {
+        "selector_enter": 657370308,
+        "power_ready": 1318115923,
+        "cover_ready": 1442115308,
+        "before_frame_guard": 2102264462,
+        "frame_guard_ready": 2277653077,
+        "display_ready": 2417181847,
+        "main_enter": 2534206693,
+        "backend_ready": 2743283385,
+        "application_attach_begin": 3115537154,
+        "store_open_begin": 3120806154,
+        "store_open_end": 3163031923,
+        "application_attach_end": 3671943385,
+        "startup_feedback_finished": 3673298385,
+        "software_ready": 3693812231,
+        "backend_event_loop_enter": 3693823693,
+        "touch_opened": 3718618077,
+        "portrait_opened": 3760660693,
+        "library_draw_begin": 3774009924,
+        "library_draw_end": 4505106231,
+        "framebuffer_write_end": 4612133616,
+        "library_send_accepted": 4612297616,
+        "library_wait_complete": 4977496847
+      },
+      "application_receipt_after_release_upper_bound_ns": 4612300385,
+      "original_installation_and_native_return_verified": true
+    },
+    {
+      "slot": 8,
+      "role": "measured",
+      "pair": 4,
+      "lane": "B",
+      "rotation_degrees": 0,
+      "matching_positive_update_marker": true,
+      "release_to_render_ns": [
+        5032296385,
+        5033677154
+      ],
+      "release_to_send_ns": [
+        5081687924,
+        5083068693
+      ],
+      "release_to_wait_ns": [
+        5446765616,
+        5448146385
+      ],
+      "release_bracket_width_ns": 1380769,
+      "stages_after_release_upper_bound_ns": {
+        "selector_enter": 490240693,
+        "power_ready": 1253669923,
+        "cover_ready": 1367248154,
+        "before_frame_guard": 2172237077,
+        "frame_guard_ready": 2487829923,
+        "display_ready": 2652821539,
+        "main_enter": 2788901077,
+        "backend_ready": 3047258077,
+        "application_attach_begin": 3364314693,
+        "store_open_begin": 3365827923,
+        "store_open_end": 3385836616,
+        "application_attach_end": 3979249000,
+        "startup_feedback_finished": 3986498308,
+        "software_ready": 4014266385,
+        "backend_event_loop_enter": 4014277539,
+        "touch_opened": 4024616616,
+        "portrait_opened": 4083916923,
+        "library_draw_begin": 4099381462,
+        "library_draw_end": 5032296385,
+        "framebuffer_write_end": 5081190539,
+        "library_send_accepted": 5081687924,
+        "library_wait_complete": 5446765616
+      },
+      "application_receipt_after_release_upper_bound_ns": 5081692231,
+      "original_installation_and_native_return_verified": true
+    },
+    {
+      "slot": 9,
+      "role": "measured",
+      "pair": 4,
+      "lane": "A",
+      "rotation_degrees": 0,
+      "matching_positive_update_marker": true,
+      "release_to_render_ns": [
+        6198583308,
+        6200086462
+      ],
+      "release_to_send_ns": [
+        6246999462,
+        6248502616
+      ],
+      "release_to_wait_ns": [
+        6612468231,
+        6613971385
+      ],
+      "release_bracket_width_ns": 1503154,
+      "stages_after_release_upper_bound_ns": {
+        "selector_enter": 495640231,
+        "power_ready": 1239514692,
+        "cover_ready": 1356977077,
+        "before_frame_guard": 2348933385,
+        "frame_guard_ready": 2615696769,
+        "display_ready": 2882648308,
+        "main_enter": 2982622077,
+        "backend_ready": 4053349154,
+        "application_attach_begin": 4353623770,
+        "store_open_begin": 4359329846,
+        "store_open_end": 4388561385,
+        "application_attach_end": 5381411923,
+        "startup_feedback_finished": 5382027539,
+        "software_ready": 5408032154,
+        "backend_event_loop_enter": 5408037308,
+        "touch_opened": 5410135154,
+        "portrait_opened": 5442145462,
+        "library_draw_begin": 5449073462,
+        "library_draw_end": 6198583308,
+        "framebuffer_write_end": 6239526154,
+        "library_send_accepted": 6246999462,
+        "library_wait_complete": 6612468231
+      },
+      "application_receipt_after_release_upper_bound_ns": 6248597616,
+      "original_installation_and_native_return_verified": true
+    }
+  ],
+  "rejected": []
+}

@@ -64,7 +64,7 @@ _Static_assert(sizeof(struct fb_fix_info) == 68, "ARM GETFIX ABI size");
     F(XGetWindowAttributes) F(XCreateWindow) F(XDestroyWindow) \
     F(XCreatePixmap) F(XFreePixmap) F(XCreateGC) F(XFreeGC) \
     F(XCreateImage) F(XPutImage) F(XSetWindowBackgroundPixmap) \
-    F(XClearWindow) F(XStoreName) F(XInternAtom) F(XChangeProperty) \
+    F(XClearWindow) F(XStoreName) F(XInternAtoms) F(XChangeProperty) \
     F(XSetClassHint) F(XSetWMHints) F(XMapWindow) F(XSync) \
     F(XTranslateCoordinates) F(XQueryTree) F(XFree) F(XQueryColors) F(XPending) F(XNextEvent) \
     F(XConnectionNumber) F(XMaxRequestSize) F(XSetErrorHandler) F(XSetIOErrorHandler)
@@ -612,13 +612,16 @@ static int create_window(struct guard *guard) {
         CWBackPixel | CWBackingStore | CWEventMask, &attributes);
     if (!guard->window) { return report("guard window creation failed"); }
     api_XStoreName(guard->display, guard->window, GUARD_TITLE);
-    Atom name = api_XInternAtom(guard->display, "_NET_WM_NAME", False);
-    Atom utf8 = api_XInternAtom(guard->display, "UTF8_STRING", False);
-    api_XChangeProperty(guard->display, guard->window, name, utf8, 8, PropModeReplace,
+    char *atom_names[] = { "_NET_WM_NAME", "UTF8_STRING", "_NET_WM_PID" };
+    Atom atoms[3];
+    if (!api_XInternAtoms(guard->display, atom_names, 3, False, atoms) ||
+        atoms[0] == None || atoms[1] == None || atoms[2] == None) {
+        return report("guard window properties are unavailable");
+    }
+    api_XChangeProperty(guard->display, guard->window, atoms[0], atoms[1], 8, PropModeReplace,
         (const unsigned char *)GUARD_TITLE, (int)strlen(GUARD_TITLE));
-    Atom pid_property = api_XInternAtom(guard->display, "_NET_WM_PID", False);
     unsigned long process_id = (unsigned long)getpid();
-    api_XChangeProperty(guard->display, guard->window, pid_property, XA_CARDINAL, 32,
+    api_XChangeProperty(guard->display, guard->window, atoms[2], XA_CARDINAL, 32,
         PropModeReplace, (const unsigned char *)&process_id, 1);
     XClassHint class_hint = { .res_name = "weread-frame-guard", .res_class = "WeReadFrameGuard" };
     api_XSetClassHint(guard->display, guard->window, &class_hint);

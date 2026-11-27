@@ -917,8 +917,8 @@ impl App {
         if let Some(error) = self.immediate_job_error.take() {
             return Err(error);
         }
-        let mut changed = self.poll_lighting();
-        changed |= self.poll_image_preparation()?;
+        self.poll_lighting();
+        let mut changed = self.poll_image_preparation()?;
         changed |= self.poll_article_preparation()?;
         for _ in 0..64 {
             match self.events.try_recv() {

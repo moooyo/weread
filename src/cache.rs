@@ -1784,11 +1784,15 @@ impl FileCache {
         let transaction = self.connection.unchecked_transaction()?;
         let mut numeric = Vec::with_capacity(count);
         for key in keys {
-            let span: Option<(bool,bool,i64,i64)> = transaction.query_row(
-                "SELECT typeof(key)='text',typeof(filename)='text',COALESCE(octet_length(key),0),
-                 COALESCE(octet_length(filename),0) FROM cache_entries WHERE key=?1",
-                [key], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?)),
-            ).optional()?;
+            let span: Option<(bool, bool, i64, i64)> = transaction
+                .prepare_cached(
+                    "SELECT typeof(key)='text',typeof(filename)='text',COALESCE(octet_length(key),0),
+                     COALESCE(octet_length(filename),0) FROM cache_entries WHERE key=?1",
+                )?
+                .query_row([key], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+                })
+                .optional()?;
             let span = if let Some((key_text, filename_text, key_bytes, filename_bytes)) = span {
                 if !key_text || !filename_text {
                     return Err(InventoryUnavailable.into());
@@ -2171,7 +2175,7 @@ impl FileCache {
             );
             return Ok(None);
         };
-        let mut statement = self.connection.prepare(
+        let mut statement = self.connection.prepare_cached(
             "SELECT CASE WHEN typeof(key)='text' AND COALESCE(octet_length(key),0)<=?2 THEN key ELSE NULL END,
              CASE WHEN typeof(filename)='text' AND COALESCE(octet_length(filename),0)<=?3 THEN filename ELSE NULL END,
              size,pinned FROM cache_entries WHERE key=?1",
