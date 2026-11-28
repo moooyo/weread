@@ -1,6 +1,6 @@
 # Handoff: Kindle Library startup
 
-For the current work, use the [November 28 startup notification handoff](docs/review/STARTUP_NOTIFICATION_HANDOFF_20261128.md). The latest formal comparison stopped after a returned A warmup, with no formal pairs. The pre-navigation installation check passed offline verification; the next physical prerequisite is a fresh, separately approved load-only baseline. The [November 26 power-wait handoff](docs/STARTUP_POWER_WAIT_HANDOFF_20261126.md) and the record below are historical and do not authorize a new device visit.
+For the current work, use the [November 28 startup notification handoff](docs/review/STARTUP_NOTIFICATION_HANDOFF_20261128.md). The formal v6 comparison stopped after its first measured pair because B recorded no ready hint. All four visits returned the device; there are no eligible formal pairs. The [November 26 power-wait handoff](docs/STARTUP_POWER_WAIT_HANDOFF_20261126.md) and the record below are historical and do not authorize a new device visit.
 
 Updated November 22, 2026 (Asia/Shanghai). **Font optimization measured,
 deployed and retested on Kindle Scribe 2022 / firmware 5.19.5.** The standard

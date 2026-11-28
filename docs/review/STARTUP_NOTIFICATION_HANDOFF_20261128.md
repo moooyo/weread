@@ -1,11 +1,10 @@
 # Handoff: Kindle startup notification comparison
 
-November 28, 2026 (Asia/Shanghai). **The latest formal roster stopped after
-its first warmup, with zero accepted timing rows or pairs.** Its A trial
-launched and was independently returned, but the file identities differed
-from the earlier load-only reference. The preceding view-change roster and
-this latest roster are both retired. This document is not a reservation or
-authorization to contact a device.
+November 28, 2026 (Asia/Shanghai). **Formal v6 stopped after two warmups
+and one measured pair because measured B received no ready hint.** All four
+visits returned the device. There are zero eligible formal pairs. Do not
+resume v6 or reuse a slot from an earlier roster. This document is not a
+reservation or authorization to contact a device.
 
 ## Current receiver and shared operation lock
 
@@ -314,17 +313,161 @@ $Worker = '/root/weread-notification-installation-gate-20261128.db_umre0'
 ssh test-env "cd / && unshare --net python3 -I -B '$Worker/verify-installation-gate.py'"
 ```
 
-No Kindle connection or lease was attempted for this fix. Before sealing a
-successor, verify a fresh approved A/B load-only baseline with the current
-installation. Wire that fresh verifier to the revised controller rather than
-reusing its historical fixture baseline. Do not ignore inode differences,
-infer a remount, or promote the excluded A into another batch. Reconfirm daily
-and peer references, freeze newly labeled timed slots, and obtain a new
-authorized handoff. Keep the shared lock, private transport and individual
-cleanup. Only B enables the notification on initial display takeover. Each
-pair still requires the same automatic orientation path and rotation, no
-notification wait in A, and at least one valid ready hint with no waiter
-error in B.
+No Kindle connection or lease was attempted for that offline fix. The new
+physical baseline and its separately sealed formal successor are below.
+
+## Fresh physical installation baseline: passed
+
+The new load-only worker is
+`test-env:/root/weread-display-handoff-20261128.baseline-v6.ik6l82bb`.
+Both new A and B visits passed on Scribe 2022 / 5.19.5, with the most recently
+verified BiliComics `ec9726e` public reference. Their input archives matched
+the previous verified arms byte for byte. Preparation verified both complete
+wire streams under a private operation lock, before the physical attempt.
+
+Both visits received successful retired `stage` and `install` operations on
+closed transports, performed the independent document/supervisor byte audits,
+and completed `stop`, `restore`, `close`, and independent owned-stage absence.
+The original document, supervisor, and application identities matched exactly
+before and after each visit and across both visits. They never prepared the
+stock card, navigated, activated a selector or launched the application. No
+timing sample or daily installation change resulted.
+
+A returned at **14:18:21.911183**, and B at **14:21:05.172553** Asia/Shanghai on
+November 28. A's verified return preceded B's independent acquisition. Final
+worker readback confirmed no outstanding load, token, owner record, held
+operation lock, or staged stream. These are historical returns, not a
+reservation or an availability claim. Keep the original load-only receipts
+sealed on `test-env`; only their verification status belongs here.
+
+## Formal v6: seal and pre-navigation verification
+
+The formal worker is
+`test-env:/root/weread-display-handoff-20261128.formal-v6.593httjh`.
+Its controller and report both use the fresh returned v6 baseline above.
+A and B warmups and four measured pairs (`AB / BA / AB / BA`) have ten fresh
+labels. The archives match the baseline exactly, and every device script
+matches its corresponding physical load-only arm apart from that label.
+The startup candidate, device receivers, and measurement endpoints did not
+change. On `test-env`, all ten preflights passed. A network-isolated replay
+used the actual new baseline and the older installation identity to exercise
+both formal child paths: two complete wire compares and two verified synthetic
+returns, without dispatching navigation or admitting a sample. The initial
+formal report had zero accepted rows and ten untouched slots. No Kindle
+connection or lease was made for the formal seal.
+
+## Formal v6 physical result: stopped at measured B
+
+All four visits matched the fresh physical installation baseline before
+navigation. Both warmups and the first `AB` pair produced a populated Library
+frame with matching device-clock `SEND` and `WAIT`, the automatic direction
+reads path, and 0° rotation. All four passed native restoration and
+before/after original-file identity and byte audits. The last lease was
+independently verified returned at **14:46:12.013691 Asia/Shanghai**.
+No owned stage, pending load, private token, or live transport remained;
+worker readback also confirmed an empty staged-stream directory and an
+unheld shared operation lock. The ordinary install was not changed.
+
+The B warmup reported two waits, one ready hint, and no waiter error. The
+first measured B reported two waits, **zero ready hints**, and no waiter
+error. The controller returned status 6 (`portrait_notice_unproved`) after
+handback, independently of the already requested safe yield. Six measured
+slots were untouched. Neither warmup contributes to the measured pairs.
+
+The raw first pair is diagnostic only. At the matching driver `WAIT`, A
+was **5.962743–5.963623 s** and B was **6.574365–6.575819 s**. B was
+**610.7–613.1 ms slower** for this pair; its owned portrait command was
+**40–80 ms longer**. The optional publication bracket was not captured in
+measured B. These are endpoint bounds from the synthetic release, not optical
+settling or an estimate of the notification effect. The reporter exposes one
+raw pair with its mechanism flag false; the number of eligible formal pairs
+is **zero**. Do not retain only notification hits to claim a benefit.
+
+Inspect the retired data on the worker without connecting to Kindle:
+
+```powershell
+$Worker = '/root/weread-display-handoff-20261128.formal-v6.593httjh'
+ssh test-env "cd / && python3 -I -B '$Worker/driver/notify_report.py' --public"
+```
+
+The predeclared notification gate did not pass. Do not clear the stop marker,
+resume v6, change the gate after seeing these data, or deploy the candidate.
+
+## Offline diagnosis: a zero-hint result does not identify a lost event
+
+The raw v6 records confirm `2 / 1 / 0` (waits / ready hints / waiter errors)
+for the B warmup and `2 / 0 / 0` for measured B. The analyzer did not discard
+an observed hint. The parent still read the authoritative completion for both
+launches. Each watcher has a 100 ms deadline starting before setup, and opens
+the directory watch before looking for the final file name. A rename between
+the parent's check and the watcher's registration is therefore covered by the
+post-registration lookup if it is processed within the slot. There is no
+per-wait registration, publication, or wake timestamp in the retained trace.
+
+Exit `1` is ambiguous. It can mean the slot expired before publication, or
+that a queued event was not acted on before the deadline. The current helper
+also disables an already-armed watch after certain poll/read failures, waits
+the remainder, and can exit `1`; the launcher does not count that as a waiter
+error. The parent checks the completion record again so none of those cases
+implies that it lost the command result. The physical run cannot distinguish
+them. Measured B's optional publication sidecar was absent from the trace.
+The producer writes that sidecar only after the authoritative rename, and the
+parent is allowed to reap the producer immediately after reading completion.
+The missing sidecar therefore cannot locate the rename or identify the cause.
+
+The B warmup spent 310–330 ms from launcher permission to status acceptance;
+measured B spent 350–370 ms. The inner Rust probe was **231.877 ms** in
+measured B, not slower than the B warmup's **239.194 ms**. The parent also
+spent 60–80 ms after wrapper retirement validating output in measured B
+versus 0–20 ms in the B warmup. These separate clocks do not place a rename
+relative to a watch deadline. The larger end-to-end difference cannot be
+assigned to notifications from this evidence.
+
+On `test-env`, an isolated Linux build of the frozen watcher reproduced
+successful hints before expiry, late publication after two expired waits,
+and a timeout even when the file was renamed during an armed wait if the
+process resumed after the deadline. A synthetic error on an armed watch
+also returned `1`. The frozen producer fragment retained the authoritative
+file when reaped between rename and the sidecar write. QEMU user-mode replay
+of the byte-identical frozen ARM helper with public Scribe 5.19.5 and 5.20.1
+libraries confirmed the ordinary hint, late publication and delayed wake
+cases with QEMU's default CPU; an explicit Cortex-A8 run stopped at `SIGILL`
+and supplied no watcher result. This is not a full firmware guest, physical
+kernel trace, or identification of measured B's cause. No device connection,
+lease, candidate change, or new roster was made. Worker fixtures and summaries
+are retained at `test-env:/root/weread-notify-diagnosis-20261128.fdvwe2iA`.
+
+## New diagnostic build: verified offline only
+
+The [diagnostic generator](../../tools/startup-observer/portrait-notification/README.md)
+creates private A/B launcher and helper sources from the retained v6 trial.
+The ordinary package does not compile or stage them. The diagnostic watcher
+reports actual deadline expiry separately from setup, poll, read, queue,
+lookup, and clock failures. The generated launcher retains the bounded
+polling fallback and still validates its own completion status; it never
+makes a hint or the trace an authority. Recorded times cover registration,
+rename bounds, userspace poll wake, named-event read, completed-file lookup,
+and terminal outcome on one `CLOCK_MONOTONIC` clock. A missing rename end
+remains an incomplete bracket even if the authoritative file survived.
+
+On `test-env`, 14 network-isolated Linux tests passed, including forced
+wake after expiry, injected poll/read/queue failures, producer interruption
+after the atomic rename, the generated launcher's actual fallback, and
+owned bounded trace collection. The separate ARM build requires only
+`GLIBC_2.4`; QEMU user-mode checks with public Scribe 5.19.5 and 5.20.1
+libraries passed timeout separation, already-published and armed-rename
+cases on the shared clock. This is not a full firmware guest, physical
+result, or resolution of the historical v6 miss. Verification summaries
+and generated diagnostic sources are retained at
+`test-env:/var/tmp/weread-notice-offline-20261128.nyeL7gaM`.
+
+No new roster or production package was built, and Kindle was not contacted.
+The diagnostic collector is a separate fragment, not integrated in a live
+controller. The clock reads, appends, and renamed-file publisher may perturb
+scheduling; do not treat these builds as performance candidates. A future
+authorized diagnostic visit needs a separately tested collection path and
+fresh inputs. Do not change the v6 acceptance rule retroactively or restart
+its slots.
 
 Use the existing synthetic stock-card release bracket and the same-launch
 render, `SEND` and matching positive, uncached `WAIT` endpoints. Require

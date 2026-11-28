@@ -46,3 +46,7 @@ for a build that includes it; it does not instrument the existing installation.
 The worker's `operations.json` contains the public timings and receipts, not
 the private authentication input or lease token. Use host fixtures for failure
 paths; do not experiment with gate changes while holding the physical device.
+
+The [experimental portrait notification diagnostics](portrait-notification/README.md)
+are separate from the stock startup observer and formal timing. They generate
+private diagnostic sources for investigating missed wake hints off-device.
