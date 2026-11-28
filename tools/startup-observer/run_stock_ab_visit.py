@@ -18,6 +18,7 @@ import tarfile
 import tempfile
 import time
 
+from load_progress import HEADER_RECEIVED, checked_progress
 from qualified_submit import PORTRAIT_DIAGNOSTIC_PURPOSE
 from run_daily_render import LABEL, SHARED, Refused, now, public_reason
 from stock_ab_transaction import (LOAD_CLOSE_RECEIPTS, METADATA, WireRefusal, bind_syscall_refusal, checkpoint,
@@ -29,7 +30,7 @@ REFS = ('document-reference', 'launch-reference')
 TRUST = Path('/root/.config/kindle-physical')
 WORKER_RUNNER = Path('/opt/kindle-toolchain/ubuntu-run')
 OPERATION_LOCK_MODULE = Path('/usr/local/lib/kindle-physical/device_lock.py')
-HEADER_RECEIVED = b'WEREAD_STOCK_INSTALL_HEADER_COMPLETE'
+MAX_HEADER = 120 * 1024  # Leave room below Linux's single-argument exec limit.
 PORTRAIT_READ = 'portrait_diagnostic'
 PORTRAIT_DEVICE_SECONDS = 12
 PORTRAIT_HOST_SECONDS = 25
@@ -50,7 +51,7 @@ def invocation(body, mode, label):
     allowed = {'admit','stage','install','original','audit','prepare','activate','arm','request','tap','claim',
                'witness','stop','restore','close','absent', PORTRAIT_READ}
     header = body.rstrip(b'\n')
-    if (mode not in allowed or not LABEL.fullmatch(label) or not header.isascii() or not 0 < len(header) <= 256 * 1024
+    if (mode not in allowed or not LABEL.fullmatch(label) or not header.isascii() or not 0 < len(header) <= MAX_HEADER
             or b'\r' in header or b'\0' in header):
         raise ValueError('Invalid frozen device program or operation')
     acknowledged = "printf '%s\\n' " + HEADER_RECEIVED.decode('ascii') + ' >&2; ' if mode == 'install' else ''
@@ -215,6 +216,7 @@ class Transport:
         self.ssh, self.script, self.label = ssh, script, label
         self.archive, self.reference, self.env, self.owned = archive, reference, env, owned
         self.wire = wire
+        self.install_receive = None
 
     def request(self):
         self.owned()
@@ -227,9 +229,11 @@ class Transport:
         command, header = invocation(self.script, operation, self.label)
         try:
             if mode == 'install':
+                self.install_receive = None
                 if self.wire is None:
                     raise Refused('install_wire_not_prepared')
                 with self.wire.open('rb') as source:
+                    expected_bytes = os.fstat(source.fileno()).st_size - len(header)
                     result = subprocess.run([*self.ssh, command], stdin=source,
                                             capture_output=True, env=self.env, timeout=TIMES['install'])
             else:
@@ -239,6 +243,8 @@ class Transport:
         except subprocess.TimeoutExpired as error:
             raise transport_failure(mode,None,error.stderr) from None
         retired = load_retirement_observed(mode, self.label, result)
+        if mode == 'install' and retired:
+            self.install_receive = checked_progress(result.stderr, self.label, expected_bytes)
         if result.returncode:
             raise transport_failure(mode,result.returncode,result.stderr,load_retired=retired)
         if mode in LOAD_CLOSE_RECEIPTS and not retired:

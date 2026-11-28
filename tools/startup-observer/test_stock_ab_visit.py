@@ -395,6 +395,45 @@ if IFS= read -r line; then exit 1; fi; printf '{"result":1}\\n' '''
                     remote.call(mode)
                 self.assertIs(failure.exception.load_retired,False)
 
+    def test_receiver_snapshot_is_bound_to_retired_install_and_exact_stream(self):
+        from load_progress import PREFIX
+
+        program = b':'
+        marker = LOAD_CLOSE_RECEIPTS['install'] + LABEL.encode('ascii') + b'\n'
+        progress = PREFIX + f' {LABEL} 1000 5000 2000 7 7 eof\n'.encode('ascii')
+        prefix = HEADER_RECEIVED + b'\n'
+        with tempfile.TemporaryDirectory() as work:
+            wire = Path(work)/'install.stream'
+            wire.write_bytes(program + b'archive')
+            remote = Transport(['unused'],program,LABEL,None,b'',os.environ,lambda:None,wire=wire)
+            for code,trail,accepted in ((0,prefix+progress+marker,True),
+                                        (1,prefix+progress+b'refused install_outer_archive\n'+marker,True),
+                                        (255,prefix+progress+marker,False),
+                                        (1,prefix+progress,False),
+                                        (0,prefix+progress+progress+marker,False),
+                                        (0,progress+prefix+marker,False),
+                                        (0,prefix+progress.replace(LABEL.encode(),b'f'*16)+marker,False),
+                                        (0,prefix+progress.replace(b'7 7 eof',b'8 8 eof')+marker,False),
+                                        (0,prefix+progress.replace(b'2000',b'999')+marker,False),
+                                        (0,prefix+progress.replace(b'eof',b'raw_path')+marker,False)):
+                with self.subTest(code=code,trail=trail), patch('run_stock_ab_visit.subprocess.run',
+                        return_value=subprocess.CompletedProcess([],code,line({'state':'installed'}),trail)):
+                    if code:
+                        with self.assertRaises(WireRefusal):
+                            remote.call('install')
+                    else:
+                        self.assertEqual(remote.call('install'),line({'state':'installed'}))
+                    if accepted:
+                        self.assertEqual(remote.install_receive,dict(clock='CLOCK_MONOTONIC',archive_bytes=7,started_ns=1000,
+                            sampled_ns=5000,last_data_read_ns=2000,bytes_read=7,bytes_written=7,state='eof',eof_observed=True))
+                    else:
+                        self.assertIsNone(remote.install_receive)
+            with patch('run_stock_ab_visit.subprocess.run',side_effect=subprocess.TimeoutExpired([],1,stderr=prefix+progress+marker)):
+                with self.assertRaises(WireRefusal) as failure:
+                    remote.call('install')
+                self.assertFalse(failure.exception.load_retired)
+                self.assertIsNone(remote.install_receive)
+
     def test_pinned_original_reference_order_does_not_depend_on_tar_order(self):
         with tempfile.TemporaryDirectory() as work:
             path=Path(work)/'in.tgz'

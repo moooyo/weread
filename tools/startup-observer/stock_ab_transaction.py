@@ -155,6 +155,10 @@ def drive(transport, release, report, journal, save, persist, *, recovering=Fals
     channel = None
     label = report['label']
 
+    def install_evidence(mode, row):
+        if mode == 'install' and diagnostic:
+            row['install_receive'] = getattr(transport, 'install_receive', None)
+
     def step(mode, action):
         collection = report['guard_checks' if mode in GUARDS else 'operations']
         try:
@@ -169,6 +173,7 @@ def drive(transport, release, report, journal, save, persist, *, recovering=Fals
                     failed['install_header_observed'] = error.header_observed
                 if mode in LOAD_CLOSE_RECEIPTS and type(error.load_retired) is bool:
                     failed['load_retired'] = error.load_retired
+            install_evidence(mode, failed)
             collection.append(failed)
             save()
             raise Refused(mode + ':' + reason) from None
@@ -176,6 +181,7 @@ def drive(transport, release, report, journal, save, persist, *, recovering=Fals
         if mode in LOAD_CLOSE_RECEIPTS:
             # Transport success already requires the matching terminal marker.
             success['load_retired'] = True
+        install_evidence(mode, success)
         collection.append(success)
         save()
         return receipt

@@ -45,12 +45,14 @@ The parent does not wait for the trace to become readable or complete.
 visit. It has no live CLI or roster generator. A future controller must
 supply a verifier for fresh, byte-checked diagnostic materials and a plan
 with purpose `portrait-notification-diagnostic`. Its verifier returns the
-plan metadata and its underlying stock device program; the adapter checks
-that the sealed device program is exactly `device_program(base)`. Use a
-trial renderer that separately checks the original installation references
+plan metadata, its underlying stock device program with concrete archive
+length, and the fresh static ARM receive helper bytes. The adapter verifies
+that the sealed device program is exactly `device_program(base, reader)`.
+Use a trial renderer that separately checks the original installation references
 and permits the verified diagnostic launcher/helper bytes. The ordinary
 stock A/B freezer is not a diagnostic material verifier. For recovery use
-the original plan, token and device program, not another launch.
+the original plan, token, device program, and its frozen worker tools, not
+another launch.
 
 - The ordinary `claim`, `witness` and `library_submit` path must prove a
   same-launch submission for the disposable public shelf. The device binds
@@ -77,6 +79,43 @@ the original plan, token and device program, not another launch.
   result and validated trace rows are separate from v6's `startup_trace`.
   The collector does not request the launcher's optional wait count; missing
   slots remain unknown unless independently established for this launch.
+
+## Install progress and EOF
+
+The diagnostic script embeds the verified ARM helper before the first archive
+byte; it does not fetch or install a receiver separately. Build
+`receive-progress.c` with the worker's Zig, targeting static ARM hard float:
+
+```sh
+zig cc -target arm-linux-musleabihf -mcpu=cortex_a8 -mfpu=vfpv3-d16 \
+    -mfloat-abi=hard -static -std=c11 -Oz -Wall -Wextra -Werror -s \
+    receive-progress.c -o receive-progress
+```
+
+The sealed script must fit the transport's 120 KiB shell header limit. The
+worker's full wire must contain that exact header followed by the exact
+archive. No change is made to ordinary A/B packaging or to retired programs.
+
+The private install operation now has `install_receive` in `operations.json`.
+It contains the expected archive size, bytes read from stdin, bytes accepted
+by the file write calls (not an fsync guarantee), the latest sample and last
+successful data read, and a distinct EOF observation. Timestamps use device
+`CLOCK_MONOTONIC`, in nanoseconds. EOF means `read` returned zero, not that
+the file was full or that the SSH session returned normally. On a timeout
+these are the last completed samples, not an exact deadline snapshot;
+`eof_observed: false` means no EOF was recorded in that sample. No sample,
+or a malformed or unretired reply, is represented by `null`, not by zero
+bytes or a negative EOF claim.
+
+An exact archive with no EOF cannot be promoted. The 150-second device receive
+and 240-second host install deadlines, the length-plus-one fence, and the
+original retirement and handback proof still apply. The snapshot is emitted
+only after the waiting shell retakes the original writer lock, and the host
+retains it only with the original closed transport and retirement record. The
+snapshot neither authorizes cleanup nor certifies archive identity. A failure
+in the optional progress record does not become an install or cleanup verdict.
+For offline controls, run `test_receive_progress.py` under `unshare --net`
+with the native compiler and again with `--reader "$QEMU_ARM" "$ARM_READER"`.
 
 ## Offline generation and verification
 

@@ -9,6 +9,7 @@ from pathlib import Path
 import runpy
 import subprocess
 import sys
+import tempfile
 import time
 from types import SimpleNamespace
 import unittest
@@ -37,6 +38,13 @@ def trace(*rows):
 
 
 class CollectionTests(stock.StockDeviceFixture):
+    @classmethod
+    def setUpClass(cls):
+        path = Path(cls.enterClassContext(tempfile.TemporaryDirectory()))/'receive-progress'
+        subprocess.run(['cc','-std=c11','-O2','-Wall','-Wextra','-Werror','-s',
+                        str(HERE/'receive-progress.c'),'-o',str(path)],check=True,timeout=15)
+        cls.reader = path.read_bytes()
+
     def setUp(self):
         super().setUp()
         base = self.program.read_bytes()
@@ -52,9 +60,20 @@ class CollectionTests(stock.StockDeviceFixture):
 ''')
         # A same-size replacement after the fd is open must not be joined
         # to the launch, even when both files have the same valid records.
-        anchor = b'\nstock_request_serve() {'
+        anchor = b'\nload_terminal() {'
         self.assertEqual(self.base_program.count(anchor), 1)
         self.base_program = self.base_program.replace(anchor, b'''
+base64() {
+    if [ -e "$fixture/refuse-reader-stage" ]; then return 1; fi
+    command base64 "$@"
+}
+single() {
+    plain "$1" && [ "$(stat -c %h "$1")" = 1 ] || return 1
+    if [ "$mode:$1" = "install:$stage/load-receive-progress" ] && [ -e "$fixture/drop-progress-before-open" ]; then
+        mv "$1" "$fixture/test-retained-progress" || return 1
+    fi
+    return 0
+}
 dd() {
     if [ "$mode:$1" = portrait_diagnostic:bs=8193 ] && [ -e "$fixture/swap-trace" ]; then
         cp -p "$lock/portrait-notification.diag" "$lock/replacement" &&
@@ -62,10 +81,10 @@ dd() {
     fi
     command dd "$@"
 }
-stock_request_serve() {''', 1)
+load_terminal() {''', 1)
         self.plan = self.root/'visit'
         self.plan.mkdir(mode=0o700)
-        (self.plan/'device.sh').write_bytes(diagnostic.device_program(self.base_program))
+        (self.plan/'device.sh').write_bytes(diagnostic.device_program(self.base_program, self.reader))
         (self.plan/'inputs.tgz').write_bytes(self.payload)
         self.attempt = self.plan/'attempt'
         self.receipt = self.attempt/'portrait-notification.json'
@@ -172,10 +191,13 @@ stock_request_serve() {''', 1)
     def run_visit(self):
         def verify(work, plan, *, recovery):
             self.assertEqual((work, plan, recovery), (self.root, self.plan, bool(self.args.recover)))
-            return self.config, self.base_program
+            return self.config, self.base_program, self.reader
 
         private_stdin = SimpleNamespace(isatty=lambda:False, buffer=io.BytesIO(b'fixture-only\n'))
-        with patch('sys.stdin', private_stdin):
+        self.assertTrue(self.reader.startswith(b'\x7fELF'))
+        # The transport runs an actual Linux receiver. Only the production
+        # ARM binary check is substituted for the native fixture platform.
+        with patch('sys.stdin', private_stdin), patch.object(diagnostic, 'check_arm_elf'):
             return diagnostic.execute(self.args, verify)
 
     def diagnostics(self):
@@ -204,6 +226,13 @@ stock_request_serve() {''', 1)
         report = self.returned()
         self.assertEqual(self.calls[-7:-5], ['witness',READ])
         self.assertEqual(self.calls.count(READ), 1)
+        install = next(row for row in report['operations'] if row['mode']=='install')
+        receive = install['install_receive']
+        self.assertTrue(receive['eof_observed'])
+        self.assertEqual(receive['bytes_read'], len(self.payload))
+        self.assertEqual(receive['bytes_written'], len(self.payload))
+        self.assertLessEqual(receive['started_ns'],receive['last_data_read_ns'])
+        self.assertLessEqual(receive['last_data_read_ns'],receive['sampled_ns'])
         result = self.diagnostics()
         self.assertEqual((result['status'],result['released']), ('collected',True))
         submit = next(row['receipt'] for row in report['operations'] if row['mode']=='library_submit')
@@ -221,6 +250,27 @@ stock_request_serve() {''', 1)
         self.assertTrue(receipt['released']); self.assertNotIn('analysis', receipt)
         self.assertNotIn('unrelated private output', str(receipt))
         self.assertEqual(self.calls.count(READ), 1)
+
+    def test_reader_stage_failure_retires_and_returns_before_navigation(self):
+        (self.root/'refuse-reader-stage').touch()
+        self.assertEqual(self.run_visit(), 1)
+        report = json.loads((self.attempt/'operations.json').read_bytes())
+        self.assertEqual(report['refused'], 'install:install_receive_reader')
+        self.assertTrue(report['released']); self.assertFalse(report['recovery_required'])
+        self.assertEqual(self.calls, ['admit','stage','install','stop','restore','close','absent','audit_after'])
+        install = next(row for row in report['operations'] if row['mode']=='install')
+        self.assertTrue(install['load_retired']); self.assertIsNone(install['install_receive'])
+        self.assertFalse(self.stage.exists()); self.assertFalse(self.token.exists()); self.assert_lock(held=False)
+        self.assertEqual(self.diagnostics()['status'], 'not_attempted')
+
+    def test_optional_progress_disappearing_before_open_does_not_change_install(self):
+        (self.root/'drop-progress-before-open').touch()
+        self.assertEqual(self.run_visit(), 0)
+        report = self.returned()
+        install = next(row for row in report['operations'] if row['mode']=='install')
+        self.assertTrue(install['load_retired']); self.assertIsNone(install['install_receive'])
+        self.assertEqual((self.root/'test-retained-progress').read_bytes(), b'')
+        self.assertEqual(self.diagnostics()['status'], 'collected')
 
     def test_missing_trace_returns_without_evidence(self):
         self.trace_kind = 'missing'
@@ -307,7 +357,7 @@ class WireTests(unittest.TestCase):
         if FROZEN_DEVICE is None:
             self.skipTest('Pass the retained v6 device source to this test script')
         base = diagnostic.source(FROZEN_DEVICE).encode('ascii')
-        program = diagnostic.device_program(base)
+        program = diagnostic.device_program(base, b'fixture reader')
         self.assertIn(b'trace) exit 64;;', program)
         self.assertNotIn(b'portrait-diagnostic-submit', base)
         shell = ['busybox', 'sh'] if os.getenv('WEREAD_TEST_BUSYBOX') else ['sh']

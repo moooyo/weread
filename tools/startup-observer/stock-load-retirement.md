@@ -43,8 +43,15 @@ original-file byte readback are still required after a confirmed load
 retirement, including an early refusal before navigation.
 
 These checks apply equally to both arms, before card release or during
-handback. This is test tooling, not part of the production Kindle package or
-an application timing endpoint. Freeze fresh visit inputs before use;
-previous load-only evidence does not exercise this transport. Firmware-side
+handback. The ordinary stock receiver still uses `head`. A separately sealed
+[portrait diagnostic visit](portrait-notification/README.md#install-progress-and-eof)
+can instrument the same boundary with a small static reader. It positively
+observes EOF and tracks cumulative reads and writes independently, but
+retirement still requires the separate original terminal marker and closed
+SSH. A timeout sample never unblocks a pending journal entry.
+
+This is test tooling, not part of the production Kindle package or an
+application timing endpoint. Freeze fresh visit inputs before use; previous
+load-only evidence does not exercise the diagnostic reader. Firmware-side
 applet behavior and both no-navigation handbacks must be qualified on the
 representative Kindle before using the tool for a new timed comparison.

@@ -491,11 +491,55 @@ its flock. Final logs are under
 No local application tests or physical operation were run. The collector
 does not infer a total wait count from the rows it receives.
 
-There is no physical diagnostic plan or live controller ready to run. Before
-an authorized diagnostic visit, verify fresh launcher/helper and public seed
-bytes, an installation baseline, and a sealed diagnostic plan. Do not use a
-retired timing slot as that plan. No ordinary package change or deployment
-was made.
+### First physical diagnostic attempt: receive deadline before launch
+
+A separately sealed B-only visit on Scribe 2022 / 5.19.5 stopped at
+`install_receive_timeout`. The install header and reader retirement were
+confirmed; the archive was not promoted, no card was opened, and no
+notification records were collected. The owned stage was removed, native
+state and original document/supervisor bytes were checked, and the original
+owner token was returned at **19:52:56.576382 Asia/Shanghai**. There is no
+new timing sample. The original attempt stays private on `test-env` under
+`/var/tmp/weread-portrait-device-20261128.hcHFovUw/visit/attempt`.
+
+The follow-up loopback replay used that exact 102,967,335-byte archive. At a
+controlled slow rate, 150 seconds refused while 180 seconds received the full
+payload with EOF. Keeping stdin open after sending the same bytes still
+refused at 180 seconds. A direct pipe control proved `head` could already
+have read a trailing block that it had not written. The original physical
+receipt contained neither progress nor EOF, so the cause of that physical
+receive timeout is still unknown. See the private offline summary under
+`test-env:/var/tmp/weread-transfer-eof-20261128.MznVw8uY`.
+
+### Diagnostic receive progress: offline only
+
+The [progress reader](../../tools/startup-observer/portrait-notification/README.md#install-progress-and-eof)
+records bytes read, bytes written, the monotonic last-data sample, and EOF
+from an actual zero-length read. Complete data with no EOF is distinguishable
+from a partial stall, and neither can be promoted. Missing or invalid
+telemetry cannot replace the original terminal retirement or block a valid
+handback. The 150-second receive deadline and 240-second SSH budget are
+unchanged. The ordinary stock A/B receiver and the retired v6 programs are
+unchanged.
+
+On `test-env`, 89 host regressions, 18 integrated visit tests each under GNU
+and BusyBox, eight receiver tests each natively and under ARM QEMU user-mode,
+and 14 notification producer tests passed. Loopback OpenSSH sent the full
+archived payload in four controls per receiver: normal EOF, partial stall,
+full data with no EOF, and short EOF. The two stalls kept their separate
+byte counts and neither was promoted; both returned the original retirement
+receipt. The standalone ARM helper compiled to 22,716 bytes, and BusyBox
+parsed the 113,092-byte diagnostic header. These fixtures are not a full
+firmware VM or a physical visit. See the private verification summary at
+`test-env:/var/tmp/weread-receive-progress-20261128.VP1MxyYd/logs/verified.json`.
+No device connection or lease was attempted.
+
+Before another separately authorized physical diagnostic, rebuild the reader,
+freeze fresh inputs and a new label against the current installation baseline,
+and qualify that exact install/control path on the designated worker. Do not
+rerun the attempted slot, change the historical verdict, or replace any
+ordinary installed component. The physical timeout and v6 notification miss
+remain separate unresolved observations.
 
 For any separately authorized, non-diagnostic comparison, use the existing
 synthetic stock-card release bracket and the same-launch

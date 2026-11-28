@@ -1,12 +1,15 @@
 """Bind a notification snapshot to one separately verified diagnostic visit."""
 
+import base64
 from pathlib import Path
+import re
 
 from analyze import LIMIT, WAIT_FIELDS, analyze
 from prepare import replace, source
 from qualified_submit import PORTRAIT_DIAGNOSTIC_PURPOSE
+from prepare_daily_render import check_arm_elf
 from run_daily_render import Refused
-from run_stock_ab_visit import PORTRAIT_READ, execute as run_visit
+from run_stock_ab_visit import MAX_HEADER, PORTRAIT_READ, execute as run_visit
 
 
 HERE = Path(__file__).resolve().parent
@@ -22,16 +25,52 @@ BIND = '''    # Observation is auxiliary: a failed anchor write cannot change SE
 '''
 
 
-def device_program(base):
+def receive_program(text, reader):
+    encoded = base64.b64encode(reader).decode('ascii')
+    inline = '\n'.join(encoded[i:i+76] for i in range(0,len(encoded),76))
+    fragment = source(HERE/'receive-progress.sh').replace('@RECEIVER_BASE64@', inline).replace('@RECEIVER_BYTES@', str(len(reader)))
+    text = replace(text, 'receive_archive() {\n', fragment + '\nreceive_archive() {\n')
+    text = replace(text, "(exec 7<&- 8<&-; exec timeout -s KILL 150 sh -c '",
+                   "(exec 3<&- 4<&- 7<&- 8<&-; exec timeout -s KILL 150 /bin/sh -c '")
+    text = replace(text, '''[ "$(stat -Lc "%d:%i" /proc/self/fd/6)" = "$2" ] || exit 76
+        exec head -c "$3" >/proc/self/fd/6''', '''[ "$(stat -Lc "%d:%i" /proc/self/fd/6)" = "$2" ] &&
+            exec 5<"$4" && [ "$4" -ef /proc/self/fd/5 ] &&
+            [ "$(stat -Lc "%d:%i" /proc/self/fd/5)" = "$5" ] || exit 76
+        exec /proc/self/fd/5 "$3" "$6" "$7" "$8" >/proc/self/fd/6''')
+    argument = re.search(r'(?m)^    \' weread-load-read "\$stage/input\.tgz" "\$receive_id" \$\(\([1-9][0-9]{0,8}\+1\)\)\); then$', text)
+    if not argument:
+        raise ValueError('Unrecognized frozen archive length argument')
+    old = argument[0]
+    text = replace(text, old, old.removesuffix('); then') +
+                   ' "$receive_reader" "$receive_reader_id" "$label" "$receive_records" "$receive_records_id"); then')
+    text = replace(text, '    case "$receive_status" in\n        0) return 0;;',
+                   '    receive_joined=1\n    case "$receive_status" in\n        0) return 0;;')
+    text = replace(text, '    install_reason=install_receive_failed\n', '''    install_reason=install_receive_reader
+    prepare_receive_reader || return 1
+    install_reason=install_receive_failed
+''')
+    return replace(text, '        install 2>/dev/null || load_refused "${bind_reason:-$install_reason}"\n        reply installed; load_terminal;;', '''        if install 2>/dev/null; then
+            report_receive_progress
+            reply installed; load_terminal
+        else
+            report_receive_progress
+            load_refused "${bind_reason:-$install_reason}"
+        fi;;''')
+
+
+def device_program(base, reader):
     """Extend a fresh private trial program, not its inputs or ordinary launcher."""
-    text = base.decode('ascii')
+    text = receive_program(base.decode('ascii'), reader)
     text = replace(text, ACK, '*) [ "${2-}" = read_only ] || write_tag stock-ack-seen || return 1;;')
     text = replace(text, SUBMIT, BIND + SUBMIT)
     branch = f'''case "$mode" in
     {PORTRAIT_READ}) portrait_diagnostic_receipt 2>/dev/null || fail diagnostic_snapshot;;
     trace) exit 64;;
     admit)'''
-    return replace(text, DISPATCH, source(HERE/'collect.sh') + '\n' + branch).encode('ascii')
+    program = replace(text, DISPATCH, source(HERE/'collect.sh') + '\n' + branch).encode('ascii')
+    if len(program) > MAX_HEADER:
+        raise ValueError('Embedded diagnostic receiver would exceed the frozen shell argument limit')
+    return program
 
 
 def snapshot(raw, submission):
@@ -66,13 +105,16 @@ def collect(transport, submission):
 
 
 def execute(args, verify_trial):
-    """Use a caller's fresh diagnostic material verifier; there is no live CLI."""
+    """Use a verifier for the exact stock program, archive and embedded reader."""
     def verify(work, plan, *, recovery):
-        config, base = verify_trial(work, plan, recovery=recovery)
+        config, base, reader = verify_trial(work, plan, recovery=recovery)
         if config.get('purpose') != PORTRAIT_DIAGNOSTIC_PURPOSE:
             raise Refused('invalid_diagnostic_scope')
+        if not isinstance(reader, bytes) or not 0 < len(reader) <= 64 * 1024:
+            raise ValueError('Expected a bounded, freshly verified archive reader')
+        check_arm_elf(reader, static=True)
         path = plan/'device.sh'
-        program = device_program(base)
+        program = device_program(base, reader)
         if (path.is_symlink() or not path.is_file() or path.stat().st_size != len(program)
                 or path.read_bytes() != program):
             raise Refused('invalid_diagnostic_device_program')

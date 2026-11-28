@@ -35,23 +35,27 @@ def regular_size(path, maximum):
     return size
 
 
+def check_arm_elf(data, *, static=False):
+    if (len(data) < 52 or data[:7] != b"\x7fELF\x01\x01\x01"
+            or struct.unpack_from("<HHI", data, 16) not in ((2, 40, 1), (3, 40, 1))
+            or struct.unpack_from("<I", data, 36)[0] & 0xFF000600 != 0x05000400):
+        raise ValueError("Expected a little-endian ARM32 hard-float ELF")
+    if static:
+        table = struct.unpack_from("<I", data, 28)[0]
+        width, count = struct.unpack_from("<HH", data, 42)
+        if width != 32 or not 1 <= count <= 128 or table < 52 or table + width * count > len(data):
+            raise ValueError("Invalid standalone ARM program headers")
+        segments = {struct.unpack_from("<I", data, table + width * index)[0] for index in range(count)}
+        if 1 not in segments or 3 in segments:
+            raise ValueError("A directly invoked static ARM helper must have no ELF interpreter")
+
+
 def check_content(name, data):
     if name == SHELL:
         if not data.startswith(b"#!/bin/sh\n") or b"\x00" in data or b"\r" in data:
             raise ValueError("Expected the POSIX tile helper with LF endings")
     elif name not in MODELS:
-        if (len(data) < 52 or data[:7] != b"\x7fELF\x01\x01\x01"
-                or struct.unpack_from("<HHI", data, 16) not in ((2, 40, 1), (3, 40, 1))
-                or struct.unpack_from("<I", data, 36)[0] & 0xFF000600 != 0x05000400):
-            raise ValueError("Expected a little-endian ARM32 hard-float ELF")
-        if name == OBSERVER:
-            table = struct.unpack_from("<I", data, 28)[0]
-            width, count = struct.unpack_from("<HH", data, 42)
-            if width != 32 or not 1 <= count <= 128 or table < 52 or table + width * count > len(data):
-                raise ValueError("Invalid render observer program headers")
-            segments = {struct.unpack_from("<I", data, table + width * index)[0] for index in range(count)}
-            if 1 not in segments or 3 in segments:
-                raise ValueError("The directly invoked render observer must have no ELF interpreter")
+        check_arm_elf(data, static=name == OBSERVER)
 
 
 def write_member(archive, name, data):
