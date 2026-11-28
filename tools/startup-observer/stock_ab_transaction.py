@@ -4,7 +4,7 @@ import json
 import os
 import re
 
-from qualified_submit import SUBMITTED, qualify
+from qualified_submit import ISOLATED_SUBMISSION, PORTRAIT_DIAGNOSTIC_PURPOSE, SUBMITTED, checked_submission, qualify
 from run_daily_render import CLOCK, Refused, json_line, now, release_bounds
 
 
@@ -40,7 +40,8 @@ def valid_installation_receipt(row, state):
 
 def initial(config, owner):
     return dict({key: config[key] for key in METADATA}, owner=owner, protocol='isolated_stock_launch',
-                measurement_build='temporary_measurement_build', fixture='disposable_public', started_at_utc=now(),
+                measurement_build=('temporary_diagnostic_build' if config['purpose'] == PORTRAIT_DIAGNOSTIC_PURPOSE
+                                   else 'temporary_measurement_build'), fixture='disposable_public', started_at_utc=now(),
                 operations=[], guard_checks=[], primary='not_timed', released=False, device_accessed=False,
                 recovery_required=False, native_guard_verified=False)
 
@@ -144,7 +145,11 @@ def valid_journal(journal, label):
     return False
 
 
-def drive(transport, release, report, journal, save, persist, *, recovering=False, expected_installation=None):
+def drive(transport, release, report, journal, save, persist, *, recovering=False, expected_installation=None,
+          capture_diagnostic=None):
+    diagnostic = report['purpose'] == PORTRAIT_DIAGNOSTIC_PURPOSE
+    if not recovering and diagnostic != (capture_diagnostic is not None):
+        raise Refused('invalid_diagnostic_scope')
     if expected_installation is not None and not valid_installation_receipt(expected_installation, 'original'):
         raise Refused('invalid_installation_baseline')
     channel = None
@@ -237,6 +242,11 @@ def drive(transport, release, report, journal, save, persist, *, recovering=Fals
             call('claim')
             call('witness')
             step('library_submit', channel.collect)
+            if diagnostic:
+                submission = checked_submission(report, ISOLATED_SUBMISSION, isolated=True)
+                if submission['content'] != 'entries':
+                    raise Refused('unexpected_public_fixture_content')
+                capture_diagnostic(submission)
     except (Exception, KeyboardInterrupt) as error:
         report['refused'] = public_error(error)
         save()
@@ -276,6 +286,8 @@ def drive(transport, release, report, journal, save, persist, *, recovering=Fals
         return 0
     if 'refused' in report or not report['native_guard_verified']:
         return 1
+    if diagnostic:
+        return 0
     try:
         result = qualify(report)
         if result['content'] != 'entries':

@@ -8,16 +8,20 @@ from run_daily_render import CLOCK, LABEL, Refused, release_bounds
 
 SEQUENCE = ('admit', 'stage', 'install', 'prepare', 'arm', 'observe_armed', 'tap', 'claim', 'observe',
             'witness', 'library_submit', 'stop', 'restore', 'close', 'absent')
-ISOLATED_SEQUENCE = ('admit', 'stage', 'install', 'prepare', 'activate', 'arm', 'request_armed', 'tap', 'claim',
-                     'witness', 'library_submit', 'stop', 'restore', 'close', 'absent')
+ISOLATED_SUBMISSION = ('admit', 'stage', 'install', 'prepare', 'activate', 'arm', 'request_armed', 'tap', 'claim',
+                       'witness', 'library_submit')
+ISOLATED_SEQUENCE = ISOLATED_SUBMISSION + ('stop', 'restore', 'close', 'absent')
 SUBMITTED = re.compile(r'WEREAD_LIBRARY_SUBMITTED ([0-9a-f]{16}) ([1-9][0-9]{0,18}) (entries|empty)\n')
 REQUEST_LIFETIME_NS = 60_000_000_000
+PORTRAIT_DIAGNOSTIC_PURPOSE = 'portrait-notification-diagnostic'
 
 
 def qualify(report):
     """Use the live arm and collect receipts, including the original stage's tile release."""
     if not isinstance(report, dict) or not isinstance(report.get('label'), str) or not LABEL.fullmatch(report['label']):
         raise Refused('unknown_batch')
+    if report.get('purpose') == PORTRAIT_DIAGNOSTIC_PURPOSE:
+        raise Refused('diagnostic_only')
     if (report.get('released') is not True or report.get('owner_and_token_checked') is not True or
             report.get('recovery_required') is not False or not isinstance(report.get('released_at_utc'), str) or
             not report['released_at_utc'].strip() or 'error' in report or 'refused' in report):
@@ -31,6 +35,17 @@ def qualify(report):
             report.get('fixture') != 'disposable_public' or 'observation' in report)):
         raise Refused('unknown_stock_protocol')
     sequence = ISOLATED_SEQUENCE if isolated else SEQUENCE
+    event = checked_submission(report, sequence, isolated=isolated)
+    submitted = event['submitted_ns']
+    before, after = event['synthetic_release_ns']
+    return {'label': event['label'], 'measurement_build': report['measurement_build'], 'clock': CLOCK,
+            'start': 'synthetic_stock_library_card_release', 'end': 'library_frame_send_accepted_application_marker',
+            'content': event['content'], 'synthetic_release_ns': [before, after], 'submitted_ns': submitted,
+            'elapsed_interval_ns': [submitted - after, submitted - before], 'optical_completion_measured': False}
+
+
+def checked_submission(report, sequence, *, isolated):
+    """Check the live endpoint without treating it as a closed or timed visit."""
     steps = report.get('operations')
     if not isinstance(steps, list) or len(steps) != len(sequence):
         raise Refused('incomplete_transaction')
@@ -79,7 +94,5 @@ def qualify(report):
     if scene is not None and (not isinstance(scene, dict) or scene.get('clock') != CLOCK or
                               scene.get('scene') not in (('grid', 'list') if match[3] == 'entries' else ('empty',))):
         raise Refused('conflicting_scene')
-    return {'label': report['label'], 'measurement_build': report['measurement_build'], 'clock': CLOCK,
-            'start': 'synthetic_stock_library_card_release', 'end': 'library_frame_send_accepted_application_marker',
-            'content': match[3], 'synthetic_release_ns': [before, after], 'submitted_ns': submitted,
-            'elapsed_interval_ns': [submitted - after, submitted - before], 'optical_completion_measured': False}
+    return {'label': report['label'], 'content': match[3], 'synthetic_release_ns': [before, after],
+            'submitted_ns': submitted, 'observed_ns': witness['observed_ns']}

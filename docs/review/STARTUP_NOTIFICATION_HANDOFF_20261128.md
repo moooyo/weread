@@ -462,14 +462,43 @@ and generated diagnostic sources are retained at
 `test-env:/var/tmp/weread-notice-offline-20261128.nyeL7gaM`.
 
 No new roster or production package was built, and Kindle was not contacted.
-The diagnostic collector is a separate fragment, not integrated in a live
-controller. The clock reads, appends, and renamed-file publisher may perturb
-scheduling; do not treat these builds as performance candidates. A future
-authorized diagnostic visit needs a separately tested collection path and
-fresh inputs. Do not change the v6 acceptance rule retroactively or restart
-its slots.
+The clock reads, appends, and renamed-file publisher may perturb scheduling;
+do not treat these builds as performance candidates. Do not change the v6
+acceptance rule retroactively or restart its slots.
 
-Use the existing synthetic stock-card release bracket and the same-launch
+### Diagnostic collection: integrated offline
+
+The [one-visit adapter](../../tools/startup-observer/portrait-notification/README.md#single-visit-collection)
+collects after the verified `claim`, `witness`, and public Library submission
+and before `stop`. The device rechecks the original GUI and session around
+a bounded private snapshot; the host checks the visit label and exact
+submission receipt and saves only validated rows and analysis. Missing or
+refused evidence is independent of the original stop, restoration, audit
+and owner-token handback. Recovery does not collect. All diagnostic visits
+remain `not_timed`; no new path writes the formal v6 trace.
+
+On `test-env`, 81 ordinary host and shared-lock regressions and 14 diagnostic
+producer regressions passed in network-isolated Linux fixtures. All 16
+collection tests passed with GNU tools and again with BusyBox. The fixture
+uses the actual stock device shell and host transport, with synthetic input,
+a simulated GUI, and a private kernel lock. It covers stale and replaced
+records, an unbound GUI, absent or invalid output, a stalled reader separate
+from the host, output storage failure, and exact-token recovery. Keeping an
+open stage descriptor in an early implementation pinned the fixture mount
+after host timeout; the final reader keeps neither a stage descriptor nor
+its flock. Final logs are under
+`test-env:/var/tmp/weread-portrait-collection-20261128.p34jGO1t`.
+No local application tests or physical operation were run. The collector
+does not infer a total wait count from the rows it receives.
+
+There is no physical diagnostic plan or live controller ready to run. Before
+an authorized diagnostic visit, verify fresh launcher/helper and public seed
+bytes, an installation baseline, and a sealed diagnostic plan. Do not use a
+retired timing slot as that plan. No ordinary package change or deployment
+was made.
+
+For any separately authorized, non-diagnostic comparison, use the existing
+synthetic stock-card release bracket and the same-launch
 render, `SEND` and matching positive, uncached `WAIT` endpoints. Require
 at least three of four positive lower bounds and a positive paired median
 lower bound for the entire owned portrait command. The matching Library

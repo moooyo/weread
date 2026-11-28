@@ -18,6 +18,7 @@ import tarfile
 import tempfile
 import time
 
+from qualified_submit import PORTRAIT_DIAGNOSTIC_PURPOSE
 from run_daily_render import LABEL, SHARED, Refused, now, public_reason
 from stock_ab_transaction import (LOAD_CLOSE_RECEIPTS, METADATA, WireRefusal, bind_syscall_refusal, checkpoint,
                                   drive, fresh_journal, initial, valid_installation_receipt, valid_journal)
@@ -29,6 +30,9 @@ TRUST = Path('/root/.config/kindle-physical')
 WORKER_RUNNER = Path('/opt/kindle-toolchain/ubuntu-run')
 OPERATION_LOCK_MODULE = Path('/usr/local/lib/kindle-physical/device_lock.py')
 HEADER_RECEIVED = b'WEREAD_STOCK_INSTALL_HEADER_COMPLETE'
+PORTRAIT_READ = 'portrait_diagnostic'
+PORTRAIT_DEVICE_SECONDS = 12
+PORTRAIT_HOST_SECONDS = 25
 
 
 @contextmanager
@@ -44,14 +48,15 @@ def physical_operation():
 
 def invocation(body, mode, label):
     allowed = {'admit','stage','install','original','audit','prepare','activate','arm','request','tap','claim',
-               'witness','stop','restore','close','absent'}
+               'witness','stop','restore','close','absent', PORTRAIT_READ}
     header = body.rstrip(b'\n')
     if (mode not in allowed or not LABEL.fullmatch(label) or not header.isascii() or not 0 < len(header) <= 256 * 1024
             or b'\r' in header or b'\0' in header):
         raise ValueError('Invalid frozen device program or operation')
     acknowledged = "printf '%s\\n' " + HEADER_RECEIVED.decode('ascii') + ' >&2; ' if mode == 'install' else ''
+    watchdog = f'timeout -s KILL {PORTRAIT_DEVICE_SECONDS} ' if mode == PORTRAIT_READ else ''
     command = (f'export LC_ALL=C; program=$(dd bs=1 count={len(header)} 2>/dev/null); '
-               f'[ "${{#program}}" = {len(header)} ] || exit 64; ' + acknowledged + 'exec sh -c "$program" ' +
+               f'[ "${{#program}}" = {len(header)} ] || exit 64; ' + acknowledged + f'exec {watchdog}sh -c "$program" ' +
                shlex.join(['weread-stock-ab', mode, label]))
     return command, header
 
@@ -243,6 +248,42 @@ class Transport:
             raise WireRefusal('missing_install_header_receipt',result.returncode,False,load_retired=retired)
         return result.stdout
 
+    def read_portrait_diagnostic(self, limit):
+        self.owned()
+        command, header = invocation(self.script, PORTRAIT_READ, self.label)
+        with tempfile.TemporaryFile() as source:
+            source.write(header)
+            source.seek(0)
+            with subprocess.Popen([*self.ssh, command], stdin=source, stdout=subprocess.PIPE,
+                                  stderr=subprocess.DEVNULL, env=self.env, start_new_session=True) as process:
+                deadline = time.monotonic() + PORTRAIT_HOST_SECONDS
+                data = bytearray()
+                completed = False
+                try:
+                    while len(data) <= limit:
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0 or not select.select([process.stdout], [], [], remaining)[0]:
+                            raise Refused('diagnostic_read_timeout')
+                        chunk = os.read(process.stdout.fileno(), min(4096, limit + 1 - len(data)))
+                        if not chunk:
+                            break
+                        data.extend(chunk)
+                    if len(data) > limit:
+                        raise Refused('diagnostic_output_limit')
+                    status = process.wait(timeout=max(0, deadline - time.monotonic()))
+                    completed = True
+                    if status:
+                        raise Refused('diagnostic_read_timeout' if status in (-9, 124, 137) else 'diagnostic_read_refused')
+                    return bytes(data)
+                except subprocess.TimeoutExpired:
+                    raise Refused('diagnostic_read_timeout') from None
+                finally:
+                    if not completed:
+                        try:
+                            os.killpg(process.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+
 
 @contextmanager
 def plan_lock(plan):
@@ -296,19 +337,27 @@ def original_attempt(plan, config, args):
     return attempt
 
 
-def execute(args):
-    from stock_ab_freeze import verify_visit
-
+def execute(args, *, diagnostic_verifier=None, collect_diagnostic=None):
+    if (diagnostic_verifier is None) != (collect_diagnostic is None):
+        raise Refused('invalid_diagnostic_scope')
     os.umask(0o077)
     if sys.platform != 'linux' or not WORKER_RUNNER.is_file():
         raise ValueError('Use the designated worker host')
     work, plan = args.work.resolve(strict=True), args.plan.resolve(strict=True)
     if args.work.is_symlink() or args.plan.is_symlink() or not plan.is_relative_to(work) or work == plan:
         raise ValueError('Expected a frozen visit under its original worker')
-    config = verify_visit(work, plan, recovery=bool(args.recover))
+    if diagnostic_verifier is None:
+        from stock_ab_freeze import verify_visit
+
+        config = verify_visit(work, plan, recovery=bool(args.recover))
+        body = (plan / 'device.sh').read_bytes()
+    else:
+        config, body = diagnostic_verifier(work, plan, recovery=bool(args.recover))
+    diagnostic = config['purpose'] == PORTRAIT_DIAGNOSTIC_PURPOSE
+    if diagnostic != (diagnostic_verifier is not None):
+        raise Refused('invalid_diagnostic_scope')
     expected = {key:config[key] for key in METADATA}
     label = config['label']
-    body = (plan / 'device.sh').read_bytes()
     invocation(body, 'request', label)
     _, install_header = invocation(body, 'install', label)
     archive = plan / 'inputs.tgz'
@@ -410,14 +459,39 @@ def execute(args):
                     return 2 if partial else 3 if busy else 1
                 report.update(acquisition='acquired', acquired_at_utc=acquired['acquired_at_utc'], recovery_required=True)
                 save()
+            diagnostic_result = {'status': 'not_attempted'}
+
+            def capture(submission):
+                nonlocal diagnostic_result
+                try:
+                    diagnostic_result = collect_diagnostic(transport, submission)
+                except Exception:
+                    # No auxiliary read can prevent the normal closeout or
+                    # replace the authoritative submission/handback results.
+                    diagnostic_result = {'status': 'unavailable', 'reason': 'diagnostic_collection_error'}
+
+            options = {'capture_diagnostic': capture} if diagnostic else {}
             status = drive(transport, release, report, journal, save, persist, recovering=bool(args.recover),
-                           expected_installation=expected_installation)
+                           expected_installation=expected_installation, **options)
         if report['released']:
             request.token_file.unlink(missing_ok=True)
-        print(json.dumps(dict(label=label, lane=config['lane'], slot=config['slot'], primary=report['primary'],
-                              released=report['released'], recovery_required=report['recovery_required'],
-                              reason=report.get('close_reason') or report.get('refused') or report.get('qualification_reason'),
-                              receipt=str(receipt))))
+        summary = dict(label=label, lane=config['lane'], slot=config['slot'], primary=report['primary'],
+                       released=report['released'], recovery_required=report['recovery_required'],
+                       reason=report.get('close_reason') or report.get('refused') or report.get('qualification_reason'),
+                       receipt=str(receipt))
+        if diagnostic and not args.recover:
+            path = attempt/'portrait-notification.json'
+            independent = diagnostic_result | {'label':label, 'purpose':config['purpose'], 'released':report['released'],
+                                               'startup_timing_eligible':False}
+            # Persist auxiliary evidence after leaving the physical operation.
+            # Recovery never overwrites it or reads another launch's record.
+            try:
+                checkpoint(path, independent)
+            except OSError:
+                summary['portrait_diagnostic'] = 'receipt_write_failed'
+            else:
+                summary.update(portrait_diagnostic=independent['status'], diagnostic_receipt=str(path))
+        print(json.dumps(summary))
         return status
 
 

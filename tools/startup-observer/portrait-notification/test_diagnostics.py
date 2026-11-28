@@ -319,11 +319,13 @@ printf '%s %s %s %s\n' "$NATIVE_COMMAND_EXIT_STATUS" "$weread_notify_waits" "$we
         self.assertEqual(self.parse(0)['publication']['result'],'ok')
 
     def test_collection_requires_owned_bounded_trace_without_mixed_output(self):
-        stub='''lock=$1; allow=$2
-startup_trace_identity() { [ "$allow" = yes ]; }
+        stub='''
+lock=$1; allow=$2
+portrait_diagnostic_identity() { [ "$allow" = yes ]; }
 stock_private_record() { [ -f "$1" ] && [ ! -L "$1" ] && [ "$(stat -c '%u:%a:%h' "$1")" = 0:600:1 ]; }
+collect_portrait_notification
 '''
-        shell=stub+(self.inputs/'collect.sh').read_text('ascii')+'\ncollect_portrait_notification'
+        shell=(self.inputs/'collect.sh').read_text('ascii')+stub
         value=trace('publish_begin 100','publish_end 110 ok')
         self.trace.write_bytes(value)
         result=launch(['/bin/sh','-c',shell,'fixture',str(self.directory),'yes'])

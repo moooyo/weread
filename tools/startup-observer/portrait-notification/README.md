@@ -37,13 +37,46 @@ All recorded times are on the same Linux `CLOCK_MONOTONIC` clock:
 
 The diagnostic launcher reserves a small append-only trace inside its private
 lock directory and removes that exact file with its own lifetime cleanup.
-The parent does not wait for the trace to become readable or complete. If
-integrating a **new diagnostic visit**,
-use the generated `collect.sh` in a separate read before the launcher exits.
-The fragment requires the existing `startup_trace_identity` and
-`stock_private_record` proofs and rechecks them around a bounded snapshot.
-It emits only these numeric records and fixed outcome names. Do not append
-it to v6's existing startup trace or accept raw device output in its place.
+The parent does not wait for the trace to become readable or complete.
+
+## Single-visit collection
+
+`diagnostic_visit.py` connects `collect.sh` to a separate, one-shot stock-card
+visit. It has no live CLI or roster generator. A future controller must
+supply a verifier for fresh, byte-checked diagnostic materials and a plan
+with purpose `portrait-notification-diagnostic`. Its verifier returns the
+plan metadata and its underlying stock device program; the adapter checks
+that the sealed device program is exactly `device_program(base)`. Use a
+trial renderer that separately checks the original installation references
+and permits the verified diagnostic launcher/helper bytes. The ordinary
+stock A/B freezer is not a diagnostic material verifier. For recovery use
+the original plan, token and device program, not another launch.
+
+- The ordinary `claim`, `witness` and `library_submit` path must prove a
+  same-launch submission for the disposable public shelf. The device binds
+  the snapshot to that session, its submitted and observed samples, and the
+  visit label. The host checks the same release/request window before
+  requesting the read and rejects records outside the release-to-submit
+  window. Neither the session identity nor unrestricted device output is
+  exported.
+- The read runs once before `stop`, while the host holds the shared operation
+  lock and verifies the visit owner. It rechecks the GUI around a bounded,
+  pinned private file snapshot. The read-only command has its own deadline
+  (12 seconds on the device, 25 on the host). It rechecks the stage inode
+  without retaining a stage descriptor or flock, so a stalled reader does
+  not own any stage resource needed by `stop`.
+- The normal stop, restoration, closed transports, absence check and byte
+  audit still govern handback. In the private attempt directory,
+  `portrait-notification.json` records `collected`, `unavailable`, or
+  `not_attempted`, and whether the original attempt completed handback. The
+  worker writes it outside the physical operation; a write error is reported
+  separately. A zero visit exit status means the ordinary guards and handback
+  passed, not necessarily that the snapshot was collected. Recovery never
+  reads or overwrites the diagnostic receipt.
+- These visits stay `not_timed` even when collection succeeds. The parsed
+  result and validated trace rows are separate from v6's `startup_trace`.
+  The collector does not request the launcher's optional wait count; missing
+  slots remain unknown unless independently established for this launch.
 
 ## Offline generation and verification
 
@@ -62,6 +95,26 @@ Linux process/mount/network namespace, as root with a private `/tmp`. The
 suite compiles the helper, exercises the actual generated publisher and
 watcher, forces late processing and injected faults, verifies the launcher's
 normal fallback and command validation, and checks collection and analysis.
+Keep the namespace shell as Python's parent; the helper deliberately rejects
+PID 1 as its parent.
+
+For the end-to-end host/device fixture, run on the designated Linux worker
+from outside any retained input directory. Set `TOOLS` to this tool directory
+and `RETIRED_V6_DEVICE_SH` to a retained v6 device program. The latter is
+read only for source and syntax checks, not run as a visit.
+
+```sh
+cd /
+unshare --mount --pid --fork --mount-proc --net --propagation private sh -eu -c '
+    mount -t tmpfs -o mode=1777 tmpfs /tmp
+    TMPDIR=/tmp python3 -I -B "$@"
+' fixture "$TOOLS/test_collection.py" "$RETIRED_V6_DEVICE_SH"
+```
+
+For BusyBox coverage, repeat with `WEREAD_TEST_BUSYBOX=1` and the reviewed
+BusyBox applets on `PATH`. The fixture uses a private kernel lock, local
+shell transport, simulated GUI/Library data, and no Kindle connections.
+
 Use the firmware-ABI Zig flags from the ordinary build for a separate ARM
 helper build of the **generated** source; do not stage it with the ordinary
 package. Using the public Scribe libc on QEMU user-mode is an ABI and helper
@@ -75,5 +128,5 @@ python3 -I -B analyze.py "$TRACE" --wait-count "$SAME_LAUNCH_WAIT_COUNT"
 
 Omit `--wait-count` if the original launcher count was not independently
 captured. The analyzer never produces a startup sample or changes formal
-admission. Any new physical experiment needs its own baselines, tested
-collector integration, frozen roster, and authorization.
+admission. Any new physical diagnostic visit needs a fresh verified plan,
+an installation baseline, and its own authorization.
