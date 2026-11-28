@@ -43,6 +43,17 @@ The Windows transport holds a private input pipe open while the range runs. On d
 
 ## Transport, timing and recovery for each visit
 
+A series that pins an independently verified installation baseline supplies
+its `original` receipt as `expected_installation` to the single-visit
+executor. The timed notification controller supplies it for every live
+visit, including warmups. After staging the trial package, the executor
+records the live original identity and passes the existing before-byte audit. It compares all
+three identities with the baseline before `prepare` can navigate. A mismatch
+stops the range without input, binding or a sample. The live original, not
+the expected baseline, remains the authority for cleanup and the independent
+after-byte audit. The formal report still rechecks the baseline; close-only
+recovery uses the original visit's journal, not a later baseline.
+
 Before acquiring the lease the live runner prepares a private stream containing the frozen shell header followed immediately by the unmodified archive. SSH receives a short command, not the shell body in its exec request. A bounded `dd bs=1 count=N` reads only the header; `sh -c` receives the remaining bytes as its standard input. A lone diagnostic sentinel means the transport consumed the header, **not** that the installer accepted the archive. A failure report keeps the local SSH return code when available and whether that sentinel was observed, not raw stderr. A timeout does not invent an SSH return code.
 
 The `request` SSH channel emits a monotonic arm receipt, keeps its original request file pinned during the independent stock-tile click and GUI ownership checks, then emits the submitted Library marker and the original tile receipt. Do not substitute a screenshot, full cover set, other launch, UTC timestamp, `Ready` log or manual input. The endpoint is the same GUI's accepted qualifying Library frame submission, not optical completion. For this populated fixture an empty shelf is not a timed result.

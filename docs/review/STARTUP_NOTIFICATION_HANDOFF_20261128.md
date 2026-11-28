@@ -1,10 +1,10 @@
 # Handoff: Kindle startup notification comparison
 
-November 28, 2026 (Asia/Shanghai). **The replacement formal roster passed
-offline verification and has not started.** The previous formal comparison
-stopped before its first launch with zero timing samples. Its failed A warmup
-was independently cleared and returned; never reopen that roster. The separate
-physical load-only checks passed. This document is not a reservation or
+November 28, 2026 (Asia/Shanghai). **The latest formal roster stopped after
+its first warmup, with zero accepted timing rows or pairs.** Its A trial
+launched and was independently returned, but the file identities differed
+from the earlier load-only reference. The preceding view-change roster and
+this latest roster are both retired. This document is not a reservation or
 authorization to contact a device.
 
 ## Current receiver and shared operation lock
@@ -209,7 +209,7 @@ print(record["released"], record["recovery_required"], record["released_at_utc"]
 $Readback | ssh -T test-env "cd '$Worker/native-portrait-notify-comparison/visits/00-A/attempt' && python3 -I -B -"
 ```
 
-## Replacement formal comparison: offline-ready, unattempted
+## Replacement formal comparison: offline qualification and first seal
 
 The new worker is
 `test-env:/root/weread-display-handoff-20261128.formal-v5._5v31u14`.
@@ -247,24 +247,84 @@ launch was made during this preparation. The original physical load-only
 qualification applies to the unchanged archive receiver, not to the new
 view-handback behavior.
 
-To recheck before seeking a new device handoff (from PowerShell):
+## November 28 afternoon: A returned; historical identity gate stopped the range
+
+After BiliComics returned its `ec9726e` static deployment, the unused first
+seal was superseded. The refreshed worker is
+`test-env:/root/weread-display-handoff-20261128.formal-v5.ooc6db2k`.
+The peer reported its public executable at 75,052,096 bytes, supervisor at
+89,581 bytes, and unchanged JPEG helper at 426,672 bytes. Only the two
+changed size guards and fresh visit labels differed; both trial archives
+were compared byte for byte and two isolated full-wire refusal fixtures and
+ten new preflights passed. Physical admission matched the refreshed guards.
+
+On Scribe 2022 / 5.19.5, the A warmup completed ordinary stock-card input,
+Library submission, and the original handback. `stop`, `restore`, `close`,
+independent stage absence and the before/after document and supervisor byte
+audits all passed. Original identities agreed within that visit. The exact
+owner/token returned at **13:59:48.146247 Asia/Shanghai**. Independent host
+readback found no owned token, owner record, held operation lock, or staged
+stream. There was no pending recovery and the daily package was not changed
+by this trial.
+
+The range controller then rejected the warmup because its installation
+receipt did not exactly match the earlier same-day load-only reference. A
+read-only worker comparison found that only the three inode fields differed:
+original document, supervisor, and application. Other recorded identity
+fields matched; the reason for the inode changes was not established. The
+within-launch diagnostic replay independently accepted the populated frame,
+matching `SEND` and `WAIT`, the automatic portrait path, and zero
+notification waits in A. This is diagnostic only: it does not override the
+formal rejection. The independent formal report has zero accepted rows,
+zero pairs, and no outstanding recovery. The B warmup and eight measured
+visits were not attempted. Neither v5 seal may be reopened.
+
+To inspect the retired public report without Kindle SSH (from PowerShell):
 
 ```powershell
-$Worker = '/root/weread-display-handoff-20261128.formal-v5._5v31u14'
-ssh test-env "cd / && python3 -I -B '$Worker/driver/notify_ready.py' offline --series comparison"
+$Worker = '/root/weread-display-handoff-20261128.formal-v5.ooc6db2k'
 ssh test-env "cd / && python3 -I -B '$Worker/driver/notify_report.py' --public"
 ```
 
-Before live use, reconfirm the current daily and peer references, coordinate
-conflict-free access and use the exact shared lock and private stdin
-transport. No approval or reservation carries over from the cancelled
-roster. Use the `gate` action with a fresh start and bounded admission limit,
-then the `handoff.py range --series comparison` controller for the authorized
-fresh slots. Its cutoff limits new admissions, not active cleanup. Only B
-enables the notification on initial display takeover. Each pair must have
-the same automatic orientation path and rotation, no notification wait in A,
-and at least one valid ready hint with no waiter error in B. Stop the batch
-and retain the original evidence on any refusal; do not reuse its slots.
+## Pre-navigation installation gate: implemented and verified offline
+
+The formal child visit now receives the exact `original` receipt from the
+independently verified A/B load-only baseline. After recording the live
+receipt and passing the original byte audit, it compares all three
+identities before marking navigation possible or sending `prepare`. A
+mismatch refuses the visit as `installation_baseline_mismatch`; the
+controller stops, and the live original remains the target of the usual
+cleanup, absence and after-byte checks. No inode check is weakened. Final
+report qualification still checks the exact baseline, and close-only
+recovery does not require the later baseline.
+
+On `test-env`, 81 host regressions passed. The network-isolated formal
+controller fixture replayed the actual retired inode-only discrepancy in
+both lanes: both refused without navigation and returned under their live
+original identities. A matching baseline reached preparation. Missing
+baseline evidence prevented dispatch; a failed after-byte audit prevented
+release. The overlay contains the integrated formal driver and an offline
+verification receipt at
+`test-env:/root/weread-notification-installation-gate-20261128.db_umre0`.
+It deliberately contains no live roster or archives and cannot dispatch a
+real device visit. From PowerShell, its isolated fixture can be rerun with:
+
+```powershell
+$Worker = '/root/weread-notification-installation-gate-20261128.db_umre0'
+ssh test-env "cd / && unshare --net python3 -I -B '$Worker/verify-installation-gate.py'"
+```
+
+No Kindle connection or lease was attempted for this fix. Before sealing a
+successor, verify a fresh approved A/B load-only baseline with the current
+installation. Wire that fresh verifier to the revised controller rather than
+reusing its historical fixture baseline. Do not ignore inode differences,
+infer a remount, or promote the excluded A into another batch. Reconfirm daily
+and peer references, freeze newly labeled timed slots, and obtain a new
+authorized handoff. Keep the shared lock, private transport and individual
+cleanup. Only B enables the notification on initial display takeover. Each
+pair still requires the same automatic orientation path and rotation, no
+notification wait in A, and at least one valid ready hint with no waiter
+error in B.
 
 Use the existing synthetic stock-card release bracket and the same-launch
 render, `SEND` and matching positive, uncached `WAIT` endpoints. Require

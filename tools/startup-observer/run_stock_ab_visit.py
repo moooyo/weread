@@ -19,7 +19,8 @@ import tempfile
 import time
 
 from run_daily_render import LABEL, SHARED, Refused, now, public_reason
-from stock_ab_transaction import LOAD_CLOSE_RECEIPTS, METADATA, WireRefusal, bind_syscall_refusal, checkpoint, drive, fresh_journal, initial, valid_journal
+from stock_ab_transaction import (LOAD_CLOSE_RECEIPTS, METADATA, WireRefusal, bind_syscall_refusal, checkpoint,
+                                  drive, fresh_journal, initial, valid_installation_receipt, valid_journal)
 
 
 TIMES = dict(install=240, prepare=120, tap=100, claim=40, stop=100, restore=125, close=60)
@@ -315,6 +316,9 @@ def execute(args):
     if args.preflight:
         print(json.dumps(dict(**expected, validated=True, device_accessed=False, lease_requested=False)))
         return 0
+    expected_installation = getattr(args, 'expected_installation', None)
+    if expected_installation is not None and not valid_installation_receipt(expected_installation, 'original'):
+        raise Refused('invalid_installation_baseline')
     if not args.owner or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.:-]{0,95}', args.owner) or not args.lease_tool:
         raise ValueError('An owner and approved lease utility are required')
     shared = runpy.run_path(str(SHARED))
@@ -406,7 +410,8 @@ def execute(args):
                     return 2 if partial else 3 if busy else 1
                 report.update(acquisition='acquired', acquired_at_utc=acquired['acquired_at_utc'], recovery_required=True)
                 save()
-            status = drive(transport, release, report, journal, save, persist, recovering=bool(args.recover))
+            status = drive(transport, release, report, journal, save, persist, recovering=bool(args.recover),
+                           expected_installation=expected_installation)
         if report['released']:
             request.token_file.unlink(missing_ok=True)
         print(json.dumps(dict(label=label, lane=config['lane'], slot=config['slot'], primary=report['primary'],

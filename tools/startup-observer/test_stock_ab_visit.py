@@ -73,10 +73,10 @@ class Fixture:
         if self.fail == 'lease_release': raise Refused('unconfirmed_release')
         return '2026-11-21T03:44:50.100+00:00'
 
-    def run(self, recovering=False):
+    def run(self, recovering=False, *, expected_installation=None):
         return drive(self,self.release,self.report,self.journal,
                      lambda:self.saved.append(copy.deepcopy(self.report)),lambda:self.journals.append(copy.deepcopy(self.journal)),
-                     recovering=recovering)
+                     recovering=recovering,expected_installation=expected_installation)
 
 
 class VisitStateTests(unittest.TestCase):
@@ -110,6 +110,50 @@ class VisitStateTests(unittest.TestCase):
                 self.assertNotIn('qualified',fixture.report); self.assertLessEqual(fixture.calls.count('tap'),1)
                 self.assertIn('absent',fixture.calls)
         fixture=Fixture(fail='admit'); self.assertEqual(fixture.run(),1); self.assertEqual(fixture.calls,['admit','lease_release'])
+
+    def test_installation_baseline_mismatch_stops_before_navigation_and_returns_live_original(self):
+        for name,value in FIXED.items():
+            with self.subTest(name=name):
+                fields=value.split(':'); fields[1]='999'
+                baseline=dict(state='original',**{**FIXED,name:':'.join(fields)})
+                fixture=Fixture()
+                self.assertEqual(fixture.run(expected_installation=baseline),1)
+                self.assertEqual(fixture.calls,['admit','stage','install','original','audit_before',
+                                                'stop','restore','close','absent','audit_after','lease_release'])
+                self.assertEqual(fixture.report['refused'],'installation_baseline_mismatch')
+                self.assertEqual(fixture.journal['original'],dict(state='original',**FIXED))
+                self.assertFalse(any(journal['navigation_possible'] for journal in fixture.journals))
+                self.assertEqual(fixture.report['primary'],'not_timed')
+                self.assertTrue(fixture.report['released']); self.assertFalse(fixture.report['recovery_required'])
+                self.assertNotIn('qualified',fixture.report)
+
+    def test_matched_installation_baseline_keeps_original_launch_and_return_checks(self):
+        baseline=dict(state='original',**FIXED)
+        fixture=Fixture(); self.assertEqual(fixture.run(expected_installation=baseline),0)
+        self.assertLess(fixture.calls.index('audit_before'),fixture.calls.index('prepare'))
+        self.assertEqual(fixture.report['primary'],'qualified')
+        changed=dict(state='absent',**{**FIXED,'document':'1:999:43:755:0:0:1'})
+        fixture=Fixture(change={'absent':changed})
+        self.assertEqual(fixture.run(expected_installation=baseline),2)
+        self.assertIn('prepare',fixture.calls)
+        self.assertNotIn('lease_release',fixture.calls)
+        self.assertEqual(fixture.report['close_reason'],'original_identity_changed')
+
+    def test_mismatch_and_failed_after_audit_do_not_release(self):
+        baseline=dict(state='original',**{**FIXED,'application':'1:999:400:755:0:0:1752:1'})
+        fixture=Fixture(fail='audit_after')
+        self.assertEqual(fixture.run(expected_installation=baseline),2)
+        self.assertNotIn('prepare',fixture.calls); self.assertNotIn('lease_release',fixture.calls)
+        self.assertEqual(fixture.report['refused'],'installation_baseline_mismatch')
+        self.assertIn('audit_after:',fixture.report['close_reason'])
+
+    def test_invalid_baseline_does_not_dispatch(self):
+        for baseline in ({},dict(state='absent',**FIXED),dict(state='original',**{**FIXED,'document':'bad'})):
+            with self.subTest(baseline=baseline):
+                fixture=Fixture()
+                with self.assertRaisesRegex(Refused,'invalid_installation_baseline'):
+                    fixture.run(expected_installation=baseline)
+                self.assertEqual(fixture.calls,[])
 
     def test_preinput_view_refusal_returns_without_becoming_a_sample(self):
         fixture = Fixture()
@@ -402,8 +446,9 @@ if IFS= read -r line; then exit 1; fi; printf '{"result":1}\\n' '''
             finally:
                 events.append('unlocked')
 
-        def drive(transport, release, report, journal, save, persist, *, recovering):
+        def drive(transport, release, report, journal, save, persist, *, recovering, expected_installation):
             self.assertFalse(recovering)
+            self.assertIsNone(expected_installation)
             transport.owned()
             events.append('device_cleanup')
             release()

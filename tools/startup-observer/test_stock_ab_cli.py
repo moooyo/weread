@@ -110,6 +110,24 @@ printf '{{"state":"%s"}}\\n' "$state"
         with self.assertRaises(Refused): self.run_cli()
         self.assertEqual(self.lease.requested,1)
 
+    def test_installation_baseline_mismatch_uses_only_readback_and_cleanup(self):
+        self.args.expected_installation=dict(state='original',**{**FIXED,'launch':'1:999:300:755:0:0:1755:1'})
+        self.assertEqual(self.run_cli(),1)
+        self.assertEqual(self.traffic.read_text().splitlines(),['admit','stage','install','original','audit',
+                                                               'stop','restore','close','absent','audit'])
+        operations=json.loads((self.attempt/'operations.json').read_text())
+        self.assertEqual(operations['refused'],'installation_baseline_mismatch')
+        self.assertEqual(operations['primary'],'not_timed'); self.assertTrue(operations['released'])
+        self.assertFalse(self.lock_held); self.assertFalse(self.lease.held)
+        self.assertFalse((self.attempt/'private-token').exists())
+
+    def test_invalid_installation_baseline_fails_before_lease_or_traffic(self):
+        self.args.expected_installation=dict(FIXED,state='absent')
+        with self.assertRaisesRegex(Refused,'invalid_installation_baseline'):
+            self.run_cli()
+        self.assertEqual(self.lease.requested,0)
+        self.assertFalse(self.attempt.exists()); self.assertFalse(self.traffic.exists())
+
     def test_held_lock_and_atomic_race_do_not_start_any_ssh(self):
         self.lease.lock.mkdir(); self.assertEqual(self.run_cli(),3); self.assertFalse(self.attempt.exists()); self.lease.lock.rmdir()
         self.lease.busy=True; self.assertEqual(self.run_cli(),3)

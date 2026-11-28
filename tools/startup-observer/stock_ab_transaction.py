@@ -33,6 +33,11 @@ def valid_stat(key, value):
             (DOCUMENT_STAT if key == 'document' else STAT).fullmatch(value) is not None)
 
 
+def valid_installation_receipt(row, state):
+    return (isinstance(row, dict) and row.keys() == {'state', *STAT_FIELDS} and row['state'] == state
+            and all(valid_stat(key, row[key]) for key in STAT_FIELDS))
+
+
 def initial(config, owner):
     return dict({key: config[key] for key in METADATA}, owner=owner, protocol='isolated_stock_launch',
                 measurement_build='temporary_measurement_build', fixture='disposable_public', started_at_utc=now(),
@@ -62,8 +67,7 @@ def checked(mode, raw, label):
         if row == {'state': STATES[mode]} or (mode in ('stop', 'restore', 'close') and row == {'state':'already_absent'}):
             return row
     elif mode in ('original', 'absent'):
-        if (set(row) == {'state', *STAT_FIELDS} and row['state'] == mode and
-                all(valid_stat(key,row[key]) for key in STAT_FIELDS)):
+        if valid_installation_receipt(row, mode):
             return row
     elif mode in ('audit_before', 'audit_after'):
         if row == {'state':'audited'}:
@@ -140,7 +144,9 @@ def valid_journal(journal, label):
     return False
 
 
-def drive(transport, release, report, journal, save, persist, *, recovering=False):
+def drive(transport, release, report, journal, save, persist, *, recovering=False, expected_installation=None):
+    if expected_installation is not None and not valid_installation_receipt(expected_installation, 'original'):
+        raise Refused('invalid_installation_baseline')
     channel = None
     label = report['label']
 
@@ -206,6 +212,10 @@ def drive(transport, release, report, journal, save, persist, *, recovering=Fals
             original = call('original')
             mark('original_observed', original=original)
             call('audit_before')
+            # Keep the live receipt in the journal: cleanup must reconcile
+            # this visit's actual installation even when the baseline differs.
+            if expected_installation is not None and original != expected_installation:
+                raise Refused('installation_baseline_mismatch')
             mark('prepare_requested', audit_before=True, navigation_possible=True)
             call('prepare')
             mark('activate_requested')
