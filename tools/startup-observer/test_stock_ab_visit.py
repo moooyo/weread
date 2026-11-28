@@ -111,6 +111,25 @@ class VisitStateTests(unittest.TestCase):
                 self.assertIn('absent',fixture.calls)
         fixture=Fixture(fail='admit'); self.assertEqual(fixture.run(),1); self.assertEqual(fixture.calls,['admit','lease_release'])
 
+    def test_preinput_view_refusal_returns_without_becoming_a_sample(self):
+        fixture = Fixture()
+        original_call = fixture.call
+
+        def changed_view(mode):
+            if mode == 'prepare':
+                fixture.calls.append(mode)
+                raise WireRefusal('native_view_changed',1)
+            return original_call(mode)
+
+        fixture.call = changed_view
+        self.assertEqual(fixture.run(),1)
+        self.assertEqual(fixture.calls,['admit','stage','install','original','audit_before','prepare',
+                                        'stop','restore','close','absent','audit_after','lease_release'])
+        self.assertEqual(fixture.report['refused'],'prepare:native_view_changed')
+        self.assertEqual(fixture.report['primary'],'not_timed')
+        self.assertTrue(fixture.report['released']); self.assertFalse(fixture.report['recovery_required'])
+        self.assertNotIn('qualified',fixture.report)
+
     def test_unanswered_load_stays_pending_and_recovery_cannot_use_absence(self):
         for mode in LOAD_CLOSE_RECEIPTS:
             with self.subTest(mode=mode):

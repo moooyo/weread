@@ -199,6 +199,59 @@ class StockDeviceFixture(unittest.TestCase):
 
 
 class DeviceTests(StockDeviceFixture):
+    def test_preinput_cross_tab_refusal_returns_without_navigation(self):
+        tab, pointer, view = (self.root/name for name in ('tab','pointer','active-view'))
+        tab.write_text('library\n'); view.write_text('KPP_LIBRARY\n')
+        self.call('stage','staged'); self.call('install','installed',data=self.payload)
+        original=self.call('original','original'); self.call('audit','audited',data=self.reference)
+        tab.write_text('home\n'); view.write_text('KPP_HOME\n'); pointer.write_text('75 91\n')
+        self.call('prepare',refused='native_view_changed')
+        self.assertEqual((self.stage/'prepare-view-refused').read_text(),daily.LABEL+'\n')
+        self.assertFalse((self.stage/'stock-original').exists()); self.assertFalse((self.stage/'prepare-started').exists())
+        self.call('prepare',refused='preparation')
+        self.handback(original)
+        self.assertEqual((tab.read_text(), pointer.read_text(), view.read_text()),('home\n','75 91\n','KPP_HOME\n'))
+        self.assertFalse(self.base.signals())
+
+    def test_preinput_view_changes_during_read_only_scene_probe(self):
+        script = self.items['tile/native_tile.sh'].decode('ascii')
+        script = script.replace('inspect) inspect;;', '''inspect)
+        inspect
+        printf 'KPP_LIBRARY\\n' >"$root/active-view"
+        printf 'library\\n' >"$root/tab";;''')
+        self.assertNotEqual(script.encode('ascii'),self.items['tile/native_tile.sh'])
+        self.rebuild(tile_script=script)
+        self.call('stage','staged'); self.call('install','installed',data=self.payload)
+        self.call('prepare',refused='native_view_changed')
+        self.assertFalse((self.stage/'stock-original').exists())
+        self.handback()
+        self.assertEqual((self.root/'tab').read_text(),'library\n')
+
+    def test_preinput_return_needs_its_own_tag_stable_scene_and_pristine_scope(self):
+        active, tab, pointer = (self.root/name for name in ('active-view','tab','pointer'))
+        self.call('stage','staged'); self.call('install','installed',data=self.payload)
+        active.write_text('KPP_LIBRARY\n')
+        self.call('prepare',refused='native_view_changed'); self.call('stop','stopped')
+        self.call('restore',refused='native_restore')  # Live firmware view contradicts OCR.
+        tab.write_text('library\n')
+        for leaf in ('prepare-view-refused','stock-original','tile-gate','bind-intent','observer-active','input.tgz'):
+            with self.subTest(leaf=leaf):
+                file = self.stage/leaf
+                if leaf == 'prepare-view-refused':
+                    file.write_text('ffffffffffffffff\n')
+                else:
+                    file.touch()
+                self.call('restore',refused='native_restore')
+                self.assertFalse((self.stage/'restored').exists())
+                file.unlink()
+                if leaf == 'prepare-view-refused': self.tag(leaf)
+        self.call('restore','restored')
+        initial = pointer.read_bytes(); pointer.write_text('19 31\n')
+        self.call('close',refused='closeout'); self.assertTrue(self.stage.is_dir())
+        pointer.write_bytes(initial)
+        self.handback()
+        self.assertEqual(tab.read_text(),'library\n')
+
     def test_complete_original_entry_and_same_session_request(self):
         with self.live.open('rb') as underlying:
             previous = self.ready()

@@ -1,8 +1,10 @@
 # Handoff: Kindle startup notification comparison
 
-November 28, 2026 (Asia/Shanghai). **Both untimed load-only checks passed.**
-Do not repeat either slot. The next step is a fresh formal comparison roster
-and a separate device authorization. This document is not a reservation or
+November 28, 2026 (Asia/Shanghai). **The replacement formal roster passed
+offline verification and has not started.** The previous formal comparison
+stopped before its first launch with zero timing samples. Its failed A warmup
+was independently cleared and returned; never reopen that roster. The separate
+physical load-only checks passed. This document is not a reservation or
 authorization to contact a device.
 
 ## Current receiver and shared operation lock
@@ -157,35 +159,112 @@ reader that opened the old inode from writing or recreating the archive.
 If the transport changes again, do not treat these closed verification
 slots as evidence for the changed transport.
 
-## Formal comparison: frozen, not started
+## Formal comparison: stopped, no timing sample
 
-The formal worker is `test-env:/root/weread-display-handoff-20261128.formal-v4.t97vc2fk`.
-The closed load-only evidence remains in
-`test-env:/root/weread-display-handoff-20261127.load-v4.5sx2ocqq`. All ten
-fresh slots passed offline preflight: A and B warmups, then
-`AB / BA / AB / BA`. The formal archives are byte-identical to the physical
-load-only inputs, and every timed slot's device program matches its tested
-arm apart from the fresh label. The independent starting report rejected all
-unattempted slots as timing evidence. Do not pair the historical measured A
-with a new B. No formal run has contacted the Kindle or obtained a lease.
+The retired formal worker is
+`test-env:/root/weread-display-handoff-20261128.formal-v4.t97vc2fk`. All ten
+slots passed offline preflight: two warmups followed by `AB / BA / AB / BA`.
+The frozen archives were byte-identical to the load-only inputs, and the
+device program for each arm matched the corresponding load-only program
+apart from its visit label. The transport loader needed no changes.
 
-From the operator's PowerShell, after approval to connect to the worker,
-rerun the read-only preflight and inspect the redacted report:
+Only the A warmup was dispatched. On Scribe 2022 / 5.19.5, it passed
+`admit`, `stage`, `install`, and the independent original-file audit. Both
+load operations had normally closed retirement receipts. `prepare` then
+refused with `native_view_changed`, before it saved the stock origin or sent
+any input. The device's recorded `activeView` changed from `KPP_LIBRARY`
+to `KPP_HOME`; the cause of the transition was not established. The normal
+`stop` passed, but the normal restoration refused the changed view. There
+was no selector activation, card release, app launch, render or driver
+sample. The B warmup and all eight measured slots were never dispatched.
+
+The operation lock was released on worker exit and the original owner/token
+record was kept as a recovery barrier. An initial close-only attempt
+refused before deletion. A separate read-only check, under the same owner
+and shared lock, confirmed the original stopped stage, no input/request or
+binding evidence, unchanged native process projection and installed files,
+and stable native Home with a clear pointer. The stage-only cleanup then
+removed only that visit's untouched directory, without navigating to Library.
+Independent absence, original identities and document/supervisor byte
+readback passed. The original owner/token was returned at **13:32:10.215302
+Asia/Shanghai** after device SSH closed. Worker readback confirmed no
+WeRead stage, owner record, held operation lock, or staged stream remained.
+The ordinary package and private shelf were not changed.
+
+Keep the original `operations.json`, the refused `recovery.json` and the
+successful `reconciliation-preinput.json` private. The last is the terminal
+handback evidence; the older formal report does not consume that separate
+receipt, and its original refusal must remain intact. Do not rerun any
+operator or recovery script from the retired roster. A read-only resume
+check on the worker can confirm the terminal state without opening Kindle SSH:
 
 ```powershell
 $Worker = '/root/weread-display-handoff-20261128.formal-v4.t97vc2fk'
+$Readback = @'
+import json
+with open("reconciliation-preinput.json", encoding="ascii") as source:
+    record = json.load(source)
+print(record["released"], record["recovery_required"], record["released_at_utc"])
+'@
+$Readback | ssh -T test-env "cd '$Worker/native-portrait-notify-comparison/visits/00-A/attempt' && python3 -I -B -"
+```
+
+## Replacement formal comparison: offline-ready, unattempted
+
+The new worker is
+`test-env:/root/weread-display-handoff-20261128.formal-v5._5v31u14`.
+The two preflights for warmups and eight for measured slots all passed. Its
+fresh labels exclude the ten retired formal slots, the load-only visits,
+and the earlier pilot labels. The frozen order is A, B warmups, then
+`AB / BA / AB / BA`. Both archives are byte-identical to their retained
+counterparts. The application, launch policy, instrumentation, receiver,
+and measurement endpoints are unchanged. Only the test controller's
+pre-input refusal and handback changed. The frozen BiliComics public-size
+reference is the last reported verified `13f4434` installation; this is not
+a new live readback and must be reconciled if that installation changes.
+
+The native view is checked before and after the read-only stock scene probe,
+before saving the navigation origin. A changed view still refuses startup.
+For that tagged refusal alone, the [return contract](../../tools/startup-observer/STOCK-AB-CLI.md#transport-timing-and-recovery-for-each-visit)
+allows removing the original untouched, stopped stage without returning to
+the earlier tab. It requires no request, input or binding; unchanged original
+files and native services; and a stable, coherent current stock tab and
+pointer. Restore and close must observe the same scene. A conflicting scene,
+foreign tag, input evidence, archive, or bind authority blocks the special
+return. Normal post-navigation restoration, independent byte/identity audit,
+and exact lease release are unchanged. A returned refusal still stops the
+range and is not timed.
+
+On `test-env`, 75 host tests and 40 isolated BusyBox transaction tests passed.
+The BusyBox fixtures reproduced Library-to-Home before input and a change
+during inspection. They also rejected a conflicting live view, foreign tags,
+input or binding evidence, and a changed pointer before removal. The sealed
+worker rehearsed both full staged streams under an isolated file lock and
+synthetic transport (22 simulated device commands); both pre-input refusals
+returned with zero samples. The fresh report accepted no unattempted slot as
+measurement evidence. No physical device connection, lease or application
+launch was made during this preparation. The original physical load-only
+qualification applies to the unchanged archive receiver, not to the new
+view-handback behavior.
+
+To recheck before seeking a new device handoff (from PowerShell):
+
+```powershell
+$Worker = '/root/weread-display-handoff-20261128.formal-v5._5v31u14'
 ssh test-env "cd / && python3 -I -B '$Worker/driver/notify_ready.py' offline --series comparison"
 ssh test-env "cd / && python3 -I -B '$Worker/driver/notify_report.py' --public"
 ```
 
-A live comparison needs a separately approved device window, direct
-cross-project clearance, and the private live stdin transport. Only the
-actual visit process obtains the shared lock. Both arms share the same trial
-materials; only B enables the notification on the initial display takeover.
-Each visit must qualify the same populated Library frame and independently
-return native control. Each pair requires the same automatic orientation
-path and rotation, no notification wait in A, and at least one valid ready
-hint with no waiter error in B. Stop at a failed visit; never reuse its label.
+Before live use, reconfirm the current daily and peer references, coordinate
+conflict-free access and use the exact shared lock and private stdin
+transport. No approval or reservation carries over from the cancelled
+roster. Use the `gate` action with a fresh start and bounded admission limit,
+then the `handoff.py range --series comparison` controller for the authorized
+fresh slots. Its cutoff limits new admissions, not active cleanup. Only B
+enables the notification on initial display takeover. Each pair must have
+the same automatic orientation path and rotation, no notification wait in A,
+and at least one valid ready hint with no waiter error in B. Stop the batch
+and retain the original evidence on any refusal; do not reuse its slots.
 
 Use the existing synthetic stock-card release bracket and the same-launch
 render, `SEND` and matching positive, uncached `WAIT` endpoints. Require

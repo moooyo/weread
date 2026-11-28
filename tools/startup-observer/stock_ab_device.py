@@ -77,6 +77,12 @@ def render_device(config):
     state = change(state, '    ready_volume ||', '    stock_clear && absent "$authority" && fresh_production && stock_request_absent || { admit_reason=stock_install_or_request; return 1; }\n    ready_volume ||')
     state = change(state, '$4+0>=245760', '$4+0>=@FREE_KIB@')
     navigation = section(daily, 'tile()', 'observation_output()')
+    navigation = change(navigation, 'stock-original prepare-started prepare-no-input tile-original',
+                        'stock-original prepare-started prepare-no-input prepare-view-refused preinput-return tile-original')
+    navigation = change(navigation, '    matches "$stage/view" "$(view)" || { prepare_reason=native_view_changed; return 1; }',
+                        '    preinput_view_unchanged || return 1')
+    navigation = change(navigation, '    record_once stock-original "$original"',
+                        '    preinput_view_unchanged || return 1\n    record_once stock-original "$original"')
     navigation = change(navigation, 'tag installed && tag tile-prepared && origin_agrees && absent', 'selector_active && tag installed && tag tile-prepared && origin_agrees && absent')
     navigation = change(navigation, 'native_idle && tag observer-active', 'stock_request_active && selector_active && native_idle && tag observer-active')
     navigation = change(navigation, '    printf \'%s\\n\' "$receipt"\n}', '    stock_note_release "$receipt" && printf \'%s\\n\' "$receipt"\n}')

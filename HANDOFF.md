@@ -1,6 +1,6 @@
 # Handoff: Kindle Library startup
 
-For the current work, use the [November 28 startup notification handoff](docs/review/STARTUP_NOTIFICATION_HANDOFF_20261128.md). Both untimed load-only visits passed; the timed comparison is a separate gate. The [November 26 power-wait handoff](docs/STARTUP_POWER_WAIT_HANDOFF_20261126.md) and the record below are historical and do not authorize a new device visit.
+For the current work, use the [November 28 startup notification handoff](docs/review/STARTUP_NOTIFICATION_HANDOFF_20261128.md). The earlier formal comparison stopped before its first launch and the device was independently returned. A replacement comparison is frozen after offline-only verification; no slot has been attempted. The [November 26 power-wait handoff](docs/STARTUP_POWER_WAIT_HANDOFF_20261126.md) and the record below are historical and do not authorize a new device visit.
 
 Updated November 22, 2026 (Asia/Shanghai). **Font optimization measured,
 deployed and retested on Kindle Scribe 2022 / firmware 5.19.5.** The standard

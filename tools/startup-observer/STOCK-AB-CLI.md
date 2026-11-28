@@ -47,7 +47,20 @@ Before acquiring the lease the live runner prepares a private stream containing 
 
 The `request` SSH channel emits a monotonic arm receipt, keeps its original request file pinned during the independent stock-tile click and GUI ownership checks, then emits the submitted Library marker and the original tile receipt. Do not substitute a screenshot, full cover set, other launch, UTC timestamp, `Ready` log or manual input. The endpoint is the same GUI's accepted qualifying Library frame submission, not optical completion. For this populated fixture an empty shelf is not a timed result.
 
-`attempt/operations.json` contains the bounded operation/guard receipts. `primary=qualified` is set **after** the independent original-file identity and byte checks, native restoration, close, absence and exact owner/token release. The interval is `[submitted - up_after, submitted - up_before]` on the device's `CLOCK_MONOTONIC`. A stage that vanishes after navigation or selector activation without a confirmed restoration does not authorize release. A failed visit which is safely returned remains `not_timed`.
+`attempt/operations.json` contains the bounded operation/guard receipts. `primary=qualified` is set **after** the independent original-file identity and byte checks, native restoration, close, absence and exact owner/token release. The interval is `[submitted - up_after, submitted - up_before]` on the device's `CLOCK_MONOTONIC`. A stage that vanishes after navigation or selector activation without confirmed restoration does not authorize release. A failed visit which is safely returned remains `not_timed`.
+
+A change in the firmware view before navigation still refuses `prepare`.
+Only a visit-bound pre-input refusal tag can enter the read-only return path.
+It requires proof that the original stage is stopped and untouched, no input,
+request or binding exists, and the original installation and native state
+are unchanged. It independently observes the current native tab, pointer
+position and button state. The tab must be consistent with any available
+firmware view, all buttons must be released, and the same scene must be
+rechecked before deleting only the pinned stage. It never navigates to the old
+tab. Normal absence, byte readback and original-token release still apply.
+After navigation starts, this path is unavailable; the usual restoration
+rules remain in effect. A safely returned pre-input refusal stops the range
+and contributes no timing sample.
 
 The stock catalog may touch the unchanged document. Its before/after identity therefore checks device, inode, size, mode, UID, GID and link count, not timestamps. Both independent byte audits still compare the full document and supervisor against their retained originals. Supervisor and application identities also check the real modification time; the runner does not fake or restore timestamps.
 

@@ -320,7 +320,46 @@ witness() {
     selector_active && tag selector-service-view && tag selector-entered && tag tile-dispatch-intent && absent "$stage/render-cancel" && current=$(gui) &&
         matches "$stage/session" "$current"
 }
+# Refuse before recording a navigation origin or sending input. The visit tag
+# only enables the separately verified, read-only pre-input return path.
+preinput_view_unchanged() {
+    actual=$(view) || return 1
+    if matches "$stage/view" "$actual"; then return 0; fi
+    write_tag prepare-view-refused || return 1
+    prepare_reason=native_view_changed
+    return 1
+}
+preinput_scene() (
+    saved=$(line "$stage/view") && actual=$(view) || return 1
+    case "$saved" in kpp_home|kpp_library|unavailable) ;; *) return 1;; esac
+    case "$actual" in kpp_home|kpp_library|unavailable) ;; *) return 1;; esac
+    scene=$(stock_inspect) || return 1
+    # The current tab, not the pre-load snapshot, must agree with the live
+    # property if available. The read-only probe also checks clear buttons.
+    case "$actual:${scene%% *}" in kpp_home:home|kpp_library:library|unavailable:home|unavailable:library) ;; *) return 1;; esac
+    native_idle && [ "$(stock_inspect)" = "$scene" ] && [ "$(view)" = "$actual" ] || return 1
+    printf '%s %s\n' "$actual" "$scene"
+)
+preinput_handback() (
+    tag prepare-view-refused && tag staged && tag installed && tag stopped && no_navigation_handoff &&
+        owned && [ "$stage" -ef /proc/$$/fd/8 ] && absent "$authority" && stock_request_absent &&
+        native_idle && same && pair_original && checked_bind absent bind_absent || return 1
+    for leaf in stock-original bind-intent bind-directory bind-owner selector-live selector-entered selector-service-view \
+        selector-callback selector-return-intent selector-return-verified bind-cleanup-intent selector-disarmed \
+        selector-duplicate quarantined observer-active render-cancel stock-stop-session input.tgz unpack; do
+        absent "$stage/$leaf" || return 1
+    done
+    preinput_scene
+)
+remove_owned_stage() {
+    unknown=$(find "$stage" ! -type d ! -type f -print) && [ -z "$unknown" ] &&
+        owned && [ "$stage" -ef /proc/$$/fd/8 ] && stock_clear && rm -rf "$stage" && stock_empty
+}
 restore() {
+    if ! absent "$stage/prepare-view-refused"; then
+        scene=$(preinput_handback) && record_once preinput-return "$scene" && write_tag restored
+        return
+    fi
     tag stopped && channel_idle && stock_request_cleanup && native_idle && selector_return && stock_return restore || return 1
     if tag staged; then same && matches "$stage/view" "$(view)" || return 1
     else absent "$stage/bind-intent" && absent "$stage/tile-original" && absent "$stage/armed" && state >/dev/null || return 1; fi
@@ -328,6 +367,10 @@ restore() {
     absent "$authority" && write_tag restored
 }
 close_stage() {
+    if ! absent "$stage/prepare-view-refused"; then
+        tag restored && scene=$(preinput_handback) && matches "$stage/preinput-return" "$scene" && remove_owned_stage
+        return
+    fi
     tag stopped && tag restored && channel_idle && stock_request_cleanup && absent "$authority" && stock_clear && original_or_pristine && native_idle && stock_return verify || return 1
     if ! absent "$stage/bind-intent"; then tag selector-return-intent && tag selector-return-verified && pair_original || return 1; fi
     if tag installed; then known_bind && checked_bind absent bind_absent || return 1; fi
@@ -335,7 +378,7 @@ close_stage() {
     if ! absent "$stage/tile-dispatch-intent"; then
         if ! absent "$stage/quarantined"; then stock_quarantine_settled || return 1; else drained || return 1; fi
     fi
-    unknown=$(find "$stage" ! -type d ! -type f -print) && [ -z "$unknown" ] && owned && stock_clear && rm -rf "$stage" && stock_empty
+    remove_owned_stage
 }
 
 # A normally returned foreground load has no further stage writes to do.
